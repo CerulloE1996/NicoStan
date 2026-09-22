@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "Please cite NicoStan and the methodological references relevant to the options used in your analysis."
+type: software
+title: "NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models"
+authors:
+  - family-names: Cerullo
+    given-names: Enzo
+version: 0.1.9000
+date-released: '2026-09-21'
+repository-code: 'https://github.com/CerulloE1996/NicoStan'
+url: 'https://cerulloe1996.github.io/NicoStan/'
+license: GPL-3.0-only
+abstract: "An R package for general Stan models with adaptive Hamiltonian Monte Carlo and optional diffusion-pathspace dynamics for suitable Gaussian latent blocks. This is a development release."

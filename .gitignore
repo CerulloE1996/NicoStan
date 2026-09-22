@@ -1,0 +1,21 @@
+# Build products and local execution artifacts
+*.o
+*.so
+*.rds
+*.RDS
+*.RData
+*.Rhistory
+*.log
+.Rproj.user/
+00LOCK*/
+validation/
+inst/stan_data/data_*.json
+inst/NicoStan/inst/stan_data/data_*.json
+inst/examples/outputs/
+inst/examples/benchmark_results/
+# Existing BridgeStan bootstrap libraries required by the staged package
+!inst/NicoStan/inst/dummy_stan_model_model.so
+!inst/NicoStan/inst/dummy_stan_model_win_model.so
+
+# Local workspace instructions
+AGENTS.md

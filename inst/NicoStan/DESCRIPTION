@@ -1,0 +1,17 @@
+Package: NicoStan
+Type: Package
+Title: NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models
+Version: 0.1.9000
+Date: 2026-09-21
+Author: Enzo Cerullo
+Maintainer: Enzo Cerullo <enzo.cerullo@bath.edu>
+Description: General Stan-compatible Hamiltonian Monte Carlo, adaptation and diagnostics with a shared native sampler core.
+License: GPL-3
+Imports: Rcpp (>= 1.0.10), RcppEigen, RcppParallel, dqrng, cmdstanr, bridgestan, bayesplot, posterior, dplyr, ggplot2, tibble, tictoc, R6, digest, jsonlite, stringr, pracma
+LinkingTo: Rcpp, RcppEigen, RcppParallel, dqrng
+Suggests: roxygen2
+Roxygen: list(markdown = TRUE, roclets = c("namespace", "rd"))
+SystemRequirements: GNU make, C++17
+RoxygenNote: 7.3.2
+Encoding: UTF-8
+Depends: R (>= 3.5.0)

@@ -1,0 +1,1 @@
+R_INSTALL_ARGS='--no-test-load'

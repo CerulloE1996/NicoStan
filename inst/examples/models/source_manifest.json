@@ -1,0 +1,82 @@
+[
+  {
+    "file": "Frailty_surv_shared_frailty_Cox.stan",
+    "sha256": "7bf28274f8ab3e6f998812963b9a9c303a37107fd3c3d97b962cc087e67c7081"
+  },
+  {
+    "file": "Frailty_surv_shared_frailty_Cox_avx.stan",
+    "sha256": "c04acfc6de6e0970e568a611ae059c89275f1dbb42e76af4975edb6c0db9e26a"
+  },
+  {
+    "file": "Frailty_survival_shared_frailty_Cox.stan",
+    "sha256": "7bf28274f8ab3e6f998812963b9a9c303a37107fd3c3d97b962cc087e67c7081"
+  },
+  {
+    "file": "Frailty_survival_shared_frailty_Cox_avx.stan",
+    "sha256": "c04acfc6de6e0970e568a611ae059c89275f1dbb42e76af4975edb6c0db9e26a"
+  },
+  {
+    "file": "standard_surv_Weibull.stan",
+    "sha256": "3f7f0d57e97f734164644d5dff777023597e72f89d7c31484050a0fcfe674fd0"
+  },
+  {
+    "file": "standard_surv_Weibull_avx.stan",
+    "sha256": "8f8fb713b035d42e609070f1249024a24de0ce5d12f978d5e71f41b7918ffb07"
+  },
+  {
+    "file": "standard_surv_param_Weibull.stan",
+    "sha256": "3f7f0d57e97f734164644d5dff777023597e72f89d7c31484050a0fcfe674fd0"
+  },
+  {
+    "file": "standard_surv_param_Weibull_avx.stan",
+    "sha256": "8f8fb713b035d42e609070f1249024a24de0ce5d12f978d5e71f41b7918ffb07"
+  },
+  {
+    "file": "robust_regression_t4.stan",
+    "sha256": "1a7fcb3c993b0e9625981dfc9a72dc3866efd9f414089dccd4ae7a593bfb1e11"
+  },
+  {
+    "file": "robust_regression_t4_avx.stan",
+    "sha256": "fce852d7fbb56cb8846330b6f707f0a2e9739160210556f73b275509d94c1478"
+  },
+  {
+    "file": "hierarchical_logistic_regression.stan",
+    "sha256": "e828d7ecfbf1727439a0e0da7e69911d51391114b64cc27ec174f42e1640560b"
+  },
+  {
+    "file": "hierarchical_logistic_regression_avx.stan",
+    "sha256": "42108724bc982e0f60119eb6a7a35f138c14c1ddc172d6bbcb3cece7cf12a8c6"
+  },
+  {
+    "file": "Joint_longitudinal_surv.stan",
+    "sha256": "c6446373b2b61be1384b731829967d4186ac487749e9b380ae5255298808166d"
+  },
+  {
+    "file": "Joint_longitudinal_surv_avx.stan",
+    "sha256": "9ebc8e1763fb57845235bc5a68159c41ff9079b5424bb2abb92d2660d01f0520"
+  },
+  {
+    "file": "Gaussian_process.stan",
+    "sha256": "4c8de628b577c9c9412d6ec638cc1a335e39c16c1b933161665a12d901b79d57"
+  },
+  {
+    "file": "Gaussian_process_avx.stan",
+    "sha256": "13e26f632c638146393c9245c6f566faf18e57b233b148939ef6d5e049f27808"
+  },
+  {
+    "file": "Stochastic_volatility.stan",
+    "sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f"
+  },
+  {
+    "file": "Stochastic_volatility_avx.stan",
+    "sha256": "187661faf2240846e822530c8cc862bf8d1bdb5acb84933469169591361bdfd9"
+  },
+  {
+    "file": "Latent_diffusion_survival.stan",
+    "sha256": "2051f2f6f9b11944453a6039ce6c820c6f533d6c26a91e005d6239b310de8602"
+  },
+  {
+    "file": "Latent_diffusion_survival_avx.stan",
+    "sha256": "2f9464137a35dc35414244be0fa63bf355464505ff08df9d394c9154961b4c00"
+  }
+]

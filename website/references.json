@@ -1,0 +1,116 @@
+[
+  {
+    "key": "Beskos2011",
+    "authors": "Beskos, A., Pinski, F. J., Sanz-Serna, J. M. and Stuart, A. M.",
+    "year": "2011",
+    "title": "Hybrid Monte Carlo on Hilbert spaces",
+    "venue": "Stochastic Processes and Their Applications, 121(10), 2201-2230",
+    "url": "https://doi.org/10.1016/j.spa.2011.06.003",
+    "doi": "10.1016/j.spa.2011.06.003",
+    "bibtex_authors": "Beskos, Alexandros and Pinski, Francis J. and Sanz-Serna, Jesus Maria and Stuart, Andrew M."
+  },
+  {
+    "key": "Beskos2013",
+    "authors": "Beskos, A., Kalogeropoulos, K. and Pazos, E.",
+    "year": "2013",
+    "title": "Advanced MCMC methods for sampling on diffusion pathspace",
+    "venue": "Stochastic Processes and Their Applications, 123(4), 1415-1453",
+    "url": "https://doi.org/10.1016/j.spa.2012.12.001",
+    "doi": "10.1016/j.spa.2012.12.001",
+    "bibtex_authors": "Beskos, Alexandros and Kalogeropoulos, Konstantinos and Pazos, Erik"
+  },
+  {
+    "key": "Beskos2015",
+    "authors": "Beskos, A., Dureau, J. and Kalogeropoulos, K.",
+    "year": "2015",
+    "title": "Bayesian inference for partially observed stochastic differential equations driven by fractional Brownian motion",
+    "venue": "Biometrika, 102(4), 809-827",
+    "url": "https://doi.org/10.1093/biomet/asv051",
+    "doi": "10.1093/biomet/asv051",
+    "bibtex_authors": "Beskos, Alexandros and Dureau, Joseph and Kalogeropoulos, Konstantinos"
+  },
+  {
+    "key": "Alenlov2021",
+    "authors": "Alenlöv, J., Doucet, A. and Lindsten, F.",
+    "year": "2021",
+    "title": "Pseudo-Marginal Hamiltonian Monte Carlo",
+    "venue": "Journal of Machine Learning Research, 22(141), 1-45",
+    "url": "https://jmlr.org/papers/v22/19-486.html",
+    "bibtex_authors": "Alenlöv, Johan and Doucet, Arnaud and Lindsten, Fredrik"
+  },
+  {
+    "key": "Hoffman2021",
+    "authors": "Hoffman, M. D., Radul, A. and Sountsov, P.",
+    "year": "2021",
+    "title": "An Adaptive-MCMC Scheme for Setting Trajectory Lengths in Hamiltonian Monte Carlo",
+    "venue": "Proceedings of Machine Learning Research, 130, 3907-3915",
+    "url": "https://proceedings.mlr.press/v130/hoffman21a.html",
+    "bibtex_authors": "Hoffman, Matthew D. and Radul, Alexey and Sountsov, Pavel"
+  },
+  {
+    "key": "Sountsov2022",
+    "authors": "Sountsov, P. and Hoffman, M. D.",
+    "year": "2022",
+    "title": "Focusing on Difficult Directions for Learning HMC Trajectory Lengths",
+    "venue": "arXiv:2110.11576, version 3, 6 May 2022",
+    "url": "https://arxiv.org/abs/2110.11576v3",
+    "bibtex_authors": "Sountsov, Pavel and Hoffman, Matthew D."
+  },
+  {
+    "key": "Pinski2021",
+    "authors": "Pinski, F. J.",
+    "year": "2021",
+    "title": "A Novel Hybrid Monte Carlo Algorithm for Sampling Path Space",
+    "venue": "Entropy, 23(5), 499",
+    "url": "https://doi.org/10.3390/e23050499",
+    "doi": "10.3390/e23050499",
+    "bibtex_authors": "Pinski, Francis J."
+  },
+  {
+    "key": "RiouDurand2023",
+    "authors": "Riou-Durand, L., Sountsov, P., Vogrinc, J., Margossian, C. and Power, S.",
+    "year": "2023",
+    "title": "Adaptive Tuning for Metropolis Adjusted Langevin Trajectories",
+    "venue": "Proceedings of Machine Learning Research, 206, 8102-8116",
+    "url": "https://proceedings.mlr.press/v206/riou-durand23a.html",
+    "bibtex_authors": "Riou-Durand, Lionel and Sountsov, Pavel and Vogrinc, Jure and Margossian, Charles and Power, Sam"
+  },
+  {
+    "key": "Cerullo2022",
+    "authors": "Cerullo, E., Jones, H. E., Carter, O., Quinn, T. J., Cooper, N. J. and Sutton, A. J.",
+    "year": "2022",
+    "title": "Meta-analysis of dichotomous and ordinal tests with an imperfect gold standard",
+    "venue": "Research Synthesis Methods, 13(5), 595-611",
+    "url": "https://doi.org/10.1002/jrsm.1567",
+    "doi": "10.1002/jrsm.1567",
+    "bibtex_authors": "Cerullo, Enzo and Jones, Hayley E. and Carter, Olivia and Quinn, Terry J. and Cooper, Nicola J. and Sutton, Alex J."
+  },
+  {
+    "key": "Cerullo2025",
+    "authors": "Cerullo, E., Pinkney, S., Sutton, A. J., Lucas, T., Cooper, N. J. and Jones, H. E.",
+    "year": "2025",
+    "title": "Latent class multivariate probit and latent trait models for evaluating test accuracy without a gold standard: A simulation study",
+    "venue": "arXiv:2509.18489, version 1, 23 September 2025",
+    "url": "https://arxiv.org/abs/2509.18489v1",
+    "doi": "10.48550/arXiv.2509.18489",
+    "bibtex_authors": "Cerullo, Enzo and Pinkney, Sean and Sutton, Alex J. and Lucas, Tim and Cooper, Nicola J. and Jones, Hayley E."
+  },
+  {
+    "key": "HoffmanGelman2014",
+    "authors": "Hoffman, M. D. and Gelman, A.",
+    "year": "2014",
+    "title": "The No-U-Turn Sampler: Adaptively Setting Path Lengths in Hamiltonian Monte Carlo",
+    "venue": "Journal of Machine Learning Research, 15(47), 1593-1623",
+    "url": "https://www.jmlr.org/papers/v15/hoffman14a.html",
+    "bibtex_authors": "Hoffman, Matthew D. and Gelman, Andrew"
+  },
+  {
+    "key": "Margossian2024",
+    "authors": "Margossian, C. C., Hoffman, M. D., Sountsov, P., Riou-Durand, L., Vehtari, A. and Gelman, A.",
+    "year": "2024",
+    "title": "Nested R-hat: Assessing the convergence of Markov chain Monte Carlo when running many short chains",
+    "venue": "Bayesian Analysis; arXiv:2110.13017, version 6, 30 May 2024",
+    "url": "https://arxiv.org/abs/2110.13017v6",
+    "bibtex_authors": "Margossian, Charles C. and Hoffman, Matthew D. and Sountsov, Pavel and Riou-Durand, Lionel and Vehtari, Aki and Gelman, Andrew"
+  }
+]

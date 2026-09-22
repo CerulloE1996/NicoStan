@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" role="img" aria-labelledby="flow-title flow-desc">
+<title id="flow-title">Unit Gaussian reference flow</title><desc id="flow-desc">Position u and velocity v rotate on a circle, preserving the reference energy. This shows the Gaussian substep only.</desc>
+<rect width="480" height="320" rx="16" fill="#eef2e9"/>
+<g fill="none" stroke="#c5cfbf"><path d="M64 160H416M240 24V294"/><circle cx="240" cy="160" r="112" stroke-dasharray="3 5"/><circle cx="240" cy="160" r="72" opacity=".45"/></g>
+<circle cx="240" cy="160" r="112" fill="none" stroke="#255b43" stroke-width="2"/>
+<path id="flow-radius" d="M240 160L322 236" stroke="#c16f45" stroke-width="2"/>
+<circle id="flow-point" cx="322" cy="236" r="7" fill="#b25b35" stroke="#fff" stroke-width="3"/>
+<g font-family="Georgia,serif" font-size="17" fill="#274536"><text x="426" y="165">u</text><text x="234" y="19">v</text></g>
+<g font-family="system-ui,sans-serif" font-size="12" fill="#526153"><text x="232" y="179">0</text><text x="349" y="178">1</text><text x="249" y="52">1</text><text x="22" y="301">GAUSSIAN REFERENCE SUBSTEP</text></g></svg>

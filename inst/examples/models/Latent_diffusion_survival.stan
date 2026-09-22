@@ -1,0 +1,130 @@
+// latent_diffusion_survival.stan
+//
+// Latent diffusion survival model (Roberts and Sangalli, 2010), in the form used by
+// Beskos, Kalogeropoulos and Pazos (2013, Sections 5 and 6.3). All subjects share one
+// hazard trajectory h(u) = hazard_scale * (x(u)^2 + x_squared_hazard_offset), driven by the latent diffusion
+//     dX_u = -(drift_sin_coefficient * sin(X_u) + drift_constant) du + sigma_x dB_u,  X_0 = x_0,
+// on the observation window [0, t_max]. Beskos et al. use hazard_scale = 1, drift
+// coefficients (1.4, 1), sigma_x = 1 (unit diffusion coefficient), x_0 = 2 and t_max = 1,
+// and treat these as known. Here the drift coefficients and the hazard scale are estimated
+// jointly with the path; sigma_x and x_0 are fixed data.
+//
+// Hazard offset (round-4 change, 2026-09-22, assistant-introduced; not in Beskos et al.): Beskos et al. use
+// h(x) = x^2 exactly (x_squared_hazard_offset = 0). Then log h at an event time is 2 log|x(t)|, which is -Inf
+// at x(t) = 0, and h(x) = h(-x). The drift pulls X towards its stable point -0.795 (the drift-only path from
+// x_0 = 2 reaches 0 at t = 1.07, and about 60% of simulated paths cross 0 before t = 1). Once the path gets
+// near zero, the posterior splits into sign patterns of x at the event times,
+// separated by those -Inf walls. Hamiltonian trajectories cannot cross the walls and diverge near them:
+// cmdstanr at adapt_delta 0.9 gave 120 divergences and x_path R-hat 1.11 with the old model, and still 43
+// divergences and x_path R-hat 1.53 with every parameter fixed at the Beskos et al. values. A small offset
+// (default 0.01 in the simulator, i.e. the hazard never falls below 1% of hazard_scale) makes log h finite
+// and smooth, so the sign patterns are connected and the sampler mixes over them. The hazard shape is x^2
+// wherever |x| is not tiny. Setting the offset to 0 gives the exact Beskos et al. form (and its divergences).
+//
+// Discretisation: Euler-Maruyama on M equal steps of length dt = t_max / M, non-centred.
+// The nuisance block w holds the M standard normal Brownian increments, and
+//     x[k + 1] = x[k] + drift(x[k]) * dt + sigma_x * sqrt(dt) * w[k].
+// The path is taken as linear between grid points. The hazard at an event time uses the
+// linearly interpolated path value (not a snap to the nearest grid point). The integrated
+// hazard is the trapezoid rule over the whole grid cells before t[n], plus a trapezoid over
+// the partial cell from its lower grid point to t[n]. Right-censored times contribute only
+// -H(t[n]); administrative censoring at t_max is the usual case.
+data {
+    int<lower=1> N;                          // number of subjects
+    int<lower=2> M;                          // number of Euler-Maruyama steps on [0, t_max]
+    real<lower=0> t_max;                     // end of the observation window
+    real x_0;                                // fixed initial value of the latent diffusion
+    real<lower=0> sigma_x;                   // fixed diffusion coefficient (1 = unit diffusion)
+    real<lower=0> x_squared_hazard_offset;   // h(u) = hazard_scale * (x(u)^2 + offset); 0 = exact Beskos et al. form
+    vector<lower=0, upper=t_max>[N] t;       // event or censoring time
+    array[N] int<lower=0, upper=1> event;    // 1 = event observed, 0 = right censored at t
+}
+
+
+transformed data {
+    real dt = t_max / M;
+    real sqrt_dt = sqrt(dt);
+    int N_event = sum(event);
+    array[N_event] int event_index;          // subjects with an observed event
+    array[N] int cell_index;                 // lower grid point of the cell containing t[n]
+    array[N] int cell_index_upper;           // upper grid point of that cell
+    vector[N] time_into_cell;                // t[n] minus the time of that lower grid point
+    vector[N] cell_fraction;                 // time_into_cell / dt, in [0, 1]
+    {
+      int position = 1;
+      for (n in 1:N) {
+        int cell = 1;
+        if (t[n] <= 0) reject("Event and censoring times must be strictly positive.");
+        // Grid point k (1-based) sits at time (k - 1) * dt; the last cell is [(M - 1) dt, t_max].
+        while (cell < M && t[n] >= cell * dt) cell += 1;
+        cell_index[n] = cell;
+        cell_index_upper[n] = cell + 1;
+        time_into_cell[n] = t[n] - (cell - 1) * dt;
+        cell_fraction[n] = fmin(1, time_into_cell[n] / dt);
+        if (event[n] == 1) {
+          event_index[position] = n;
+          position += 1;
+        }
+      }
+    }
+}
+
+
+parameters {
+    vector[M] w;                             // standard normal Brownian increments, declared first
+    real drift_sin_coefficient;              // drift: -(drift_sin_coefficient * sin(x) + drift_constant)
+    real drift_constant;
+    real<lower=0> hazard_scale;              // h(u) = hazard_scale * (x(u)^2 + x_squared_hazard_offset)
+}
+
+
+transformed parameters {
+    vector[M + 1] x_path;                    // latent diffusion at the M + 1 grid points
+    x_path[1] = x_0;
+    for (k in 1:M) {
+      x_path[k + 1] = x_path[k] - (drift_sin_coefficient * sin(x_path[k]) + drift_constant) * dt
+                      + sigma_x * sqrt_dt * w[k];
+    }
+}
+
+
+model {
+    // priors
+    // Drift priors (round-4 change, 2026-09-22, assistant-introduced): Beskos et al. treat the drift as known,
+    // (1.4, 1). One path on [0, 1] carries little information about the drift (with the earlier normal(0, 2)
+    // priors the posterior SDs were about 1.5, close to the prior), so the prior sets how far the sampler goes
+    // along the drift_sin_coefficient / drift_constant ridge (posterior correlation about -0.7). With
+    // normal(0, 2) and the hazard offset, cmdstanr (adapt_delta 0.8, N = 800) still gave 49 divergences, 30 of
+    // them from the 5% of draws with drift_sin_coefficient <= -1.5 (drift_constant about 3 there), i.e. the far
+    // tail of that ridge, where the Euler recursion is expanding. These priors relax "known drift" to
+    // "drift known to within about 1"; with them that run had 0 divergences.
+    // The hazard-scale prior (median 1) is unchanged.
+    drift_sin_coefficient ~ normal(1.4, 1);
+    drift_constant ~ normal(1, 1);
+    hazard_scale ~ lognormal(0, 1);
+    w ~ std_normal();
+
+    // likelihood
+    {
+      vector[M + 1] hazard_grid = hazard_scale * (square(x_path) + x_squared_hazard_offset);
+      vector[M + 1] cumulative_hazard_grid;
+      vector[N] x_at_t = (1 - cell_fraction) .* x_path[cell_index] + cell_fraction .* x_path[cell_index_upper];
+      vector[N] hazard_at_t = hazard_scale * (square(x_at_t) + x_squared_hazard_offset);
+      cumulative_hazard_grid[1] = 0;
+      cumulative_hazard_grid[2:(M + 1)] = cumulative_sum(0.5 * dt * (hazard_grid[1:M] + hazard_grid[2:(M + 1)]));
+      // log h(t) at the observed event times; finite at x(t) = 0 whenever x_squared_hazard_offset > 0.
+      target += N_event * log(hazard_scale) + sum(log(square(x_at_t[event_index]) + x_squared_hazard_offset));
+      // - H(t) for every subject, events and censored alike.
+      target += -sum(cumulative_hazard_grid[cell_index] + 0.5 * time_into_cell .* (hazard_grid[cell_index] + hazard_at_t));
+    }
+}
+
+
+generated quantities {
+    vector[M + 1] hazard_path = hazard_scale * (square(x_path) + x_squared_hazard_offset);
+    vector[M + 1] survival_path;             // S(u) = exp(-H(u)) at the grid points
+    survival_path[1] = 1;
+    for (k in 1:M) {
+      survival_path[k + 1] = survival_path[k] * exp(-0.5 * dt * (hazard_path[k] + hazard_path[k + 1]));
+    }
+}

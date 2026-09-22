@@ -1,0 +1,37 @@
+[
+  {
+    "id": "CHESSR",
+    "name": "ChEES-R",
+    "summary": "The original ChEES-rate criterion, using the squared change in the main block's centred squared radius per realised trajectory length.",
+    "formula": "mean[αᵢ Cᵢ / τᵢ]",
+    "note": "Uses the direct gradient of the mean ChEES-rate criterion."
+  },
+  {
+    "id": "CHESSR_log",
+    "name": "Log-ChEES-R",
+    "summary": "Our log-ratio formulation, which normalises the numerator gradient by a running average of the ChEES numerator.",
+    "formula": "mean[αᵢ Gᵢ] / EMA(mean[αᵢ Cᵢ]) - 1",
+    "note": "The displayed expression is the log-ratio adaptation gradient, with exponential-moving-average normalisation."
+  },
+  {
+    "id": "SNAPER",
+    "name": "SNAPER",
+    "summary": "Learns a difficult main-parameter direction with a metric-aware Oja update and adapts the trajectory length using squared changes along that direction per unit length.",
+    "formula": "mean[αᵢ ((wᵀzᵢ′)² - (wᵀzᵢ)²)² / τᵢ]",
+    "note": "The learned unit direction and the main positions use the same current mass-matrix coordinates."
+  },
+  {
+    "id": "ChEES",
+    "name": "ChEES",
+    "summary": "Uses the squared change in the main block's centred squared radius, without dividing by trajectory length.",
+    "formula": "mean[αᵢ Cᵢ]",
+    "note": "Cᵢ = (‖zᵢ′‖² / 2 - ‖zᵢ‖² / 2)². The current metric is applied to positions and velocities."
+  },
+  {
+    "id": "KE",
+    "name": "Kinetic-energy criterion",
+    "summary": "Retains the package's kinetic-energy-based trajectory adaptation for comparison with the position-based criteria.",
+    "formula": "burnin_algorithm = \"KE\"",
+    "note": "Uses the derivative of the main block's kinetic energy from the native sampler."
+  }
+]
