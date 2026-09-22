@@ -1,9 +1,6 @@
 # NicoStan
 
 
-Adaptive Hamiltonian Monte Carlo for general Stan models.
-
-
 [Installation](#installation) · [Examples](#examples) · [Algorithms](#trajectory-length-adaptation) · [References](#references)
 
 
