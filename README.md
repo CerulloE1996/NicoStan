@@ -118,11 +118,6 @@ v(t) = v(0) cos(t) - u(0) sin(t)
 ```
 
 
-![Unit Gaussian reference flow: a rotation in position and velocity coordinates](docs/assets/reference-flow.svg)
-
-The [interactive reference-flow illustration](https://cerulloe1996.github.io/NicoStan/#reference-flow) shows this substep for one standard normal coordinate. The illustration follows one Gaussian reference substep.
-
-
 Note that NicoStan's default differs from this textbook case (a rotation about zero, with unit mass) in two ways:
 
 - **Shifted centre:** the rotation is about a centre `c` rather than zero, i.e., the Gaussian reference is `N(c, I)`. 

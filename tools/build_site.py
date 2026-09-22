@@ -29,7 +29,8 @@ algorithm_table = "\n".join(f"- `{a['id']}` ({a['name']}): {a['summary']}" for a
 reference_list = "\n\n".join(f"{i}. {r['authors']} ({r['year']}). [{r['title']}]({r['url']}). {r['venue']}." for i, r in enumerate(references, 1))
 template = (SOURCE / "README.template.md").read_text()
 markdown = template.replace("{{QUICKSTART}}", quickstart).replace("{{ALGORITHMS}}", algorithm_table).replace("{{REFERENCES}}", reference_list)
-markdown = markdown.replace("{{REFERENCE_FLOW}}", "![Unit Gaussian reference flow: a rotation in position and velocity coordinates](docs/assets/reference-flow.svg)\n\nThe [interactive reference-flow illustration](https://cerulloe1996.github.io/NicoStan/#reference-flow) shows this substep for one standard normal coordinate. The illustration follows one Gaussian reference substep.")
+## The reference-flow figure appears on the GitHub Pages site only; the README carries no figure (2026-09-22).
+markdown = re.sub(r"\{\{REFERENCE_FLOW\}\}\n+", "", markdown)
 (ROOT / "README.md").write_text(markdown)
 
 
