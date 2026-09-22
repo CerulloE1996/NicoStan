@@ -1,6 +1,6 @@
 # Trajectory-length adaptation in NicoStan
 
-NicoStan provides `burnin_algorithm = "ChEES"`, `"CHESSR"`, `"CHESSR_log"`, `"SNAPER"` and `"KE"`. The trajectory-length criteria use the main parameters. The nuisance block is excluded from these criteria, including when the transition jointly updates both blocks.
+NicoStan provides `burnin_algorithm = "ChEES"`, `"CHESSR"`, `"CHESSR_log"` and `"SNAPER"`. The code also accepts `"KE"`, a kinetic-energy criterion of our own; it is experimental (unpublished and not recommended) and is kept only for comparison. The trajectory-length criteria use the main parameters. The nuisance block is excluded from these criteria, including when the transition jointly updates both blocks.
 
 ## Positive trajectory lengths and the log parameterisation
 

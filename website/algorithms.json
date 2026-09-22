@@ -26,12 +26,5 @@
     "summary": "Uses the squared change in the main block's centred squared radius, without dividing by trajectory length.",
     "formula": "mean[αᵢ Cᵢ]",
     "note": "Cᵢ = (‖zᵢ′‖² / 2 - ‖zᵢ‖² / 2)². The current metric is applied to positions and velocities."
-  },
-  {
-    "id": "KE",
-    "name": "Kinetic-energy criterion",
-    "summary": "Retains the package's kinetic-energy-based trajectory adaptation for comparison with the position-based criteria.",
-    "formula": "burnin_algorithm = \"KE\"",
-    "note": "Uses the derivative of the main block's kinetic energy from the native sampler."
   }
 ]

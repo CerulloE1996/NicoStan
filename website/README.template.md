@@ -21,7 +21,7 @@ The R package provides:
 
 - **A general Stan interface**, so existing Stan models can be fitted through NicoStan.
 - **Hybrid diffusion-pathspace HMC** for models with suitable Gaussian latent/nuisance blocks, based on [Beskos et al. (2011)](https://doi.org/10.1016/j.spa.2011.06.003) and [Beskos et al. (2013)](https://doi.org/10.1016/j.spa.2012.12.001).
-- **ChEES, ChEES-R and SNAPER trajectory-length adaptation**, drawing on [Hoffman et al. (2021)](https://proceedings.mlr.press/v130/hoffman21a.html) and [Sountsov and Hoffman (2022)](https://arxiv.org/abs/2110.11576v3), alongside our log-CHESSR formulation and the kinetic-energy criterion.
+- **ChEES, ChEES-R and SNAPER trajectory-length adaptation**, drawing on [Hoffman et al. (2021)](https://proceedings.mlr.press/v130/hoffman21a.html) and [Sountsov and Hoffman (2022)](https://arxiv.org/abs/2110.11576v3), alongside our log-CHESSR formulation.
 - **Custom AVX2 and AVX-512 mathematical functions**, supplied through the BayesMVP extension and available to general Stan models.
 - **Parallel chains, diagonal/dense main-parameter metrics, posterior summaries and MCMC diagnostics.**
 
