@@ -1,4 +1,4 @@
-# NicoStan
+# NicoStan <img src="docs/assets/NicoStan_logo_720.png" align="right" height="140" alt="NicoStan logo" />
 
 
 [Installation](#installation) · [Examples](#examples) · [Performance](#performance) · [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) · [Algorithms](#efficient-burnin-algorithms) · [How to cite](#how-to-cite-nicostan) · [References](#references)

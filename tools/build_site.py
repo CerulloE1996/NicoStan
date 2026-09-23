@@ -31,6 +31,8 @@ template = (SOURCE / "README.template.md").read_text()
 markdown = template.replace("{{QUICKSTART}}", quickstart).replace("{{ALGORITHMS}}", algorithm_table).replace("{{REFERENCES}}", reference_list)
 ## The reference-flow figure appears on the GitHub Pages site only; the README carries no figure (2026-09-22).
 markdown = re.sub(r"\{\{REFERENCE_FLOW\}\}\n+", "", markdown)
+## The Nico logo sits beside the title in the GitHub README only (the website shows it in the banner) (2026-09-23).
+markdown = markdown.replace("# NicoStan\n", '# NicoStan <img src="docs/assets/NicoStan_logo_720.png" align="right" height="140" alt="NicoStan logo" />\n', 1)
 (ROOT / "README.md").write_text(markdown)
 
 
