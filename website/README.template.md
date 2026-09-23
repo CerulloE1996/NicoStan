@@ -404,7 +404,7 @@ and SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)
 
 More specifically, during burnin, NicoStan adapts:
 
-- The step size, targeting a mean acceptance probability of `adapt_delta` (0.80 by default), using an Adam-type update.
+- The step size, targeting a mean acceptance probability of `adapt_delta` (0.80 by default), using an ADAM-type update ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980)).
 - The mass matrix (i.e., metric) for the main parameters, using either empirical covariance/variance estimates from the burnin chains (`metric_type_main = "Empirical"`)
 or a numerical Hessian (`metric_type_main = "Hessian"`); more specifically, the Hessian is computed by finite differences of the main-parameter gradients.
 Both methods support a diagonal/dense Euclidean metric (`metric_shape_main = "diag"` or `"dense"`).
@@ -540,6 +540,8 @@ describes how to check which extensions your CPU supports.
 19. Talhouk, A., Doucet, A. and Murphy, K. (2012). [Efficient Bayesian inference for multivariate probit models with sparse inverse correlation matrices](https://www.stats.ox.ac.uk/~doucet/talhouk_doucet_murphy_sparseprobit.pdf). Journal of Computational and Graphical Statistics, 21(3), 739-757.
 
 20. Johnston, C. K., Waterhouse, T., Wiens, M., Mondick, J., French, J. and Gillespie, W. R. (2024). [Bayesian estimation in NONMEM](https://doi.org/10.1002/psp4.13088). CPT: Pharmacometrics & Systems Pharmacology, 13, 192-207.
+
+21. Kingma, D. P. and Ba, J. (2015). [Adam: A Method for Stochastic Optimization](https://arxiv.org/abs/1412.6980). International Conference on Learning Representations (ICLR); arXiv:1412.6980.
 
 
 ## Package citation and development

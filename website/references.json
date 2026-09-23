@@ -191,5 +191,14 @@
     "url": "https://doi.org/10.1002/psp4.13088",
     "doi": "10.1002/psp4.13088",
     "bibtex_authors": "Johnston, C. K. and Waterhouse, T. and Wiens, M. and Mondick, J. and French, J. and Gillespie, W. R."
+  },
+  {
+    "key": "Kingma2015",
+    "authors": "Kingma, D. P. and Ba, J.",
+    "year": "2015",
+    "title": "Adam: A Method for Stochastic Optimization",
+    "venue": "International Conference on Learning Representations (ICLR); arXiv:1412.6980",
+    "url": "https://arxiv.org/abs/1412.6980",
+    "bibtex_authors": "Kingma, Diederik P. and Ba, Jimmy"
   }
 ]

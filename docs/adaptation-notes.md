@@ -73,7 +73,7 @@ $$
 =\frac{1}{R}\frac{\partial R}{\partial\eta}.
 $$
 
-Consequently, taking the logarithm preserves the positive objective's stationary points and the sign of its gradient. It rescales the gradient, so finite learning-rate updates and ADAM trajectories can differ.
+Consequently, taking the logarithm preserves the positive objective's stationary points and the sign of its gradient. It rescales the gradient, so finite learning-rate updates and ADAM ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980)) trajectories can differ.
 
 `CHESSR_log` estimates this derivative using
 
