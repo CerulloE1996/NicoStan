@@ -1,24 +1,63 @@
+
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 # NicoStan
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+
+[Installation](#installation) ·
+[Examples](#examples) ·
+[Benchmarks](#benchmarks) ·
+[Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
+[NicoStan's efficient burnin algorithms](#efficient-burnin-algorithms) ·
+[How to cite](#how-to-cite-nicostan) ·
+[References](#references)
 
 
-[Installation](#installation) · [Examples](#examples) · [Performance](#performance) · [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) · [Algorithms](#efficient-burnin-algorithms) · [How to cite](#how-to-cite-nicostan) · [References](#references)
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+## What is NicoStan, and how is it different to Stan (e.g., cmdstanr or rstan)?
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-NicoStan is an R package for fitting Bayesian models written in Stan.
-It combines adaptive Hamiltonian Monte Carlo (HMC) with a hybrid diffusion-pathspace algorithm for models containing large blocks of
-latent variables or "nuisance" parameters.
-NicoStan is more efficient than Stan for most models (benchmark results coming soon),
-especially for models with high-dimensional nuisance parameters/Gaussian latent variables.
-NicoStan accesses Stan's log posterior and gradients through our integration of [BridgeStan](https://joss.theoj.org/papers/10.21105/joss.05236) into NicoStan's R/C++ code;
-more specifically, the C++ sampler calls the compiled Stan model directly through BridgeStan's C interface.
+NicoStan is an R package for fitting Bayesian models written in the probabilistic programming language [Stan](https://mc-stan.org/).
+NicoStan accesses Stan's log posterior and gradients through our integration of [BridgeStan](https://joss.theoj.org/papers/10.21105/joss.05236)
+into NicoStan's R/C++ code;
+more specifically, NicoStan's C++ sampler calls the compiled Stan model directly through BridgeStan's C/C++ interface.
 NicoStan handles the burnin (i.e., warm-up), sampling and posterior summaries.
 
 
+For the burnin (or "warmup") phase, Stan uses a well-established, state-of-the-art No-U-Turn HMC
+(NUTS-HMC; see [Hoffman and Gelman, 2014](https://www.jmlr.org/papers/v15/hoffman14a.html)) algorithm for adaptation;
+that is, for automatically (or adaptively) tuning the HMC path length ($\tau$).
+On the other hand, NicoStan provides state-of-the-art, between-chain adaptation algorithms,
+such as SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)),
+CHESS-HMC ([Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html)),
+and CHESSR-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)) -
+see [this section below](#efficient-burnin-algorithms) for more details on NicoStan's burnin algorithms.
+
+
+This difference in burnin adaptation algorithm makes NicoStan more efficient than Stan for most models
+(benchmark results coming soon).
+In our testing, NicoStan can also perform very well with a very short burnin
+(100-125 iterations with just 4 chains; we are also currently testing shorter burnins).
+Furthermore, the fact that NicoStan uses between-chain adaptation (as opposed to within-chain adaptation, like Stan's NUTS-HMC algorithm)
+means that all chains finish the sampling phase at approximately the same time, avoiding the common issue of "stuck chains",
+which is often seen with complex models when using Stan directly
+(e.g., via [cmdstanr](https://mc-stan.org/cmdstanr/) or [rstan](https://mc-stan.org/rstan/)).
+
+
+Additionally, for models with high-dimensional nuisance parameters
+(see [this section below](#models-with-nuisance-parameters-diffusion-pathspace-hmc) for examples of such models),
+NicoStan offers a hybrid diffusion-pathspace HMC sampling algorithm
+(based on [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003),
+and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)),
+which can greatly increase efficiency - especially for large N.
+
+
+
 Note that NicoStan can also fit any Stan model (i.e., any `.stan` model file);
-however, the efficiency gains (relative to Stan) will likely be less dramatic for models without nuisance parameters.
+however, expect efficiency gains (relative to Stan) to be less dramatic for models without high-dimensional nuisance parameters.
 
 
-The R package provides:
+The NicoStan R package provides:
 
 - **A general Stan interface**, so that existing Stan models can be fitted via NicoStan
 (directly, using the user's existing `.stan` model files).
@@ -49,8 +88,9 @@ For instance, we used [BayesMVP](https://github.com/CerulloE1996/BayesMVP) to fi
 which compared the LC-MVP and latent trait ([Qu et al., 1996](https://pubmed.ncbi.nlm.nih.gov/8805757/)) models.
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Installation
-
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 NicoStan requires:
 
@@ -110,8 +150,9 @@ BayesMVP::install_BayesMVP()
 Note that this command installs the [main branch](https://github.com/CerulloE1996/BayesMVP/tree/main) of [BayesMVP](https://github.com/CerulloE1996/BayesMVP).
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Examples
-
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 The general examples are grouped by their parameterisation:
 
@@ -136,7 +177,8 @@ fit$model_fit_object$summaries$summary_tibbles$summary_tibble_main_params
 ```
 
 
-This example simulates data with 20 groups and 200 observations, with a standard normal latent vector (i.e., the non-centred random intercepts) declared first in the Stan model.
+This example simulates data with 20 groups and 200 observations, with a standard normal latent vector 
+(i.e., the non-centred random intercepts) declared first in the Stan model.
 See the complete [R example](inst/examples/random_intercepts.R) and [Stan model](inst/examples/random_intercepts.stan)
 for the full parameterisation and settings.
 Note that the R6 class is called `NicoStan::Nico_model` (`NicoStan::MVP_model` also still works, for compatibility);
@@ -179,13 +221,16 @@ When preparing a model for NicoStan:
 
 - Declare the nuisance block **first in the Stan parameters block**.
 - Set `sample_nuisance = TRUE` (or `FALSE` for a model without a nuisance block).
-- Note that NicoStan automatically detects the (unconstrained) dimension of the nuisance block, using the Stan compiler metadata and BridgeStan.
+- Note that NicoStan automatically detects the (unconstrained) dimension of the nuisance block, 
+using the Stan compiler metadata and BridgeStan.
 - For a non-centred Gaussian representation,
 declare standard normal variables in this first block, and then introduce the scales/correlations in the transformed parameters block.
 - Keep the complete posterior density (including the prior on the nuisance parameters) in the Stan model.
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## [BayesMVP](https://github.com/CerulloE1996/BayesMVP): multivariate probit models
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 The [BayesMVP R package extension](https://github.com/CerulloE1996/BayesMVP) to NicoStan provides highly optimised,
@@ -216,7 +261,9 @@ in a comprehensive simulation study, in which the models were fitted using [Baye
 <!-- whilst the model also provides a larger example for the general NicoStan sampler. -->
 
 
-## Performance
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+## Benchmarks
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 In our initial tests on models with high-dimensional nuisance parameters/blocks,
@@ -245,12 +292,15 @@ as well as convergence diagnostics (e.g., R-hat and nested R-hat [nR-hat]; [Marg
 alongside the computational settings.
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Models with nuisance parameters (diffusion-pathspace HMC)
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 NicoStan is particularly aimed at models with a large block of latent/nuisance parameters for which analytic marginalisation is unavailable,
 or numerical marginalisation is too expensive. Techniques such as non-centring can improve the posterior geometry for some of these models;
 however, it does not remove the nuisance block - the corresponding latent variables still have to be handled during posterior computation.
+
 
 Such blocks occur in many commonly-used models; more specifically:
 
@@ -276,10 +326,9 @@ the survival component generally prevents the Gaussian marginalisation available
 for instance in population pharmacokinetic/pharmacodynamic (PK/PD) models.
 - **Measurement-error models with nonlinear/non-Gaussian outcomes:** unobserved true exposures/covariates
 or residual processes that enter the outcome likelihood.
-- **Binomial-normal hierarchical meta-analysis:** Gaussian study effects on transformed probabilities,
-including correlated effects for sensitivity/specificity in diagnostic test accuracy models.
 - **Nonlinear inverse problems with Gaussian-prior fields:** unknown spatial functions or initial conditions,
 for instance log-permeability fields inferred through a groundwater-flow model.
+
 
 For examples of these structures, see the [Stan item-response models](https://mc-stan.org/learn-stan/case-studies/rasch_and_2pl.html),
 the [nonlinear mixed-effects PK models in Johnston et al., 2024](https://doi.org/10.1002/psp4.13088),
@@ -288,24 +337,32 @@ the diffusion bridge, stochastic volatility and latent diffusion survival applic
 and the function-space applications in [Cotter et al., 2013](https://arxiv.org/abs/1202.0709).
 These are relevant model families; the [runnable examples](#examples) above show the implementations currently supplied with NicoStan.
 
+
 Note that some simpler Gaussian models allow the latent block to be integrated out analytically.
 For instance, our Gaussian-outcome GP example uses the marginal likelihood and is fitted with standard HMC;
 the latent-GP examples listed here instead have non-Gaussian likelihoods.
 
+
 ### Why some of these models are particularly difficult to sample
 
-MVP and its latent class/ordinal extensions are particularly demanding examples.
-The augmented state can be very large, whilst strong correlations and outcome-dependent truncation create difficult dependencies between latent variables and model parameters.
-In latent class models, weak identification and overlapping class-specific distributions can make sampling harder still
+
+MVP and its latent class/ordinal extensions (LC-MVP, LC-MVOP, etc) are particularly demanding examples.
+The augmented latent data can be very large, 
+whilst strong correlations and outcome-dependent truncation create difficult dependencies between latent variables and model parameters.
+Additionally, specifically for latent class models, poor identifiability can make sampling harder still
 (see [Talhouk et al., 2012](https://www.stats.ox.ac.uk/~doucet/talhouk_doucet_murphy_sparseprobit.pdf)
 and [Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)).
 
+
 Stochastic-volatility and nonlinear state-space models can also be difficult when latent processes are highly persistent
-or their innovation scales are small. In frailty, joint longitudinal-survival and latent-factor models,
+or their innovation scales are small. In frailty survival analysis models, joint longitudinal survival analysis, and latent-factor models,
 limited information about individual effects can induce strong posterior dependence between the effects and their population-level parameters.
-Techniques such as non-centring can help with these dependencies in some models; the remaining latent block may nevertheless account for much of the computational cost.
+Techniques such as non-centring can help with these dependencies in some models;
+however, the remaining high-dimensional latent block may nevertheless make the computation prohibitively expensive.
+
 
 ### GPU acceleration and serial dependencies
+
 
 Several of these models also contain calculations that are difficult to map efficiently to a GPU.
 For instance, in sequential-conditioning implementations of MVP/LC-MVP,
@@ -315,18 +372,23 @@ Similarly, forward simulation/non-centred reconstruction of nonlinear state-spac
 often requires each state to be available before the next state can be calculated.
 These dependencies limit parallelism within an individual/path, although independent individuals, paths and chains can still be processed in parallel.
 
+
 Additionally, a model may require many small calculations, irregular indexing or repeated transfers between CPU and GPU memory,
 so that the overhead of GPU execution is large relative to the work being parallelised.
 This makes the structure of the likelihood/gradient calculation important, alongside the number of observations or latent parameters.
+
 
 GPU suitability therefore depends on the implementation and the amount of parallel work available;
 large dense-matrix operations and vectorised GLM likelihoods can benefit substantially.
 For instance, [Stan's OpenCL interface](https://mc-stan.org/cmdstanr/articles/articles-online-only/opencl.html)
 supports several GLM likelihoods directly.
-For models whose serial dependencies or likelihood/gradient calculations limit effective GPU acceleration, NicoStan provides a CPU-based solution.
-Its hybrid/joint HMC and diffusion-pathspace dynamics, between-chain adaptation and CPU parallelism address the cost of posterior sampling directly;
+For models whose serial dependencies or likelihood/gradient calculations limit effective GPU acceleration,
+NicoStan provides a CPU-based solution.
+Its hybrid/joint HMC and diffusion-pathspace dynamics, between-chain adaptation, 
+and CPU parallelism address the cost of posterior sampling directly;
 the optional [AVX2/AVX-512 functions](#custom-avx2-and-avx-512-functions) additionally accelerate model/gradient evaluation.
-These methods can be used without having to restructure the model's calculations for GPU execution.
+Furthermore, NicoStan can be used without having to restructure the model's calculations for GPU execution, or having to install CUDA.
+
 
 <!--  Further parameterisation examples are given in the Stan User's Guide sections on   -->
 <!--  [stochastic volatility](https://mc-stan.org/docs/2_33/stan-users-guide/stochastic-volatility-models.html), -->
@@ -334,7 +396,10 @@ These methods can be used without having to restructure the model's calculations
 <!--  [reparameterisation](https://mc-stan.org/docs/stan-users-guide/efficiency-tuning.html).   -->
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## How NicoStan works
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+
 
 Many Bayesian models have a relatively small number of parameters of direct interest (i.e., the "main" model parameters),
 but a much larger (i.e., high-dimensional) block of latent variables (or "nuisance parameters");
@@ -343,6 +408,7 @@ and Gaussian process models (see the [Models with nuisance parameters](#models-w
 section above for more examples).
 As this nuisance block grows, standard HMC often becomes increasingly expensive.
 
+
 To address this, NicoStan treats the nuisance parameters (in the unconstrained space) as a change of measure from a Gaussian reference measure
 (based on [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003) and
 [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)) -
@@ -350,6 +416,7 @@ i.e., their posterior can be written as a Gaussian reference measure multiplied 
 This formulation is particularly useful when a Gaussian reference captures much of the nuisance-block structure;
 for instance, a non-centred parameterisation such as `x = μ(θ) + L(θ)u`, with `u ~ N(0, I)`, gives a standard normal prior for `u`.
 The nuisance posterior itself does not need to be Gaussian - its departure from the reference is retained in the correction term.
+
 
 NicoStan samples the main parameters `θ` and the latent/nuisance parameters `u` **jointly**, within the same hybrid HMC/diffusion-pathspace trajectory:
 
@@ -360,10 +427,11 @@ where the Gaussian part of the dynamics is solved exactly (it is a rotation),
 so this Gaussian substep adds no integration error, regardless of the size of the nuisance block.
 The complete trajectory also contains numerical steps for the remaining terms; the Metropolis-Hastings acceptance step corrects their integration error.
 
+
 Models without a nuisance block (e.g., standard univariate logistic regression) use standard HMC throughout.
 In our initial tests, we have also found NicoStan to be more efficient than Stan (via cmdstanr) for some of these models;
 we expect the different burnin/adaptation schemes to contribute to this, although the detailed comparisons are still in progress
-(see [Performance](#performance) and [Efficient burnin algorithms](#efficient-burnin-algorithms)).
+(see [Performance](#benchmarks) and [Efficient burnin algorithms](#efficient-burnin-algorithms)).
 
 
 The hybrid/joint sampling scheme uses a "kick-flow-kick" splitting.
@@ -394,16 +462,20 @@ they change the reference dynamics used in the splitting.
 is based on the main parameters only; hence, a large nuisance block does not dominate the adaptation.  -->
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Efficient burnin algorithms
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 NicoStan's burnin (i.e., warm-up) runs several chains in parallel,
 and adapts the HMC tuning parameters using information pooled **across** all of the burnin chains (i.e., between-chain adaptation);
 whereas Stan normally adapts each NUTS-HMC chain separately.
 
+
 This between-chain adaptation is based on ChEES-HMC
 ([Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html)),
 and SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)).
+
 
 More specifically, during burnin, NicoStan adapts:
 
@@ -476,7 +548,9 @@ with at least one integration step.
 Note that `manual_tau` separately controls whether the trajectory length is adapted at all.
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Custom AVX2 and AVX-512 functions
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 NicoStan can use our custom vectorised (i.e., SIMD) mathematical functions, which are supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension.
@@ -502,7 +576,9 @@ for instance, [Intel's processor guidance](https://www.intel.com/content/www/us/
 describes how to check which extensions your CPU supports.
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## How to cite NicoStan
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 If you use NicoStan in your work, please cite the package as follows:
@@ -522,7 +598,9 @@ Cerullo, E. (2026). NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models. 
 Please also cite the methodological references relevant to the options used in your analysis (see [References](#references)).
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## How to cite BayesMVP
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 If you use the BayesMVP extension (i.e., the specialised MVP models or the custom AVX2/AVX-512 functions), please also cite:
@@ -540,7 +618,9 @@ Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoS
 ```
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## References
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 1. Beskos, A., Pinski, F. J., Sanz-Serna, J. M. and Stuart, A. M. (2011). [Hybrid Monte Carlo on Hilbert spaces](https://doi.org/10.1016/j.spa.2011.06.003). Stochastic Processes and Their Applications, 121(10), 2201-2230.
@@ -587,7 +667,9 @@ Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoS
 21. Kingma, D. P. and Ba, J. (2015). [Adam: A Method for Stochastic Optimization](https://arxiv.org/abs/1412.6980). International Conference on Learning Representations (ICLR); arXiv:1412.6980.
 
 
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Package citation and development
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 NicoStan is developed by Enzo Cerullo and licensed under GPL-3.
@@ -596,3 +678,6 @@ and the references above are available as a [BibTeX file](docs/references.bib).
 
 
 The source includes the example models and validation scripts.
+
+
+
