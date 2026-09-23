@@ -1,5 +1,8 @@
 ## Website banner text. The lines above the --- line are the big title; the lines below it are the
 ## paragraph under the title. Each line here is one line on the website. Lines starting with ## are ignored.
+## The description: line is the one-line package description, used for the GitHub "About" box and the
+## website's search-engine description.
+description: Adaptive Hamiltonian Monte Carlo for general Stan models
 NicoStan:
 Adaptive HMC
 for Stan models.
