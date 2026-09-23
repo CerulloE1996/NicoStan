@@ -26,7 +26,7 @@ and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001).
 - **ChEES, ChEES-R and SNAPER-HMC trajectory-length adaptation**,
 based on [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html),
 and [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
-- **Custom AVX2 and AVX-512 maths functions**, supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension, and available to general Stan models; however, note that your `.stan` model file will need to be re-written to source the necessary NicoStan/BayesMVP C++ `.hpp` header files,
+- **Custom AVX2 and AVX-512 maths functions**, supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension, and available to general Stan models; however, note that your `.stan` model file will need to be re-written to declare the custom functions, with the NicoStan/BayesMVP C++ `.hpp` header file supplied when compiling (via `Stan_cpp_user_header`),
 as well as replacing standard Stan math functions (e.g. `Phi()`) with their custom AVX2 or AVX-512 counterparts (e.g. `fast_Phi()`).
 - **Parallel chains, diagonal/dense empirical or numerical-Hessian mass matrices for the main parameters, posterior summaries and MCMC diagnostics**
 (see [Burnin algorithms](#burnin-algorithms)); the main/nuisance metrics can be chosen separately.
