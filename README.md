@@ -1,7 +1,7 @@
 # NicoStan
 
 
-[Installation](#installation) · [Examples](#examples) · [Performance](#performance) · [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) · [Algorithms](#burnin-algorithms) · [References](#references)
+[Installation](#installation) · [Examples](#examples) · [Performance](#performance) · [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) · [Algorithms](#burnin-algorithms) · [How to cite](#how-to-cite-nicostan) · [References](#references)
 
 
 NicoStan is an R package for fitting Bayesian models written in Stan.
@@ -498,6 +498,44 @@ The compiled AVX model reports its lane count (i.e., four for AVX2 and eight for
 Note that you should compile the model on the same machine you will use for sampling, since the available instruction sets depend on the CPU;
 for instance, [Intel's processor guidance](https://www.intel.com/content/www/us/en/support/articles/000090473/processors/intel-core-processors.html)
 describes how to check which extensions your CPU supports.
+
+
+## How to cite NicoStan
+
+
+If you use NicoStan in your work, please cite the package as follows:
+
+Cerullo, E. (2026). NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models. R package version 0.1.9000. https://github.com/CerulloE1996/NicoStan
+
+```bibtex
+@Manual{Cerullo2026NicoStan,
+  title = {NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models},
+  author = {Enzo Cerullo},
+  year = {2026},
+  note = {R package version 0.1.9000},
+  url = {https://github.com/CerulloE1996/NicoStan},
+}
+```
+
+Please also cite the methodological references relevant to the options used in your analysis (see [References](#references)).
+
+
+## How to cite BayesMVP
+
+
+If you use the BayesMVP extension (i.e., the specialised MVP models or the custom AVX2/AVX-512 functions), please also cite:
+
+Cerullo, E. (2026). BayesMVP: Specialised Multivariate Probit Models Using NicoStan. R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
+
+```bibtex
+@Manual{Cerullo2026BayesMVP,
+  title = {BayesMVP: Specialised Multivariate Probit Models Using NicoStan},
+  author = {Enzo Cerullo},
+  year = {2026},
+  note = {R package version 0.1.9000},
+  url = {https://github.com/CerulloE1996/BayesMVP},
+}
+```
 
 
 ## References
