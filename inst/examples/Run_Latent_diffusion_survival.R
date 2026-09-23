@@ -4,7 +4,7 @@
 ## latent hazard path h(u) = hazard_scale * (X(u)^2 + 0.01), with dX_u = -(1.4 sin(X_u) + 1) du + dB_u, X_0 = 2, on [0, 1].
 ## The 0.01 hazard offset and the normal(1.4, 1) / normal(1, 1) drift priors are round-4 changes (2026-09-22, assistant-
 ## introduced, not in Beskos et al.) that remove the divergences; see MODEL_NOTES.md and the .stan header.
-## The data are simulated by fn_simulate_latent_diffusion_survival_data() in paper3_examples.R (fine-grid path, exact
+## The data are simulated by fn_simulate_latent_diffusion_survival_data() in NicoStan_examples.R (fine-grid path, exact
 ## event times given that path, right censoring at t = 1). NicoStan estimates the drift coefficients and the hazard
 ## scale jointly with the 50 standard normal Brownian increments w (the nuisance block, sample_nuisance = TRUE).
 ## Source this file in R or run with Rscript. Edit the settings below for the research run.

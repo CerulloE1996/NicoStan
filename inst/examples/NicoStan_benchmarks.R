@@ -1,5 +1,5 @@
 #### =====================================================================================================================================
-## Paper 3 / NicoStan benchmark orchestration
+## NicoStan benchmark orchestration
 ##
 ## This file is deliberately separate from the sampler implementation.  It runs
 ## the same simulated example, seed, initial values, and main-parameter ESS
@@ -135,7 +135,7 @@ NicoStan_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, ch
         harness_hash <- digest::digest(file = harness_path, algo = "sha256")
         orchestration_path <- file.path(dirname(harness_path), "NicoStan_benchmarks.R")
         orchestration_hash <- if (file.exists(orchestration_path)) digest::digest(file = orchestration_path, algo = "sha256") else NA_character_
-        substr(digest::digest(list(version = "paper3_benchmark_v1", model = model, N = N,
+        substr(digest::digest(list(version = "NicoStan_benchmark_v1", model = model, N = N,
                                    arm = arm, seed = seed, profile = profile, chains = chains,
                                    warmup = warmup, iterations = iterations, adapt_delta = adapt_delta,
                                    burnin_algorithm = burnin_algorithm, include_avx2 = include_avx2,

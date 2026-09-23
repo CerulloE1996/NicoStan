@@ -1,6 +1,6 @@
 ##
 ## =====================================================================================================================================
-## Alg. paper 3 / NicoStan examples
+## NicoStan examples
 ##
 ## Source this file to define the functions; no fits run on sourcing.
 ## The smoke profile checks execution. The analysis profile is a starting configuration, not a convergence guarantee.
@@ -465,7 +465,7 @@ run_NicoStan_example <-  function( model,
                 ## 2026-09-22: ISA flags APPENDED via CXXFLAGS_OPTIM (a command-line CXXFLAGS replaced BridgeStan's make/local
                 ## CXXFLAGS, dropping -DNDEBUG and -fno-math-errno etc. from the AVX arms only), and "AVX2" = the same build as
                 ## "AVX512" plus -DBAYESMVP_FORCE_AVX2 (4-lane BayesMVP kernels; simd_lanes is checked below). Same rule as
-                ## paper3_benchmark_compile_arguments() in paper3_benchmarks.R.
+                ## NicoStan_benchmark_compile_arguments() in NicoStan_benchmarks.R.
                 isa_flags <-  if (math_backend == "AVX512") "-march=native -mtune=native -mfma -mavx2 -mavx512f -mavx512vl -mavx512dq" else
                               "-march=native -mtune=native -mfma -mavx2"
                 compile_arguments <-  c(compile_arguments, paste0("CXXFLAGS_OPTIM=", shQuote(isa_flags)))
