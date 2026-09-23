@@ -15,12 +15,13 @@ between-chain
 adaptation and
 diffusion-pathspace HMC
 ---
+## --------------------------------------------------------------------------------
 NicoStan uses standard HMC for the main model parameters,
 and diffusion-pathspace HMC for the high-dimensional Gaussian latent variables
 (or "nuisance" parameters), which many models require, such as:
 binary/ordinal multivariate probit models
-(used in e.g., econometrics and diagnostic/screening test accuracy without a gold standard),
-and stochastic volatility models (used in e.g., quantitative finance, econometrics, medicine).
+(used in e.g., econometrics and diagnostic test accuracy with imperfect gold standards),
+and stochastic volatility models (e.g., for quantitative finance, econometrics, medicine).
 ## ----
 It also uses between-chain adaptation to achieve more efficient burnin/warmup,
 and state-of-the-art burnin algorithms (such as ChEES-R-HMC and SNAPER-HMC).
