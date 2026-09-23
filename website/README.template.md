@@ -18,10 +18,11 @@
 
 
 NicoStan is an R package for fitting Bayesian models written in the probabilistic programming language [Stan](https://mc-stan.org/).
-NicoStan accesses Stan's log posterior and gradients through our integration of [BridgeStan](https://joss.theoj.org/papers/10.21105/joss.05236)
+NicoStan accesses Stan's log posterior and gradients through our integration of
+[BridgeStan](https://roualdes.us/bridgestan/latest/) ([Roualdes et al., 2023](https://joss.theoj.org/papers/10.21105/joss.05236))
 into NicoStan's R/C++ code;
 more specifically, NicoStan's C++ sampler calls the compiled Stan model directly through BridgeStan's C/C++ interface.
-NicoStan handles the burnin (i.e., warm-up), sampling and posterior summaries.
+NicoStan handles the burnin/warmup, sampling and posterior summaries.
 
 
 For the burnin (or "warmup") phase, Stan uses a well-established, state-of-the-art No-U-Turn HMC
@@ -29,8 +30,8 @@ For the burnin (or "warmup") phase, Stan uses a well-established, state-of-the-a
 that is, for automatically (or adaptively) tuning the HMC path length ($\tau$).
 On the other hand, NicoStan provides state-of-the-art, between-chain adaptation algorithms,
 such as SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)),
-CHESS-HMC ([Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html)),
-and CHESSR-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)) -
+ChEES-HMC ([Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html)),
+and ChEES-R-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)) -
 see [this section below](#efficient-burnin-algorithms) for more details on NicoStan's burnin algorithms.
 
 
@@ -168,12 +169,12 @@ The logistic random-intercept example gives a short introduction to the API:
 
 ```r
 source(system.file("examples", "random_intercepts.R", package = "NicoStan"))
-fit <-  run_random_intercepts(burnin_algorithm = "CHESSR")
+fit <-  run_random_intercepts(burnin_algorithm = "CHEESR")
 diagnostics <-  fit$summary(save_log_lik_trace = FALSE)
 fit$model_fit_object$summaries$summary_tibbles$summary_tibble_main_params
 
 ## Other trajectory-length adaptation options:
-## "CHESSR_log", "SNAPER", "ChEES"
+## "CHEESR_log", "SNAPER", "ChEES"
 ```
 
 
@@ -431,7 +432,7 @@ The complete trajectory also contains numerical steps for the remaining terms; t
 Models without a nuisance block (e.g., standard univariate logistic regression) use standard HMC throughout.
 In our initial tests, we have also found NicoStan to be more efficient than Stan (via cmdstanr) for some of these models;
 we expect the different burnin/adaptation schemes to contribute to this, although the detailed comparisons are still in progress
-(see [Performance](#benchmarks) and [Efficient burnin algorithms](#efficient-burnin-algorithms)).
+(see [Benchmarks](#benchmarks) and [Efficient burnin algorithms](#efficient-burnin-algorithms)).
 
 
 The hybrid/joint sampling scheme uses a "kick-flow-kick" splitting.
@@ -501,9 +502,9 @@ This distinction allows NicoStan to use a dense main-parameter metric without co
 Use `burnin_algorithm` to choose the trajectory-length adaptation rule:
 
 
-- `CHESSR` (**ChEES-R**): The original ChEES-rate criterion,
+- `CHEESR` (**ChEES-R**): The original ChEES-rate criterion,
 using the squared change in the main block's centred squared radius per realised trajectory length.
-- `CHESSR_log` (**Log-ChEES-R**): NicoStan's log-ratio formulation of the ChEES-rate criterion,
+- `CHEESR_log` (**Log-ChEES-R**): NicoStan's log-ratio formulation of the ChEES-rate criterion,
 which normalises the numerator gradient by a running average of the ChEES numerator.
 - `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction with a metric-aware Oja update,
 and adapts the trajectory length using squared changes along that direction per unit length.
@@ -528,9 +529,9 @@ The position-based criteria use the main parameters in coordinates defined by th
 <!-- and SNAPER-HMC learns its direction in the same coordinates. -->
 
 
-<!-- `CHESSR_log` is our log-ratio formulation of the ChEES rate, -->
+<!-- `CHEESR_log` is our log-ratio formulation of the ChEES rate, -->
 <!-- using a running average of the numerator to normalise its gradient. -->
-Note that both `CHESSR` and `CHESSR_log` adapt a positive trajectory length on the log scale.
+Note that both `CHEESR` and `CHEESR_log` adapt a positive trajectory length on the log scale.
 Their update rules differ; hence, both are available in NicoStan
 (see the [adaptation notes](docs/adaptation-notes.md) for the derivation).
 
