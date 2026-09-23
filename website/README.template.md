@@ -555,5 +555,3 @@ and the references above are available as a [BibTeX file](docs/references.bib).
 
 
 The source includes the example models and validation scripts.
-The README and website share the same editorial source;
-run `python3 tools/build_site.py` after editing the files in `website/`.
