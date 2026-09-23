@@ -25,7 +25,7 @@ fit$model_fit_object$summaries$summary_tibbles$summary_tibble_main_params
 ## Other trajectory-length adaptation options:
 ## "CHESSR_log", "SNAPER", "ChEES"
 ```'''
-algorithm_table = "\n".join(f"- `{a['id']}` ({a['name']}): {a['summary']}" for a in algorithms)
+algorithm_table = "\n".join(f"- `{a['id']}` (**{a['name']}**): {a['summary']}" for a in algorithms)
 reference_list = "\n\n".join(f"{i}. {r['authors']} ({r['year']}). [{r['title']}]({r['url']}). {r['venue']}." for i, r in enumerate(references, 1))
 template = (SOURCE / "README.template.md").read_text()
 markdown = template.replace("{{QUICKSTART}}", quickstart).replace("{{ALGORITHMS}}", algorithm_table).replace("{{REFERENCES}}", reference_list)
