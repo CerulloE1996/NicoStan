@@ -180,11 +180,13 @@ navigation = "".join(
 )
 ## Banner title and paragraph come from website/website_banner.md (one website line per file line) (2026-09-23).
 banner_lines = [line.rstrip("\n") for line in (SOURCE / "website_banner.md").read_text().split("\n") if not line.startswith("##")]
+banner_description = next(line.split(":", 1)[1].strip() for line in banner_lines if line.startswith("description:"))
+banner_lines = [line for line in banner_lines if not line.startswith("description:")]
 banner_split = banner_lines.index("---")
 banner_title_html = "<br>".join(escape(line) for line in banner_lines[:banner_split] if line.strip())
 banner_intro_html = "<br>".join(escape(line) for line in banner_lines[banner_split + 1:] if line.strip())
 page = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="Adaptive Hamiltonian Monte Carlo for general Stan models, with optional diffusion-pathspace HMC for Gaussian latent blocks. Methods, examples and installation.">
+<title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="''' + escape(banner_description, quote=True) + '''">
 <meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['script','noscript','style','textarea','pre','code'],throwOnError:false})"></script><script src="assets/site.js" defer></script></head><body>
 <a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top"><img class="brand-logo" src="assets/NicoStan_logo_128.png" alt="" width="34" height="34">NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
 <div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>''' + banner_title_html + '''</h1><p class="hero-intro">''' + banner_intro_html + '''</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram"><img class="hero-logo" src="assets/NicoStan_logo_720.png" alt="NicoStan logo"></div></div>
