@@ -7,6 +7,8 @@
 NicoStan is an R package for fitting Bayesian models written in Stan.
 It combines adaptive Hamiltonian Monte Carlo (HMC) with a hybrid diffusion-pathspace algorithm for models containing large blocks of
 latent variables or "nuisance" parameters.
+NicoStan is more efficient than Stan for most models (benchmark results coming soon),
+especially for models with high-dimensional nuisance parameters/Gaussian latent variables.
 NicoStan accesses Stan's log posterior and gradients through our integration of [BridgeStan](https://joss.theoj.org/papers/10.21105/joss.05236) into NicoStan's R/C++ code;
 more specifically, the C++ sampler calls the compiled Stan model directly through BridgeStan's C interface.
 NicoStan handles the burnin (i.e., warm-up), sampling and posterior summaries.
