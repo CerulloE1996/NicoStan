@@ -148,8 +148,8 @@ The wider comparison examples are available through:
 
 ```r
 source(system.file("examples", "paper3_examples.R", package = "NicoStan"))
-result <-  run_paper3_example(model = "hierarchical_logistic",
-                              engine = "NicoStan", math_backend = "Stan")
+result <-  run_NicoStan_example(model = "hierarchical_logistic",
+                                engine = "NicoStan", math_backend = "Stan")
 ```
 
 

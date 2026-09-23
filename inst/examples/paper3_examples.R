@@ -395,21 +395,21 @@ paper3_compare_avx <-  function(avx_model, example, plain_file) {
         errors
 }
 ##
-run_paper3_example <-  function( model,
-                                 engine = c("NicoStan", "cmdstanr"),
-                                 math_backend = c("Stan", "AVX512", "AVX2"),
-                                 profile = c("smoke", "analysis"),
-                                 burnin_algorithm = "CHESSR",
-                                 diffusion = NULL,
-                                 seed = 2026L,
-                                 chains = 4L,
-                                 warmup = NULL,
-                                 iterations = NULL,
-                                 adapt_delta = NULL,
-                                 N = NULL,
-                                 validate = NULL,
-                                 output_dir = file.path(getwd(), "paper3_example_results"),
-                                 model_dir = file.path(.paper3_source_directory, "models")) {
+run_NicoStan_example <-  function( model,
+                                   engine = c("NicoStan", "cmdstanr"),
+                                   math_backend = c("Stan", "AVX512", "AVX2"),
+                                   profile = c("smoke", "analysis"),
+                                   burnin_algorithm = "CHESSR",
+                                   diffusion = NULL,
+                                   seed = 2026L,
+                                   chains = 4L,
+                                   warmup = NULL,
+                                   iterations = NULL,
+                                   adapt_delta = NULL,
+                                   N = NULL,
+                                   validate = NULL,
+                                   output_dir = file.path(getwd(), "paper3_example_results"),
+                                   model_dir = file.path(.paper3_source_directory, "models")) {
         engine <-  match.arg(engine)
         math_backend <-  match.arg(math_backend)
         if (engine == "cmdstanr" && math_backend != "Stan") stop("The CmdStanR comparison arm uses the plain Stan model.")

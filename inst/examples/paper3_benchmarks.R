@@ -262,9 +262,9 @@ paper3_benchmark_run <- function(models = NULL, N_grid = NULL,
                         started <- Sys.time()
                         message(paste0("[", counter, "/", total, "] ", model, " N=", N, " / ", arm$arm))
                         result <- tryCatch({
-                                run_paper3_example(model = model, engine = arm$engine, math_backend = arm$math_backend,
+                                run_NicoStan_example(model = model, engine = arm$engine, math_backend = arm$math_backend,
                                     profile = profile, burnin_algorithm = burnin_algorithm, seed = item_seed,
-                                    chains = chains, warmup = warmup, iterations = iterations, adapt_delta = adapt_delta,
+                                      chains = chains, warmup = warmup, iterations = iterations, adapt_delta = adapt_delta,
                                     N = N, validate = validate, output_dir = item_output, model_dir = model_dir)
                         }, error = function(error) {
                                 error_message <<- conditionMessage(error)
