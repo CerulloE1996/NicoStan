@@ -525,11 +525,11 @@ Please also cite the methodological references relevant to the options used in y
 
 If you use the BayesMVP extension (i.e., the specialised MVP models or the custom AVX2/AVX-512 functions), please also cite:
 
-Cerullo, E. (2026). BayesMVP: Specialised Multivariate Probit Models Using NicoStan. R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
+Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoStan. R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
 
 ```bibtex
 @Manual{Cerullo2026BayesMVP,
-  title = {BayesMVP: Specialised Multivariate Probit Models Using NicoStan},
+  title = {BayesMVP: Accelerated multivariate probit models using NicoStan},
   author = {Enzo Cerullo},
   year = {2026},
   note = {R package version 0.1.9000},

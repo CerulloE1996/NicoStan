@@ -71,13 +71,13 @@ def inline(text):
 
 svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" role="img" aria-labelledby="flow-title flow-desc">
 <title id="flow-title">Unit Gaussian reference flow</title><desc id="flow-desc">Position u and velocity v rotate on a circle, preserving the reference energy. This shows the Gaussian substep only.</desc>
-<rect width="480" height="320" rx="16" fill="#eef2e9"/>
-<g fill="none" stroke="#c5cfbf"><path d="M64 160H416M240 24V294"/><circle cx="240" cy="160" r="112" stroke-dasharray="3 5"/><circle cx="240" cy="160" r="72" opacity=".45"/></g>
-<circle cx="240" cy="160" r="112" fill="none" stroke="#255b43" stroke-width="2"/>
+<rect width="480" height="320" rx="16" fill="#EEF0F5"/>
+<g fill="none" stroke="#C9CDDB"><path d="M64 160H416M240 24V294"/><circle cx="240" cy="160" r="112" stroke-dasharray="3 5"/><circle cx="240" cy="160" r="72" opacity=".45"/></g>
+<circle cx="240" cy="160" r="112" fill="none" stroke="#6272A4" stroke-width="2"/>
 <path id="flow-radius" d="M240 160L322 236" stroke="#c16f45" stroke-width="2"/>
 <circle id="flow-point" cx="322" cy="236" r="7" fill="#b25b35" stroke="#fff" stroke-width="3"/>
-<g font-family="Georgia,serif" font-size="17" fill="#274536"><text x="426" y="165">u</text><text x="234" y="19">v</text></g>
-<g font-family="system-ui,sans-serif" font-size="12" fill="#526153"><text x="232" y="179">0</text><text x="349" y="178">1</text><text x="249" y="52">1</text><text x="22" y="301">GAUSSIAN REFERENCE SUBSTEP</text></g></svg>'''
+<g font-family="Georgia,serif" font-size="17" fill="#44475A"><text x="426" y="165">u</text><text x="234" y="19">v</text></g>
+<g font-family="system-ui,sans-serif" font-size="12" fill="#6272A4"><text x="232" y="179">0</text><text x="349" y="178">1</text><text x="249" y="52">1</text><text x="22" y="301">GAUSSIAN REFERENCE SUBSTEP</text></g></svg>'''
 (DOCS / "assets" / "reference-flow.svg").write_text(svg)
 flow = '<figure id="reference-flow" class="flow"><div class="flow-plot">' + svg + '''</div><figcaption>
 <span class="eyebrow">Explore the reference flow</span><h3>A Gaussian coordinate follows a rotation.</h3>
@@ -177,8 +177,8 @@ navigation = "".join(
 )
 page = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="Adaptive Hamiltonian Monte Carlo for general Stan models, with optional diffusion-pathspace HMC for Gaussian latent blocks. Methods, examples and installation.">
-<meta name="theme-color" content="#163e2e"><link rel="icon" href="assets/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css"><script src="assets/site.js" defer></script></head><body>
-<a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top"><span class="brand-mark">N</span>NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
+<meta name="theme-color" content="#282A36"><link rel="stylesheet" href="assets/site.css"><script src="assets/site.js" defer></script></head><body>
+<a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top">NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
 <div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>Adaptive HMC<br>for Stan models.</h1><p class="hero-intro">NicoStan uses standard HMC for the main model parameters,<br>and diffusion-pathspace HMC for high-dimensional nuisance parameters/Gaussian latent variables.<br>NicoStan also uses adaptive between-chain adaptation to achieve rapid burnin/warmup, <br>and state-of-the-art burnin algorithms with a variety of options, such as ChESSR-HMC and SNAPER-HMC.<br>NicoStan also offers rapid parallel estimation of posterior summaries, and only monitors and stores the trace for the main model parameters (by default).<br>NicoStan also works for general Stan models without nuisance parameters.</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram" aria-hidden="true"><svg viewBox="0 0 420 340"><g fill="none" stroke="currentColor"><ellipse cx="210" cy="170" rx="171" ry="116" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="136" ry="87" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="98" ry="59" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="59" ry="30" transform="rotate(-28 210 170)"/><path class="hero-path" d="M79 242C64 178 127 70 256 80S370 177 286 237S159 259 143 196S216 119 262 151"/></g><circle cx="262" cy="151" r="7" fill="#eab38f"/></svg></div></div>
 <div class="layout"><aside><details open><summary>On this page</summary><nav aria-label="On this page">''' + navigation + '''</nav></details></aside><main id="content">''' + body + '''</main></div>
 <footer><a class="brand" href="#top">NicoStan</a><p>Enzo Cerullo · GPL-3 · Development documentation</p><a href="references.bib">Download references (.bib)</a></footer></body></html>'''
@@ -186,7 +186,6 @@ if "\u2014" in page or "\u2014" in markdown:
     raise ValueError("An em dash was introduced into the generated prose")
 (DOCS / "index.html").write_text(page)
 (DOCS / ".nojekyll").write_text("")
-(DOCS / "assets" / "icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#163e2e"/><path d="M19 46V18L45 46V18" stroke="#f5f4e9" stroke-width="5" fill="none"/></svg>')
 for name in ["site.css", "site.js"]:
     shutil.copy2(SOURCE / name, DOCS / "assets" / name)
 bibliography_source = SOURCE / "references.bib"
