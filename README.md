@@ -159,7 +159,8 @@ The general examples are grouped by their parameterisation:
 
 
 - **Hybrid/joint HMC with nuisance diffusion:** Cox shared frailty, hierarchical logistic regression,
-joint longitudinal-survival modelling and stochastic volatility.
+joint longitudinal-survival modelling, and an easy discrete-time stochastic volatility model (`EASY_Stochastic_volatility.stan`),
+which Stan's NUTS also samples well once non-centred; it is included as a simple introductory example only.
 - **Standard HMC:** Weibull survival regression, robust Student-t regression and marginal Gaussian process (GP) regression.
 Note that the GP example analytically integrates out the latent function, and the Student-t example evaluates its likelihood directly.
 
@@ -315,7 +316,9 @@ with non-Gaussian observations retaining a nonconjugate posterior over those coe
 - **Spatial and spatiotemporal models:** Gaussian spatial fields, temporal effects and their interactions,
 for instance in binomial/Poisson disease-mapping models.
 - **Log-Gaussian Cox processes:** a Gaussian latent log-intensity field, often represented on a large spatial mesh/grid.
-- **Stochastic volatility:** innovations driving the latent log-volatility process.
+- **Continuous-time stochastic volatility:** a latent volatility diffusion observed only through discretely sampled prices,
+so the volatility path between observations is imputed on a fine time grid (e.g., as in [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)).
+Note that the simpler discrete-time AR(1) stochastic volatility model is usually sampled well by Stan's NUTS once non-centred.
 - **Nonlinear/non-Gaussian state-space models and partially observed diffusions:** latent states,
 state innovations or a non-centred driving path.
 - **Survival analysis with lognormal frailty:** Gaussian log-frailties at the individual/cluster level,

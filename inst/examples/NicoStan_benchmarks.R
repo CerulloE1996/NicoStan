@@ -11,7 +11,7 @@
 NicoStan_benchmark_registry <- function() {
         data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic",
-                      "joint_longitudinal_survival", "gaussian_process", "stochastic_volatility",
+                      "joint_longitudinal_survival", "gaussian_process", "EASY_stochastic_volatility",
                       "latent_diffusion_survival"),
             N_1 = c(100L, 100L, 250L, 300L, 25L, 40L, 250L, 100L),
             N_2 = c(250L, 250L, 1000L, 1200L, 75L, 80L, 1000L, 200L),

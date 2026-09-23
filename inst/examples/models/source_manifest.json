@@ -64,11 +64,11 @@
     "sha256": "13e26f632c638146393c9245c6f566faf18e57b233b148939ef6d5e049f27808"
   },
   {
-    "file": "Stochastic_volatility.stan",
+    "file": "EASY_Stochastic_volatility.stan",
     "sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f"
   },
   {
-    "file": "Stochastic_volatility_avx.stan",
+    "file": "EASY_Stochastic_volatility_avx.stan",
     "sha256": "187661faf2240846e822530c8cc862bf8d1bdb5acb84933469169591361bdfd9"
   },
   {

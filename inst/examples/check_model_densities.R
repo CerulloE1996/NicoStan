@@ -33,7 +33,7 @@ NicoStan_reference_log_density <-  function(example, p) {
                 return(sum(dbinom(d$y, 1L, plogis(eta), log = TRUE)) + centred_prior + log_jacobian +
                        normal(p$mu, sd = 2) + normal(p$sigma, sd = 2))
         }
-        if (example$model == "stochastic_volatility") {
+        if (example$model == "EASY_stochastic_volatility") {
                 h <-  numeric(d$T)
                 h[1L] <-  p$mu + p$sigma * p$h_std[1L] / sqrt(1 - p$phi^2)
                 if (d$T > 1L) for (i in 2:d$T) h[i] <-  p$mu + p$phi * (h[i - 1L] - p$mu) + p$sigma * p$h_std[i]

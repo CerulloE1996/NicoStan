@@ -44,7 +44,7 @@ The drivers use the analysis profile by default. Set `NICOSTAN_EXAMPLE_PROFILE=s
 | Hierarchical logistic regression | 300, 1200, 4000 observations |
 | Joint longitudinal-survival | 25, 75, 200 subjects |
 | Marginal Gaussian process | 40, 80, 160 observations |
-| Stochastic volatility | 250, 1000, 4000 time points |
+| EASY stochastic volatility (discrete-time AR(1)) | 250, 1000, 4000 time points |
 | Latent diffusion survival | 100, 200, 800 subjects (50 path increments for every size) |
 
 ### Latent diffusion survival validation (round 4, 2026-09-22)

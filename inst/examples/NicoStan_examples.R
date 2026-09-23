@@ -12,10 +12,10 @@
 ##
 NicoStan_example_registry <-  function() {
         data.frame(
-            model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic", "joint_longitudinal_survival", "gaussian_process", "stochastic_volatility",
+            model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic", "joint_longitudinal_survival", "gaussian_process", "EASY_stochastic_volatility",
                       "latent_diffusion_survival"),
             file = c("Frailty_surv_shared_frailty_Cox.stan", "standard_surv_Weibull.stan", "robust_regression_t4.stan",
-                     "hierarchical_logistic_regression.stan", "Joint_longitudinal_surv.stan", "Gaussian_process.stan", "Stochastic_volatility.stan",
+                     "hierarchical_logistic_regression.stan", "Joint_longitudinal_surv.stan", "Gaussian_process.stan", "EASY_Stochastic_volatility.stan",
                      "Latent_diffusion_survival.stan"),
             diffusion_eligible = c(TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, TRUE),
             nuisance = c("log_frailty_raw[J]", "none", "none", "beta_raw[K,2]", "b_raw[2,N_subj]", "none: latent GP integrated out", "h_std[T]",
@@ -208,7 +208,7 @@ make_NicoStan_example <-  function( model,
                 main <-  c("mu", "sigma")
                 latent_name <-  "beta_raw"
                 n_nuisance <-  2L * n_groups
-        } else if (model == "stochastic_volatility") {
+        } else if (model == "EASY_stochastic_volatility") {
                 n <-  size(if (small) 60L else 500L)
                 innovations <-  rnorm(n)
                 h <-  numeric(n)
@@ -295,7 +295,7 @@ make_NicoStan_example <-  function( model,
         list(model = model, data = data, initial_values = initial_values, main_parameters = main,
              n_nuisance = n_nuisance, diffusion_eligible = n_nuisance > 0L,
              N = if (model == "joint_longitudinal_survival") n_subjects else n,
-             N_unit = if (model %in% c("joint_longitudinal_survival", "latent_diffusion_survival")) "subjects" else if (model == "stochastic_volatility") "time points" else "observations",
+             N_unit = if (model %in% c("joint_longitudinal_survival", "latent_diffusion_survival")) "subjects" else if (model == "EASY_stochastic_volatility") "time points" else "observations",
              source_file = registry$file[match(model, registry$model)], seed = seed, profile = profile)
 }
 ##
@@ -315,7 +315,7 @@ NicoStan_check_gradient <-  function(model, example, expected_simd_lanes = NULL)
         }
         ## The first declared parameter must be the complete standard normal nuisance block.
         expected_latent_name <-  switch(example$model, cox_frailty = "log_frailty_raw", hierarchical_logistic = "beta_raw",
-                                       joint_longitudinal_survival = "b_raw", stochastic_volatility = "h_std",
+                                       joint_longitudinal_survival = "b_raw", EASY_stochastic_volatility = "h_std",
                                        latent_diffusion_survival = "w", NULL)
         if (example$n_nuisance > 0L) {
                 names <-  unlist(bs$param_names(include_tp = FALSE, include_gq = FALSE))
@@ -357,7 +357,7 @@ NicoStan_check_model_structure <- function(model, example, expected_simd_lanes =
         unconstrained_names <- as.character(bs$param_unc_names())
         stopifnot(length(unconstrained_names) == as.integer(init$n_nuisance + init$n_params_main))
         expected_latent_name <- switch(example$model, cox_frailty = "log_frailty_raw", hierarchical_logistic = "beta_raw",
-                                       joint_longitudinal_survival = "b_raw", stochastic_volatility = "h_std",
+                                       joint_longitudinal_survival = "b_raw", EASY_stochastic_volatility = "h_std",
                                        latent_diffusion_survival = "w", NULL)
         if (example$n_nuisance > 0L) {
                 unconstrained_bases <- sub("\\..*$", "", unconstrained_names[seq_len(example$n_nuisance)])
@@ -414,9 +414,9 @@ run_NicoStan_example <-  function( model,
         math_backend <-  match.arg(math_backend)
         if (engine == "cmdstanr" && math_backend != "Stan") stop("The CmdStanR comparison arm uses the plain Stan model.")
         profile <-  match.arg(profile)
-        if (is.null(warmup)) warmup <-  if (profile == "smoke") if (model == "stochastic_volatility") 500L else 200L else 1000L
-        if (is.null(iterations)) iterations <-  if (profile == "smoke") if (model == "stochastic_volatility") 500L else 250L else 1000L
-        if (is.null(adapt_delta)) adapt_delta <-  if (model == "stochastic_volatility") 0.999 else 0.9
+        if (is.null(warmup)) warmup <-  if (profile == "smoke") if (model == "EASY_stochastic_volatility") 500L else 200L else 1000L
+        if (is.null(iterations)) iterations <-  if (profile == "smoke") if (model == "EASY_stochastic_volatility") 500L else 250L else 1000L
+        if (is.null(adapt_delta)) adapt_delta <-  if (model == "EASY_stochastic_volatility") 0.999 else 0.9
         if (is.null(validate)) validate <-  profile == "smoke"
         stopifnot(is.numeric(adapt_delta), length(adapt_delta) == 1L, adapt_delta > 0, adapt_delta < 1)
         example <-  make_NicoStan_example(model = model, profile = profile, seed = seed, chains = chains, N = N)

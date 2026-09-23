@@ -2,7 +2,7 @@
 ## stochastic_volatility: three sample sizes, common data/initial values, and main-parameter efficiency benchmarks.
 ## Source this file in R or run with Rscript. Edit the settings below for the research run.
 ##
-model <-  "stochastic_volatility"
+model <-  "EASY_stochastic_volatility"
 N_values <-  c(250L, 1000L, 4000L)
 profile <-  Sys.getenv("NICOSTAN_EXAMPLE_PROFILE", unset = "analysis")
 burnin_algorithm <-  "CHESSR"
