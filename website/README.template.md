@@ -489,7 +489,10 @@ standard Stan function calls are not automatically rewritten to use them.
 - **Specialised [BayesMVP](https://github.com/CerulloE1996/BayesMVP) models:** the same kernels are used within the native implementations.
 
 
-The comparison examples support separate `math_backend = "Stan"`, `"AVX2"` and `"AVX512"` options.
+Note that the AVX options are not a drop-in switch for an existing Stan model;
+more specifically, the user has to re-write their Stan model (i.e., the `.stan` file) so that it calls the custom AVX2/AVX-512 functions from BayesMVP,
+which is not straightforward for most models.
+The comparison examples (whose Stan models have already been re-written in this way) support separate `math_backend = "Stan"`, `"AVX2"` and `"AVX512"` options.
 The compiled AVX model reports its lane count (i.e., four for AVX2 and eight for AVX-512), so you can check which implementation is being used.
 Note that you should compile the model on the same machine you will use for sampling, since the available instruction sets depend on the CPU;
 for instance, [Intel's processor guidance](https://www.intel.com/content/www/us/en/support/articles/000090473/processors/intel-core-processors.html)
