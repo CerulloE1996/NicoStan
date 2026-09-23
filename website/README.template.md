@@ -1,7 +1,7 @@
 # NicoStan
 
 
-[Installation](#installation) · [Examples](#examples) · [Performance](#performance) · [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) · [Algorithms](#burnin-algorithms) · [How to cite](#how-to-cite-nicostan) · [References](#references)
+[Installation](#installation) · [Examples](#examples) · [Performance](#performance) · [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) · [Algorithms](#efficient-burnin-algorithms) · [How to cite](#how-to-cite-nicostan) · [References](#references)
 
 
 NicoStan is an R package for fitting Bayesian models written in Stan.
@@ -31,7 +31,7 @@ and [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
 - **Custom AVX2 and AVX-512 maths functions**, supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension, and available to general Stan models; however, note that your `.stan` model file will need to be re-written to declare the custom functions, with the NicoStan/BayesMVP C++ `.hpp` header file supplied when compiling (via `Stan_cpp_user_header`),
 as well as replacing standard Stan math functions (e.g. `Phi()`) with their custom AVX2 or AVX-512 counterparts (e.g. `fast_Phi()`).
 - **Parallel chains, diagonal/dense empirical or numerical-Hessian mass matrices for the main parameters, posterior summaries and MCMC diagnostics**
-(see [Burnin algorithms](#burnin-algorithms)); the main/nuisance metrics can be chosen separately.
+(see [Efficient burnin algorithms](#efficient-burnin-algorithms)); the main/nuisance metrics can be chosen separately.
 
 
 NicoStan grew out of our work on efficient sampling for multivariate probit (MVP) models,
@@ -363,7 +363,7 @@ The complete trajectory also contains numerical steps for the remaining terms; t
 Models without a nuisance block (e.g., standard univariate logistic regression) use standard HMC throughout.
 In our initial tests, we have also found NicoStan to be more efficient than Stan (via cmdstanr) for some of these models;
 we expect the different burnin/adaptation schemes to contribute to this, although the detailed comparisons are still in progress
-(see [Performance](#performance) and [Burnin algorithms](#burnin-algorithms)).
+(see [Performance](#performance) and [Efficient burnin algorithms](#efficient-burnin-algorithms)).
 
 
 The hybrid/joint sampling scheme uses a "kick-flow-kick" splitting.
@@ -390,11 +390,11 @@ they change the reference dynamics used in the splitting.
 
 
 <!-- Furthermore, the trajectory-length adaptation used during burnin 
-(e.g., ChEES-R or SNAPER; see the [Burnin algorithms](#burnin-algorithms) section below) 
+(e.g., ChEES-R or SNAPER; see the [Efficient burnin algorithms](#efficient-burnin-algorithms) section below) 
 is based on the main parameters only; hence, a large nuisance block does not dominate the adaptation.  -->
 
 
-## Burnin algorithms
+## Efficient burnin algorithms
 
 
 NicoStan's burnin (i.e., warm-up) runs several chains in parallel,
