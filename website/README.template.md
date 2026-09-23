@@ -426,13 +426,13 @@ This distinction allows NicoStan to use a dense main-parameter metric without co
 Use `burnin_algorithm` to choose the trajectory-length adaptation rule:
 
 
-- `CHESSR` (ChEES-R): The original ChEES-rate criterion,
+- `CHESSR` (**ChEES-R**): The original ChEES-rate criterion,
 using the squared change in the main block's centred squared radius per realised trajectory length.
-- `CHESSR_log` (Log-ChEES-R): NicoStan's log-ratio formulation of the ChEES-rate criterion,
+- `CHESSR_log` (**Log-ChEES-R**): NicoStan's log-ratio formulation of the ChEES-rate criterion,
 which normalises the numerator gradient by a running average of the ChEES numerator.
-- `SNAPER` (SNAPER): Learns a difficult main-parameter direction with a metric-aware Oja update,
+- `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction with a metric-aware Oja update,
 and adapts the trajectory length using squared changes along that direction per unit length.
-- `ChEES` (ChEES): Uses the squared change in the main block's centred squared radius,
+- `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
 without dividing by trajectory length.
 
 
@@ -465,7 +465,6 @@ The default trajectory-length settings differ between burnin and sampling:
 
 - **Burn-in:** fixed trajectory length (`randomize_tau_burnin = FALSE`)
 for each burnin iteration at the current tuning setting.
-Adaptation can change that setting between iterations.
 - **Post-burn-in sampling:** randomised trajectory length (`randomize_tau_sampling = TRUE`) -
 drawn uniformly between zero and twice the adapted scale -
 with at least one integration step.
