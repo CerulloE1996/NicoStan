@@ -1,0 +1,118 @@
+{
+  "description": "Previously saved discrete-time AR(1) stochastic-volatility validation checks; no new fits.",
+  "model_source_sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+  "comparisons": "The two seed groups differ in data, warmup and sampling lengths; this is not a controlled adapt_delta sweep.",
+  "records": [
+    {
+      "saved_check": "sv_tuned/stochastic_volatility_cmdstanr_NUTS_smoke_seed_2026/result.rds",
+      "model": "stochastic_volatility_discrete_time",
+      "N_time_points": 60,
+      "engine": "cmdstanr",
+      "math_backend": "Stan",
+      "chains": 4,
+      "warmup_per_chain": 500,
+      "sampling_per_chain": 500,
+      "seed": 2026,
+      "adapt_delta": 0.98999999999999999,
+      "divergences": 9,
+      "max_main_rhat": 1.0128220763264393,
+      "plain_source_sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+      "data_sha256": "8d44b670a68b4d8ab47c848c585a1c59799e6bb2f76aaf3faa986340bc3bffd3",
+      "initial_values_sha256": "21be8a212ce31ae44b542fe432d565a976c93303dad56f9513c6a2d5d437602e",
+      "build": {
+        "cmdstanr_version": "0.8.0",
+        "cmdstan_version": "2.37.0"
+      }
+    },
+    {
+      "saved_check": "sv_tuned/stochastic_volatility_NicoStan_CHESSR_Stan_diffusion_TRUE_smoke_seed_2026/result.rds",
+      "model": "stochastic_volatility_discrete_time",
+      "N_time_points": 60,
+      "engine": "NicoStan",
+      "math_backend": "Stan",
+      "chains": 4,
+      "warmup_per_chain": 500,
+      "sampling_per_chain": 500,
+      "seed": 2026,
+      "adapt_delta": 0.98999999999999999,
+      "divergences": 0,
+      "max_main_rhat": 1.0061976605078697,
+      "plain_source_sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+      "data_sha256": "8d44b670a68b4d8ab47c848c585a1c59799e6bb2f76aaf3faa986340bc3bffd3",
+      "initial_values_sha256": "21be8a212ce31ae44b542fe432d565a976c93303dad56f9513c6a2d5d437602e",
+      "build": {
+        "package_version": "0.1.9000",
+        "native_sha256": "51039ba6033536f75102913e4def77c13c99b8973f3c9910d3f24ea07f8e0e2b",
+        "rdb_sha256": "eddcc9ae123ac51e29e01316c24d9a5e0f03259d4b3d4c0e41ff0fdfadb8e91b",
+        "bridgestan_version": "2.6.2"
+      }
+    },
+    {
+      "saved_check": "sv_tuned/stochastic_volatility_NicoStan_CHESSR_AVX512_diffusion_TRUE_smoke_seed_2026/result.rds",
+      "model": "stochastic_volatility_discrete_time",
+      "N_time_points": 60,
+      "engine": "NicoStan",
+      "math_backend": "AVX512",
+      "chains": 4,
+      "warmup_per_chain": 500,
+      "sampling_per_chain": 500,
+      "seed": 2026,
+      "adapt_delta": 0.98999999999999999,
+      "divergences": 8,
+      "max_main_rhat": 1.0041155715482846,
+      "plain_source_sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+      "data_sha256": "8d44b670a68b4d8ab47c848c585a1c59799e6bb2f76aaf3faa986340bc3bffd3",
+      "initial_values_sha256": "21be8a212ce31ae44b542fe432d565a976c93303dad56f9513c6a2d5d437602e",
+      "build": {
+        "package_version": "0.1.9000",
+        "native_sha256": "51039ba6033536f75102913e4def77c13c99b8973f3c9910d3f24ea07f8e0e2b",
+        "rdb_sha256": "eddcc9ae123ac51e29e01316c24d9a5e0f03259d4b3d4c0e41ff0fdfadb8e91b",
+        "bridgestan_version": "2.6.2"
+      }
+    },
+    {
+      "saved_check": "sv_matched_final/CmdStanR/stochastic_volatility_N60_cmdstanr_NUTS_smoke_seed_9201_d33ada4ea2/result.rds",
+      "model": "stochastic_volatility_discrete_time",
+      "N_time_points": 60,
+      "engine": "cmdstanr",
+      "math_backend": "Stan",
+      "chains": 4,
+      "warmup_per_chain": 1000,
+      "sampling_per_chain": 1000,
+      "seed": 9201,
+      "adapt_delta": 0.999,
+      "divergences": 0,
+      "max_main_rhat": 1.0007760645870256,
+      "plain_source_sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+      "data_sha256": "a3164872f90211e38768568fd44efdd4cd5d38446d419344277a54ed03ad0776",
+      "initial_values_sha256": "e0f28b8c6033a163a0480bdca46b26d15772d09550a79c4ab7827a7b2a250277",
+      "build": {
+        "cmdstanr_version": "0.8.0",
+        "cmdstan_version": "2.37.0"
+      }
+    },
+    {
+      "saved_check": "sv_matched_final/NicoStan/stochastic_volatility_N60_NicoStan_CHESSR_Stan_diffusion_TRUE_smoke_seed_9201_db47149a17/result.rds",
+      "model": "stochastic_volatility_discrete_time",
+      "N_time_points": 60,
+      "engine": "NicoStan",
+      "math_backend": "Stan",
+      "chains": 4,
+      "warmup_per_chain": 1000,
+      "sampling_per_chain": 1000,
+      "seed": 9201,
+      "adapt_delta": 0.999,
+      "divergences": 0,
+      "max_main_rhat": 1.0028019047043375,
+      "plain_source_sha256": "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+      "data_sha256": "a3164872f90211e38768568fd44efdd4cd5d38446d419344277a54ed03ad0776",
+      "initial_values_sha256": "e0f28b8c6033a163a0480bdca46b26d15772d09550a79c4ab7827a7b2a250277",
+      "build": {
+        "package_version": "0.1.9000",
+        "native_sha256": "12602272a086cc887c044d8815d4ca2b597f3933e56f86b52cdbeba277929404",
+        "rdb_sha256": "eddcc9ae123ac51e29e01316c24d9a5e0f03259d4b3d4c0e41ff0fdfadb8e91b",
+        "bridgestan_version": "2.6.2"
+      }
+    }
+  ]
+}

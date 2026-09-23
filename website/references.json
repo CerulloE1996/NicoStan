@@ -200,5 +200,15 @@
     "venue": "International Conference on Learning Representations (ICLR); arXiv:1412.6980",
     "url": "https://arxiv.org/abs/1412.6980",
     "bibtex_authors": "Kingma, Diederik P. and Ba, Jimmy"
+  },
+  {
+    "key": "Kastner2014",
+    "authors": "Kastner, G. and Frühwirth-Schnatter, S.",
+    "year": "2014",
+    "title": "Ancillarity-sufficiency interweaving strategy (ASIS) for boosting MCMC estimation of stochastic volatility models",
+    "venue": "Computational Statistics & Data Analysis, 76, 408-423",
+    "url": "https://doi.org/10.1016/j.csda.2013.01.002",
+    "doi": "10.1016/j.csda.2013.01.002",
+    "bibtex_authors": "Kastner, Gregor and Fr{\\\"u}hwirth-Schnatter, Sylvia"
   }
 ]

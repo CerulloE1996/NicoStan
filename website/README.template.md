@@ -25,24 +25,26 @@ more specifically, NicoStan's C++ sampler calls the compiled Stan model directly
 NicoStan handles the burnin/warmup, sampling and posterior summaries.
 
 
-For the burnin (or "warmup") phase, Stan uses a well-established, state-of-the-art No-U-Turn HMC
-(NUTS-HMC; see [Hoffman and Gelman, 2014](https://www.jmlr.org/papers/v15/hoffman14a.html)) algorithm for adaptation;
-that is, for automatically (or adaptively) tuning the HMC path length ($\tau$).
-On the other hand, NicoStan provides state-of-the-art, between-chain adaptation algorithms,
+Stan's No-U-Turn HMC algorithm
+(NUTS-HMC; see [Hoffman and Gelman, 2014](https://www.jmlr.org/papers/v15/hoffman14a.html))
+chooses the trajectory length within each iteration, during both burnin/warmup and sampling;
+its step size and mass matrix are normally adapted during warmup.
+NicoStan instead adapts the trajectory length during burnin using information pooled across chains;
+more specifically, it provides between-chain adaptation algorithms,
 such as SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)),
 ChEES-HMC ([Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html)),
 and ChEES-R-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)) -
 see [this section below](#efficient-burnin-algorithms) for more details on NicoStan's burnin algorithms.
 
 
-This difference in burnin adaptation algorithm makes NicoStan more efficient than Stan for most models
-(benchmark results coming soon).
+In our initial tests, NicoStan has achieved efficiency gains over Stan on the models studied
+(see [Benchmarks](#benchmarks)); the detailed comparisons are in progress.
 In our testing, NicoStan can also perform very well with a very short burnin
 (100-125 iterations with just 4 chains; we are also currently testing shorter burnins).
-Furthermore, the fact that NicoStan uses between-chain adaptation (as opposed to within-chain adaptation, like Stan's NUTS-HMC algorithm)
-means that all chains finish the sampling phase at approximately the same time, avoiding the common issue of "stuck chains",
-which is often seen with complex models when using Stan directly
-(e.g., via [cmdstanr](https://mc-stan.org/cmdstanr/) or [rstan](https://mc-stan.org/rstan/)).
+The learned trajectory lengths also make the sampling workload more predictable across chains,
+without constructing a NUTS tree at every iteration.
+Actual runtimes can still differ between chains, and posterior exploration is assessed using the MCMC diagnostics
+(see [Benchmarks](#benchmarks)).
 
 
 Additionally, for models with high-dimensional nuisance parameters
@@ -159,8 +161,13 @@ The general examples are grouped by their parameterisation:
 
 
 - **Hybrid/joint HMC with nuisance diffusion:** Cox shared frailty, hierarchical logistic regression,
-joint longitudinal-survival modelling, and an easy discrete-time stochastic volatility model (`EASY_Stochastic_volatility.stan`),
-which Stan's NUTS also samples well once non-centred; it is included as a simple introductory example only.
+joint longitudinal-survival modelling, and a discrete-time AR(1) stochastic-volatility model
+([Stochastic_volatility_discrete_time.stan](inst/examples/models/Stochastic_volatility_discrete_time.stan)).
+Even this non-centred discrete-time example produced 9 Stan NUTS divergences at `adapt_delta = 0.99` in a saved N = 60 validation check;
+a separate, longer check on different simulated data had none at `0.999`
+(see the [saved validation settings and results](inst/examples/README_benchmarks.md#discrete-time-stochastic-volatility-validation)).
+Continuous-time SV can introduce the additional path-discretisation difficulties described
+[below](#models-with-nuisance-parameters-diffusion-pathspace-hmc).
 - **Standard HMC:** Weibull survival regression, robust Student-t regression and marginal Gaussian process (GP) regression.
 Note that the GP example analytically integrates out the latent function, and the Student-t example evaluates its likelihood directly.
 
@@ -299,12 +306,16 @@ alongside the computational settings.
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-NicoStan is particularly aimed at models with a large block of latent/nuisance parameters for which analytic marginalisation is unavailable,
-or numerical marginalisation is too expensive. Techniques such as non-centring can improve the posterior geometry for some of these models;
-however, it does not remove the nuisance block - the corresponding latent variables still have to be handled during posterior computation.
+NicoStan is particularly aimed at models with a large block of latent/nuisance parameters whose explicit sampling is computationally demanding.
+Analytic marginalisation is useful when available; numerical integration and approximate marginalisation provide alternatives,
+with their own accuracy and computational costs. Techniques such as non-centring can improve the posterior geometry for some of these models,
+but their effectiveness depends on the data and parameterisation (see [Stan's parameterisation guidance](https://mc-stan.org/docs/stan-users-guide/efficiency-tuning.html)).
+A non-centred representation retains the latent coordinates; in other words, improving the geometry does not itself remove their computational cost.
 
 
-Such blocks occur in many commonly-used models; more specifically:
+Sampling difficulty and the gains from NicoStan depend on the particular model, parameter regime, data size and implementation;
+comparisons are evaluated using the [benchmark criteria](#benchmarks).
+Such latent blocks occur in many commonly-used models; more specifically:
 
 - **MVP, LC-MVP, MVOP and LC-MVOP:** latent-Gaussian/auxiliary variables for correlated binary and/or ordinal outcomes.
 The augmented state grows with the number of individuals and outcomes; evaluating the marginal likelihood instead involves multivariate Gaussian rectangle probabilities.
@@ -316,9 +327,12 @@ with non-Gaussian observations retaining a nonconjugate posterior over those coe
 - **Spatial and spatiotemporal models:** Gaussian spatial fields, temporal effects and their interactions,
 for instance in binomial/Poisson disease-mapping models.
 - **Log-Gaussian Cox processes:** a Gaussian latent log-intensity field, often represented on a large spatial mesh/grid.
-- **Continuous-time stochastic volatility:** a latent volatility diffusion observed only through discretely sampled prices,
-so the volatility path between observations is imputed on a fine time grid (e.g., as in [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)).
-Note that the simpler discrete-time AR(1) stochastic volatility model is usually sampled well by Stan's NUTS once non-centred.
+- **Stochastic volatility:** a latent log-volatility path in discrete-time models, or a latent volatility diffusion in continuous time.
+For instance, path augmentation for a partially observed volatility diffusion introduces latent points between observations;
+the discretisation then controls both approximation error and the size of the sampled path
+(see [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)).
+The discrete-time AR(1) version has a simpler time structure, but neither centred nor non-centred parameterisations are uniformly efficient
+across all regimes ([Kastner and Frühwirth-Schnatter, 2014](https://doi.org/10.1016/j.csda.2013.01.002)).
 - **Nonlinear/non-Gaussian state-space models and partially observed diffusions:** latent states,
 state innovations or a non-centred driving path.
 - **Survival analysis with lognormal frailty:** Gaussian log-frailties at the individual/cluster level,
@@ -339,12 +353,17 @@ the [nonlinear mixed-effects PK models in Johnston et al., 2024](https://doi.org
 the diffusion bridge, stochastic volatility and latent diffusion survival applications in
 [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001),
 and the function-space applications in [Cotter et al., 2013](https://arxiv.org/abs/1202.0709).
-These are relevant model families; the [runnable examples](#examples) above show the implementations currently supplied with NicoStan.
+The [runnable examples](#examples) show the implementations currently supplied with NicoStan.
+The supplied discrete-time AR(1) stochastic-volatility example is a different model from the continuous-time experiments in
+[Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001) and [Beskos et al., 2015](https://doi.org/10.1093/biomet/asv051).
 
 
 Note that some simpler Gaussian models allow the latent block to be integrated out analytically.
 For instance, our Gaussian-outcome GP example uses the marginal likelihood and is fitted with standard HMC;
 the latent-GP examples listed here instead have non-Gaussian likelihoods.
+Similarly, a logistic GLMM can be written directly in Stan with Gaussian random effects declared as parameters.
+Those random effects are its latent block; writing the model directly does not integrate them out.
+For a small random-effects block, numerical integration may be practical; its cost becomes important for richer or crossed structures.
 
 
 ### Why some of these models are particularly difficult to sample
@@ -358,11 +377,24 @@ Additionally, specifically for latent class models, poor identifiability can mak
 and [Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)).
 
 
-Stochastic-volatility and nonlinear state-space models can also be difficult when latent processes are highly persistent
-or their innovation scales are small. In frailty survival analysis models, joint longitudinal survival analysis, and latent-factor models,
-limited information about individual effects can induce strong posterior dependence between the effects and their population-level parameters.
-Techniques such as non-centring can help with these dependencies in some models;
-however, the remaining high-dimensional latent block may nevertheless make the computation prohibitively expensive.
+Discrete-time stochastic volatility also has parameter regimes with poor mixing;
+for example, [Kastner and Frühwirth-Schnatter, 2014](https://doi.org/10.1016/j.csda.2013.01.002)
+show that centred and non-centred parameterisations perform differently as persistence and the innovation scale change.
+Their comparison motivates interweaving parameterisations; it is not a NicoStan-versus-NUTS benchmark.
+
+For finely discretised diffusions and Gaussian-prior inverse problems, a further issue is how sampling behaves as the path or mesh is refined.
+The Gaussian-reference methods in [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003),
+[Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001) and [Cotter et al., 2013](https://arxiv.org/abs/1202.0709)
+address this issue under their stated assumptions. A larger path still costs more to evaluate;
+mesh-robust behaviour is not a claim of constant runtime or a guaranteed speed-up for every implementation.
+
+In mixed-effects, frailty, joint longitudinal-survival and latent-factor models,
+limited information about individual effects can induce strong posterior dependence with population-level parameters.
+Non-centring often helps in weakly informed regimes; a centred representation can be preferable when effects are strongly informed,
+and unbalanced data can favour different choices for different effects
+(see [Stan's parameterisation guidance](https://mc-stan.org/docs/stan-users-guide/efficiency-tuning.html)).
+Likelihood cost, weak identification and, where present, multimodality also matter;
+these questions are assessed for each fitted model rather than inferred from the model-family label.
 
 
 ### GPU acceleration and serial dependencies

@@ -44,7 +44,7 @@ The drivers use the analysis profile by default. Set `NICOSTAN_EXAMPLE_PROFILE=s
 | Hierarchical logistic regression | 300, 1200, 4000 observations |
 | Joint longitudinal-survival | 25, 75, 200 subjects |
 | Marginal Gaussian process | 40, 80, 160 observations |
-| EASY stochastic volatility (discrete-time AR(1)) | 250, 1000, 4000 time points |
+| Stochastic volatility (discrete-time AR(1)) | 250, 1000, 4000 time points |
 | Latent diffusion survival | 100, 200, 800 subjects (50 path increments for every size) |
 
 ### Latent diffusion survival validation (round 4, 2026-09-22)
@@ -91,3 +91,27 @@ Extra cmdstanr checks of the new model: 4 x (1000 + 1000), same diagnostic scrip
 In every one of these runs, main-parameter R-hat was at most 1.01.
 
 The output directory contains `benchmark_summary.csv`, `efficiency_comparisons.csv`, `posterior_agreement.csv`, `comparison_checks.csv`, and the resumable `benchmark_manifest.csv`.
+
+## Discrete-time stochastic-volatility validation
+
+These are previously saved checks of `Stochastic_volatility_discrete_time.stan`, using the non-centred AR(1) path and the priors in `MODEL_NOTES.md`.
+The plain model SHA256 is `ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f`.
+Each row uses four chains; warmup and sampling counts below are per chain. R-hat is the maximum across `mu`, `phi` and `sigma`.
+
+| Data/run seed | N (time points) | Warmup | Sampling | adapt_delta | Engine / maths | Divergences | Maximum main R-hat |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026 | 60 | 500 | 500 | 0.99 | CmdStanR NUTS / Stan | 9 | 1.012822 |
+| 2026 | 60 | 500 | 500 | 0.99 | NicoStan / Stan | 0 | 1.006198 |
+| 2026 | 60 | 500 | 500 | 0.99 | NicoStan / AVX-512 | 8 | 1.004116 |
+| 9201 | 60 | 1000 | 1000 | 0.999 | CmdStanR NUTS / Stan | 0 | 1.000776 |
+| 9201 | 60 | 1000 | 1000 | 0.999 | NicoStan / Stan | 0 | 1.002802 |
+
+Within the seed-2026 comparison, the data, initial values and plain model hashes match.
+The seed-9201 check uses different simulated data and longer warmup/sampling; it is not a controlled comparison isolating `adapt_delta`.
+These results show that this non-centred discrete-time example can produce divergences even at `0.99`;
+they do not establish a threshold that is necessary or sufficient for all data/parameter regimes, or a general speed-up.
+The AVX-512 row is retained alongside the plain NicoStan result so that the check is reported in full.
+
+The [saved-check metadata](validation/stochastic_volatility_discrete_time_checks.json) records the configurations, hashes and diagnostic values.
+The model's regime-dependent parameterisation issues are discussed by
+[Kastner and Frühwirth-Schnatter (2014)](https://doi.org/10.1016/j.csda.2013.01.002); their study is not a NUTS comparison.

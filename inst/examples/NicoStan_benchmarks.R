@@ -11,7 +11,7 @@
 NicoStan_benchmark_registry <- function() {
         data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic",
-                      "joint_longitudinal_survival", "gaussian_process", "EASY_stochastic_volatility",
+                      "joint_longitudinal_survival", "gaussian_process", "stochastic_volatility_discrete_time",
                       "latent_diffusion_survival"),
             N_1 = c(100L, 100L, 250L, 300L, 25L, 40L, 250L, 100L),
             N_2 = c(250L, 250L, 1000L, 1200L, 75L, 80L, 1000L, 200L),
@@ -38,7 +38,14 @@ NicoStan_benchmark_arms <- function(include_avx2 = FALSE) {
 NicoStan_benchmark_grid <- function(models = NULL, N_grid = NULL) {
         registry <- NicoStan_benchmark_registry()
         if (is.null(models)) models <- registry$model
+        models <-  unname(vapply(models, NicoStan_normalize_example_model, character(1L)))
         stopifnot(all(models %in% registry$model))
+        if (!is.null(N_grid)) {
+                stopifnot(length(N_grid), !is.null(names(N_grid)))
+                normalized_names <- vapply(names(N_grid), NicoStan_normalize_example_model, character(1L))
+                if (anyDuplicated(normalized_names)) stop("N_grid contains duplicate models after alias normalization.")
+                names(N_grid) <- normalized_names
+        }
         rows <- lapply(models, function(model) {
                 row <- registry[match(model, registry$model), , drop = FALSE]
                 if (is.null(N_grid)) sizes <- as.integer(unlist(row[c("N_1", "N_2", "N_3")])) else {
@@ -124,6 +131,7 @@ NicoStan_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, ch
                                                  iterations, adapt_delta, burnin_algorithm,
                                                  include_avx2, harness_path, model_dir,
                                                  build_fingerprint = NULL) {
+        model <- NicoStan_normalize_example_model(model)
         registry <- NicoStan_example_registry()
         source_file <- registry$file[match(model, registry$model)]
         avx_file <- if (arm$math_backend == "Stan") source_file else sub(".stan$", "_avx.stan", source_file)
@@ -135,6 +143,33 @@ NicoStan_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, ch
         harness_hash <- digest::digest(file = harness_path, algo = "sha256")
         orchestration_path <- file.path(dirname(harness_path), "NicoStan_benchmarks.R")
         orchestration_hash <- if (file.exists(orchestration_path)) digest::digest(file = orchestration_path, algo = "sha256") else NA_character_
+        ## A pure source/ID rename must continue to address completed benchmark records.
+        ## The mapping is only active while every participating file has its recorded
+        ## post-rename hash. Any later substantive edit therefore receives a new key.
+        alias_path <- file.path(dirname(harness_path), "fingerprint_aliases.json")
+        alias_metadata <- if (file.exists(alias_path)) {
+                tryCatch(jsonlite::fromJSON(alias_path, simplifyVector = FALSE), error = function(error) NULL)
+        } else NULL
+        legacy_runtime <- if (is.list(alias_metadata)) alias_metadata$legacy_runtime_hashes else NULL
+        legacy_runtime_valid <- is.list(legacy_runtime) &&
+            identical(harness_hash, as.character(legacy_runtime$canonical_harness_hash)) &&
+            identical(orchestration_hash, as.character(legacy_runtime$canonical_orchestration_hash))
+        legacy_model <- if (is.list(alias_metadata)) alias_metadata$models[[model]] else NULL
+        canonical_source_hashes <- if (is.list(legacy_model)) as.character(unlist(legacy_model$canonical_source_hashes, use.names = FALSE)) else character()
+        legacy_source_files <- if (is.list(legacy_model)) as.character(unlist(legacy_model$legacy_source_files, use.names = FALSE)) else character()
+        source_index <- seq_along(source_hashes)
+        legacy_source_valid <- is.list(legacy_model) && length(source_index) <= length(canonical_source_hashes) &&
+            length(source_index) <= length(legacy_source_files) &&
+            identical(unname(source_hashes), canonical_source_hashes[source_index])
+        if (isTRUE(legacy_runtime_valid)) {
+                harness_hash <- as.character(legacy_runtime$legacy_harness_hash)
+                orchestration_hash <- as.character(legacy_runtime$legacy_orchestration_hash)
+        }
+        if (isTRUE(legacy_runtime_valid) && isTRUE(legacy_source_valid)) {
+                legacy_source_paths <- file.path(model_dir, legacy_source_files[source_index])
+                source_hashes <- setNames(unname(source_hashes), legacy_source_paths)
+                model <- as.character(legacy_model$legacy_model_id)
+        }
         substr(digest::digest(list(version = "NicoStan_benchmark_v1", model = model, N = N,
                                    arm = arm, seed = seed, profile = profile, chains = chains,
                                    warmup = warmup, iterations = iterations, adapt_delta = adapt_delta,
@@ -384,3 +419,25 @@ NicoStan_benchmark_collect <- function(output_dir) {
             record$benchmark$fingerprint)))
         list(summary = summary, comparison = NicoStan_benchmark_compare(summary), manifest = manifest)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

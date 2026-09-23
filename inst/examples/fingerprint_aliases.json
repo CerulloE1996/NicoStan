@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "purpose": "legacy benchmark fingerprint aliases for the stochastic-volatility pure rename",
+  "legacy_runtime_hashes": {
+    "legacy_harness_hash": "7e4045d4158968078c6703c58f6f6e8dedb933762a4a1a7521c4decb0e6a1198",
+    "canonical_harness_hash": "c253412bd7e585fa0de2eafcb6e6e9b3400f3ccc10af9d6590b2d0efcb1efc74",
+    "legacy_orchestration_hash": "4ff648d8b30a468a9388593e5848ae724c5b3975a3fe3ee9517e3a7abd8bb6b9",
+    "canonical_orchestration_hash": "3202309168117eb1dc09a1ffa0aad299eaacd700007283b9edc382159465b44f"
+  },
+  "models": {
+    "stochastic_volatility_discrete_time": {
+      "legacy_model_id": "EASY_stochastic_volatility",
+      "legacy_source_files": [
+        "EASY_Stochastic_volatility.stan",
+        "EASY_Stochastic_volatility_avx.stan"
+      ],
+      "canonical_source_files": [
+        "Stochastic_volatility_discrete_time.stan",
+        "Stochastic_volatility_discrete_time_avx.stan"
+      ],
+      "legacy_source_hashes": [
+        "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+        "187661faf2240846e822530c8cc862bf8d1bdb5acb84933469169591361bdfd9"
+      ],
+      "canonical_source_hashes": [
+        "ccd3b69909d3e2e832aaf926569fef1de7251837481567b1dc87beab6326b45f",
+        "187661faf2240846e822530c8cc862bf8d1bdb5acb84933469169591361bdfd9"
+      ]
+    }
+  }
+}

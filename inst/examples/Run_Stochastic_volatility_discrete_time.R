@@ -1,8 +1,8 @@
 #### =====================================================================================================================================
-## stochastic_volatility: three sample sizes, common data/initial values, and main-parameter efficiency benchmarks.
+## stochastic_volatility_discrete_time: three sample sizes, common data/initial values, and main-parameter efficiency benchmarks.
 ## Source this file in R or run with Rscript. Edit the settings below for the research run.
 ##
-model <-  "EASY_stochastic_volatility"
+model <-  "stochastic_volatility_discrete_time"
 N_values <-  c(250L, 1000L, 4000L)
 profile <-  Sys.getenv("NICOSTAN_EXAMPLE_PROFILE", unset = "analysis")
 burnin_algorithm <-  "CHESSR"
@@ -42,3 +42,25 @@ benchmark_result <-  NicoStan_benchmark_run(models = model, N_grid = setNames(li
     output_dir = file.path(getwd(), paste0("NicoStan_benchmark_", model)),
     model_dir = file.path(.example_directory, "models"))
 benchmark_result$comparison$efficiency
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
