@@ -272,6 +272,49 @@ R_fn_compute_gradients_for_tau_using_KE <- function( velocity_initial,
 
 }
 
+## ---- KE criterion on the JOINT (main + nuisance) block: the kinetic energies and their rates add over the two blocks, the
+##      gradient is tau * (dK_main + dK_us) * (rate_main + rate_us). EXPERIMENTAL, assistant-introduced 2026-09-23 (ps7 test of
+##      tau_adaptation_block = "joint"); tau_adaptation_block = "main" never calls this.
+##
+R_fn_kinetic_energy_change <- function( velocity_initial,
+                                        velocity_proposed,
+                                        metric_shape,
+                                        mass_matrix) {
+
+        if (length(velocity_initial) != length(velocity_proposed)) stop("KE velocities must have the same dimension.")
+        if (identical(metric_shape, "diag")) {
+            if (length(mass_matrix) != length(velocity_initial)) stop("KE diagonal mass must match the velocity dimension.")
+            return(0.5 * sum(velocity_proposed^2 * c(mass_matrix)) - 0.5 * sum(velocity_initial^2 * c(mass_matrix)))
+        }
+        return(0.5 * sum(velocity_proposed * c(mass_matrix %*% velocity_proposed)) -
+               0.5 * sum(velocity_initial * c(mass_matrix %*% velocity_initial)))
+
+}
+
+R_fn_compute_gradients_for_tau_using_KE_joint <- function( velocity_initial_main,
+                                                           velocity_proposed_main,
+                                                           metric_shape_main,
+                                                           mass_main,
+                                                           velocity_initial_us,
+                                                           velocity_proposed_us,
+                                                           mass_us_vec,
+                                                           kinetic_energy_rate_proposed_joint,
+                                                           tau_ii) {
+
+        kinetic_energy_change_joint <- R_fn_kinetic_energy_change(velocity_initial = velocity_initial_main,
+                                                                  velocity_proposed = velocity_proposed_main,
+                                                                  metric_shape = metric_shape_main,
+                                                                  mass_matrix = mass_main) +
+                                       R_fn_kinetic_energy_change(velocity_initial = velocity_initial_us,
+                                                                  velocity_proposed = velocity_proposed_us,
+                                                                  metric_shape = "diag",
+                                                                  mass_matrix = mass_us_vec)
+        gradient <- tau_ii * kinetic_energy_change_joint * kinetic_energy_rate_proposed_joint
+        if (length(gradient) != 1 || !is.finite(gradient)) gradient <- NA_real_
+        return(gradient)
+
+}
+
 #' R_fn_compute_gradients_for_tau_using_ChEES_position
 #'
 #' The ChEES criterion of Hoffman, Radul and Sountsov (2021), on a supplied

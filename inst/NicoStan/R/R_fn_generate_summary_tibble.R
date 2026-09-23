@@ -14,8 +14,20 @@ generate_summary_tibble <- function(n_threads = NULL,
                                     nested_rhat_grouping = NULL) {
   
         
-              n_cores <- round(parallel::detectCores() / 2, 0)
-              n_threads <- n_cores
+              ##
+              ## ---- 2026-09-22 fix: the n_threads argument used to be overwritten here with detectCores() / 2 (96 on the
+              ##      local HPC), so the caller's thread count was silently ignored. Honour it; only when it is NULL use
+              ##      half of the CPUs this process may run on (taskset / CPU affinity respected).
+              ##
+              if (is.null(n_threads)) {
+                    n_cpus_available_to_this_process <-  length(tryCatch(parallel::mcaffinity(), error = function(error_object) NULL))
+                    if (n_cpus_available_to_this_process < 1) n_cpus_available_to_this_process <-  parallel::detectCores()
+                    n_threads <-  max(1, round(n_cpus_available_to_this_process / 2, 0))
+              }
+              if (!(is.numeric(n_threads) && length(n_threads) == 1 && is.finite(n_threads) && n_threads >= 1)) {
+                    stop(paste0("generate_summary_tibble: n_threads must be a single number >= 1, got: ",
+                                paste(format(n_threads), collapse = ", ")))
+              }
 
               #### Initialize summary dataframe
               summary_df <- data.frame(     parameter = param_names,

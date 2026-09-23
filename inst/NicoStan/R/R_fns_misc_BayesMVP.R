@@ -627,10 +627,10 @@ get_model_info <- function(  Model_type,
 #                 Stan_data_list$baseline_case_d <- baseline_case_d
 #                 ##
 #                 # library(cmdstanr)
-#                 # mod <- cmdstan_model("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_models/LC_MVP_cpp_skeleton.stan")
-#                 # mod <- cmdstan_model("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_models/LC_MVOP_cpp_skeleton.stan")
-#                 # mod <- cmdstan_model("/home/enzocerullo/Documents/Work/PhD_work/R_packages/BayesMVP/inst/BayesMVP/inst/stan_models/LC_MVOP_cpp_skeleton.stan")
-#                 mod <- cmdstan_model("/home/enzocerullo/Documents/Work/PhD_work/R_packages/BayesMVP/inst/BayesMVP/inst/stan_models/LC_MVP_bin_cpp_skeleton.stan")
+#                 # mod <- cmdstan_model(system.file("stan_models/LC_MVP_cpp_skeleton.stan", package = "BayesMVP"))
+#                 # mod <- cmdstan_model(system.file("stan_models/LC_MVOP_cpp_skeleton.stan", package = "BayesMVP"))
+#                 # mod <- cmdstan_model(system.file("stan_models/LC_MVP_bin_cpp_skeleton.stan", package = "BayesMVP"))
+#                 mod <- cmdstan_model(system.file("stan_models/LC_MVP_bin_cpp_skeleton.stan", package = "BayesMVP"))
 #                 ##
 #                 fit <- mod$sample(
 #                   data = Stan_data_list,  # your R list before JSON conversion
@@ -983,7 +983,6 @@ permute_3d_draws_array <- function(array,
         return(new_array)
   
 }
-
 
 
 

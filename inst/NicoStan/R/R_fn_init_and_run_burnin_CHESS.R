@@ -101,6 +101,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            share_tau_ii_across_chains_in_burnin = FALSE,
                                            randomize_tau_burnin = FALSE,
                                            ##
+                                           ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL, assistant-introduced 2026-09-23 for ps7):
+                                           ##      which parameters feed the trajectory-length criterion. "main" = the main block only (the
+                                           ##      behaviour before this option existed). "joint" = main and nuisance blocks concatenated,
+                                           ##      still adapting the ONE joint tau_main. Models without a sampled nuisance block fall back
+                                           ##      to "main"; the effective value is reported as model_results$tau_adaptation_block.
+                                           ##
+                                           tau_adaptation_block = "main",
+                                           ##
                                            ## Sole trajectory-length selector. Canonical values are
                                            ## "KE", "ChEES", "CHESSR", "CHESSR_log" and "SNAPER".
                                            ## "CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion (different criteria).
@@ -385,6 +393,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
   Model_args_as_Rcpp_List$n_nuisance <- n_nuisance
   Model_args_as_Rcpp_List$n_params_main <- n_params_main
+  ##
+  ## ---- tau_adaptation_block: validate, and resolve the EFFECTIVE block (reported back as model_results$tau_adaptation_block):
+  ##
+  tau_adaptation_block <- if_null_then_set_to(tau_adaptation_block, "main")
+  if (!is.character(tau_adaptation_block) || length(tau_adaptation_block) != 1 || !tau_adaptation_block %in% c("main", "joint")) {
+      stop(paste0("tau_adaptation_block must be 'main' or 'joint'; got: ", paste(as.character(tau_adaptation_block), collapse = ", ")))
+  }
+  tau_adaptation_block_effective <- tau_adaptation_block
+  if (identical(tau_adaptation_block, "joint") && !(isTRUE(sample_nuisance) && n_nuisance > 0)) {
+      tau_adaptation_block_effective <- "main"
+      message(paste0("\033[36mtau_adaptation_block = 'joint' requested but this model has no sampled nuisance block; using 'main'.\033[0m"))
+  }
+  if (identical(tau_adaptation_block_effective, "joint") && isTRUE(partitioned_HMC)) {
+      stop("tau_adaptation_block = 'joint' needs the joint (diffusion) HMC sampler with one tau; it is not defined for partitioned_HMC = TRUE.")
+  }
+  message(paste0("\033[36mtau_adaptation_block: requested = ", tau_adaptation_block, " | effective = ", tau_adaptation_block_effective, "\033[0m"))
 
   if (Model_type != "Stan") {
    # n_tests <- ncol(y)
@@ -460,10 +484,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           snaper_m_vec_all <-    theta_vec_mean
           snaper_m_prop_vec_all <- theta_vec_mean
           snaper_s_vec_all_empirical <- rep(1, n_params)
-          trajectory_metric <- list(main = NULL, us = NULL)
-          trajectory_mass <- list(main = NULL, us = NULL)
+          trajectory_metric <- list(main = NULL, us = NULL, joint = NULL)
+          trajectory_mass <- list(main = NULL, us = NULL, joint = NULL)
           trajectory_direction <- list(main = fn_initialise_snaper_direction(n_params_main),
-                                       us = if (n_nuisance > 0) fn_initialise_snaper_direction(n_nuisance) else numeric(0))
+                                       us = if (n_nuisance > 0) fn_initialise_snaper_direction(n_nuisance) else numeric(0),
+                                       ## "joint" = main rows first, then the nuisance rows (tau_adaptation_block = "joint"):
+                                       joint = if (n_nuisance > 0) fn_initialise_snaper_direction(n_params_main + n_nuisance) else numeric(0))
 
   }
   
@@ -1428,7 +1454,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
            if (metric_estimator %in% c("chain_mean", "chain_mean_scaled")) {
               if ((metric_type_main == "Empirical") && (metric_shape_main == "dense")) {
                   if (ii < 20) {
-                    empicical_cov_main <- diag(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical)
+                    ## 2026-09-22: nrow = length(...) is needed for models with ONE main parameter: diag(x) of a length-1
+                    ## vector builds a floor(x) x floor(x) identity (0x0 for a variance below 1), so update_cov_Welford then
+                    ## failed at every iteration ("non-conformable arrays", swallowed by try()) and the dense metric was never adapted.
+                    empicical_cov_main <- diag(c(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical),
+                                               nrow = length(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical))
                   } else {
                     try({
                       empicical_cov_main <- update_cov_Welford(delta_old = delta_old_main, delta_new = delta_new_main,
@@ -1737,15 +1767,23 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           ##
           ## ---- Metric-coordinate principal directions, held fixed during this transition -------------------------------------------------
           if (!isTRUE(manual_tau) && burnin_algorithm != "KE") {
-              adapted_blocks <- "main"
+              adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" = main + nuisance (EXPERIMENTAL, 2026-09-23)
               for (adapted_block in adapted_blocks) {
-                  states <- if (adapted_block == "main") theta_main_vectors_all_chains_input_from_R else theta_us_vectors_all_chains_input_from_R
-                  centre <- if (adapted_block == "main") EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
-                  mass <- if (adapted_block == "us") c(EHMC_Metric_as_Rcpp_List$M_us_vec) else if (metric_shape_main == "diag") {
+                  states <- if (adapted_block == "main") theta_main_vectors_all_chains_input_from_R else
+                            if (adapted_block == "joint") rbind(theta_main_vectors_all_chains_input_from_R, theta_us_vectors_all_chains_input_from_R) else
+                            theta_us_vectors_all_chains_input_from_R
+                  centre <- if (adapted_block == "main") EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
+                            if (adapted_block == "joint") c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
+                            EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
+                  mass_main_block <- if (metric_shape_main == "diag") {
                       1 / c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
                   } else EHMC_Metric_as_Rcpp_List$M_dense_main
+                  mass <- if (adapted_block == "us") c(EHMC_Metric_as_Rcpp_List$M_us_vec) else
+                          if (adapted_block == "joint") list(main = mass_main_block, us = c(EHMC_Metric_as_Rcpp_List$M_us_vec)) else mass_main_block
                   if (!identical(mass, trajectory_mass[[adapted_block]])) {
-                      new_factor <- fn_trajectory_metric_factor(mass, nrow(states))
+                      new_factor <- if (adapted_block == "joint") {
+                          fn_trajectory_joint_metric_factor(mass_main = mass$main, mass_us_vec = mass$us, n_main = n_params_main, n_us = n_nuisance)
+                      } else fn_trajectory_metric_factor(mass, nrow(states))
                       trajectory_direction[[adapted_block]] <- fn_transport_snaper_direction(
                           trajectory_direction[[adapted_block]], trajectory_metric[[adapted_block]], new_factor)
                       trajectory_metric[[adapted_block]] <- new_factor
@@ -2353,19 +2391,20 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         if (ii >= gap && ii < n_adapt && !isTRUE(manual_tau)) {
                             tau_adaptation_iteration <- ii - gap + 1
                             tau_adaptation_iteration_vec[ii] <- tau_adaptation_iteration
-                            adapted_blocks <- "main"
+                            adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" (EXPERIMENTAL, 2026-09-23)
                             for (adapted_block in adapted_blocks) {
                                 is_main <- adapted_block == "main"
-                                block_name <- if (is_main) "main" else "us"
-                                theta_initial <- if (is_main) theta_main_0_burnin_tau_adapt_all_chains_input_from_R else theta_us_0_burnin_tau_adapt_all_chains_input_from_R
-                                theta_proposed <- if (is_main) theta_main_prop_burnin_tau_adapt_all_chains_input_from_R else theta_us_prop_burnin_tau_adapt_all_chains_input_from_R
-                                theta_accepted <- if (is_main) theta_main_vectors_all_chains_input_from_R else theta_us_vectors_all_chains_input_from_R
-                                velocity_initial <- if (is_main) velocity_main_0_burnin_tau_adapt_all_chains_input_from_R else velocity_us_0_burnin_tau_adapt_all_chains_input_from_R
-                                velocity_proposed <- if (is_main) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R else velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R
-                                velocity_accepted <- if (is_main) velocity_main_vectors_all_chains_input_from_R else velocity_us_vectors_all_chains_input_from_R
-                                probabilities <- if (is_main) p_jump_per_chain else p_jump_us_per_chain
-                                divergences <- if (is_main) div_main else div_us
-                                tau_values <- if (is_main) tau_main_ii_vec else tau_us_ii_vec
+                                is_joint <- adapted_block == "joint"   ## main + nuisance concatenated (main rows first); updates tau_main
+                                block_name <- if (is_main || is_joint) "main" else "us"
+                                theta_initial <- if (is_main) theta_main_0_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(theta_main_0_burnin_tau_adapt_all_chains_input_from_R, theta_us_0_burnin_tau_adapt_all_chains_input_from_R) else theta_us_0_burnin_tau_adapt_all_chains_input_from_R
+                                theta_proposed <- if (is_main) theta_main_prop_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(theta_main_prop_burnin_tau_adapt_all_chains_input_from_R, theta_us_prop_burnin_tau_adapt_all_chains_input_from_R) else theta_us_prop_burnin_tau_adapt_all_chains_input_from_R
+                                theta_accepted <- if (is_main) theta_main_vectors_all_chains_input_from_R else if (is_joint) rbind(theta_main_vectors_all_chains_input_from_R, theta_us_vectors_all_chains_input_from_R) else theta_us_vectors_all_chains_input_from_R
+                                velocity_initial <- if (is_main) velocity_main_0_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(velocity_main_0_burnin_tau_adapt_all_chains_input_from_R, velocity_us_0_burnin_tau_adapt_all_chains_input_from_R) else velocity_us_0_burnin_tau_adapt_all_chains_input_from_R
+                                velocity_proposed <- if (is_main) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R, velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R) else velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R
+                                velocity_accepted <- if (is_main) velocity_main_vectors_all_chains_input_from_R else if (is_joint) rbind(velocity_main_vectors_all_chains_input_from_R, velocity_us_vectors_all_chains_input_from_R) else velocity_us_vectors_all_chains_input_from_R
+                                probabilities <- if (is_main || is_joint) p_jump_per_chain else p_jump_us_per_chain
+                                divergences <- if (is_main) div_main else if (is_joint) pmax(div_main, div_us) else div_us
+                                tau_values <- if (is_main || is_joint) tau_main_ii_vec else tau_us_ii_vec
                                 tau_name <- paste0("tau_", block_name)
                                 adam_mean_name <- paste0("tau_m_adam_", block_name)
                                 adam_variance_name <- paste0("tau_v_adam_", block_name)
@@ -2374,15 +2413,29 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 t0 <- proc.time()[3]
                                 if (burnin_algorithm == "KE") {
                                     gradients <- rep(0, n_chains_burnin)
-                                    mass <- if (!is_main) c(EHMC_Metric_as_Rcpp_List$M_us_vec) else if (metric_shape_main == "diag") {
+                                    mass <- if (adapted_block == "us") c(EHMC_Metric_as_Rcpp_List$M_us_vec) else if (metric_shape_main == "diag") {
                                         1 / c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
                                     } else EHMC_Metric_as_Rcpp_List$M_dense_main
-                                    rates <- if (is_main) result$kinetic_energy_rate_main_proposed else result$kinetic_energy_rate_us_proposed
+                                    rates <- if (is_main) result$kinetic_energy_rate_main_proposed else
+                                             if (is_joint) result$kinetic_energy_rate_main_proposed + result$kinetic_energy_rate_us_proposed else
+                                             result$kinetic_energy_rate_us_proposed
+                                    main_rows_of_joint <- seq_len(n_params_main)
                                     for (kk in seq_len(n_chains_burnin)) {
                                         if (is.finite(divergences[kk]) && divergences[kk] == 0) {
-                                            gradients[kk] <- R_fn_compute_gradients_for_tau_using_KE(
+                                            velocity_end_kk <- if (tau_weight_by_p_jump) velocity_proposed[, kk] else velocity_accepted[, kk]
+                                            gradients[kk] <- if (is_joint) {
+                                                R_fn_compute_gradients_for_tau_using_KE_joint(
+                                                    velocity_initial_main = velocity_initial[main_rows_of_joint, kk],
+                                                    velocity_proposed_main = velocity_end_kk[main_rows_of_joint],
+                                                    metric_shape_main = metric_shape_main,
+                                                    mass_main = mass,
+                                                    velocity_initial_us = velocity_initial[-main_rows_of_joint, kk],
+                                                    velocity_proposed_us = velocity_end_kk[-main_rows_of_joint],
+                                                    mass_us_vec = c(EHMC_Metric_as_Rcpp_List$M_us_vec),
+                                                    kinetic_energy_rate_proposed_joint = rates[kk], tau_ii = tau_values[kk])
+                                            } else R_fn_compute_gradients_for_tau_using_KE(
                                                 velocity_initial = velocity_initial[, kk],
-                                                velocity_proposed = if (tau_weight_by_p_jump) velocity_proposed[, kk] else velocity_accepted[, kk],
+                                                velocity_proposed = velocity_end_kk,
                                                 metric_shape = if (is_main) metric_shape_main else "diag",
                                                 mass_matrix = mass, kinetic_energy_rate_proposed = rates[kk], tau_ii = tau_values[kk])
                                         }
@@ -2400,8 +2453,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         aggregation = "weighted_mean")
                                     tau_adam_update_performed <- isTRUE(attr(updated, "adam_update_performed"))
                                 } else {
-                                    initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
-                                    proposal_mean <- snaper_m_prop_vec_all[if (is_main) index_main else index_nuisance]
+                                    initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
+                                                    if (is_joint) c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
+                                                    EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
+                                    proposal_mean <- snaper_m_prop_vec_all[if (is_main) index_main else if (is_joint) c(index_main, index_nuisance) else index_nuisance]
                                     update <- fn_metric_tau_block_update(
                                         algorithm = burnin_algorithm, theta_initial = theta_initial, theta_proposed = theta_proposed,
                                         theta_accepted = theta_accepted, velocity_proposed = velocity_proposed, velocity_accepted = velocity_accepted,
@@ -2418,7 +2473,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         bias_correction_step = tau_adam_bias_correction_step)
                                     updated <- update$updated
                                     tau_adam_update_performed <- isTRUE(update$adam_update_performed)
-                                    if (is_main) {
+                                    if (is_main || is_joint) {
                                         ChEES_criterion_ema <- update$criterion_ema
                                         ChEES_criterion_ema_vec[ii] <- update$criterion_ema
                                         ChEES_per_tau_gradient_vec[ii] <- update$gradient
@@ -2432,7 +2487,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 ##
                                 if (tau_adam_update_performed) {
                                     tau_adam_updates_performed_by_block[[block_name]] <- tau_adam_bias_correction_step
-                                    if (is_main) tau_adam_bias_correction_step_vec[ii] <- tau_adam_bias_correction_step
+                                    if (is_main || is_joint) tau_adam_bias_correction_step_vec[ii] <- tau_adam_bias_correction_step
                                 }
                                 if (tau_adam_updates_performed_by_block[[block_name]] > tau_adaptation_iteration) {
                                     stop(paste0("tau ADAM update counter (", tau_adam_updates_performed_by_block[[block_name]],
@@ -2640,8 +2695,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 ChEES_criterion_ema_vec = ChEES_criterion_ema_vec,
                 ChEES_per_tau_gradient_vec = ChEES_per_tau_gradient_vec,
                 tau_adaptation_version = 4,
-                trajectory_parameter_block = "main",
+                trajectory_parameter_block = tau_adaptation_block_effective,
+                ## EXPERIMENTAL (2026-09-23): requested and effective block feeding the trajectory-length criterion ("main" | "joint"):
+                tau_adaptation_block_requested = tau_adaptation_block,
+                tau_adaptation_block = tau_adaptation_block_effective,
                 snaper_direction_main = trajectory_direction$main,
+                snaper_direction_joint = trajectory_direction$joint,
                 trajectory_metric_factor_main = trajectory_metric$main,
                 tau_adaptation_iteration_vec = tau_adaptation_iteration_vec,
                 ## ADAM bias correction counts performed tau updates, not iterations (skipped updates excluded):

@@ -21,9 +21,37 @@ fn_trajectory_metric_factor <-  function( mass_matrix,
 
 }
 
+##
+## ---- Joint (main + nuisance) metric factor: a list applied block-wise, so a dense main metric never has to be expanded to the full
+##      (n_main + n_nuisance)^2 matrix. EXPERIMENTAL, assistant-introduced 2026-09-23 for the ps7 test of tau_adaptation_block = "joint".
+##      Rows 1..n_main of a position/velocity are the main block, the remaining rows the nuisance block (diagonal mass M_us).
+##
+fn_trajectory_joint_metric_factor <-  function( mass_main,
+                                                mass_us_vec,
+                                                n_main,
+                                                n_us) {
+
+        if (length(mass_us_vec) != n_us || any(!is.finite(mass_us_vec)) || any(mass_us_vec <= 0)) {
+                stop("The nuisance mass diagonal must be positive, finite and match the nuisance block.")
+        }
+        return(list(main = fn_trajectory_metric_factor(mass_main, n_main),
+                    us = sqrt(c(mass_us_vec)),
+                    n_main = as.integer(n_main)))
+
+}
+
 fn_apply_trajectory_metric <-  function( metric_factor,
                                          values) {
 
+        if (is.list(metric_factor)) {
+                values <-  as.matrix(values)
+                main_rows <-  seq_len(metric_factor$n_main)
+                if (nrow(values) != metric_factor$n_main + length(metric_factor$us)) {
+                        stop("Joint metric factor and position/velocity dimensions do not agree.")
+                }
+                return(rbind(fn_apply_trajectory_metric(metric_factor$main, values[main_rows, , drop = FALSE]),
+                             fn_apply_trajectory_metric(metric_factor$us, values[-main_rows, , drop = FALSE])))
+        }
         if (is.matrix(metric_factor)) {
                 if (ncol(metric_factor) != if (is.matrix(values)) nrow(values) else length(values)) {
                         stop("Metric factor and position/velocity dimensions do not agree.")
@@ -49,6 +77,17 @@ fn_transport_snaper_direction <-  function( direction,
         ##      (R's chol() returns the upper-triangular B with t(B) %*% B = M, so backsolve() solves B_prev x = w.)
         ##
         if (is.null(previous_factor) || identical(previous_factor, metric_factor)) return(direction)
+        if (is.list(metric_factor)) {
+                ## joint factor: transport each block with its own factors, then renormalise the whole direction once.
+                main_rows <-  seq_len(metric_factor$n_main)
+                transported <-  c(fn_transport_snaper_direction(direction[main_rows], previous_factor$main, metric_factor$main) *
+                                      sqrt(sum(direction[main_rows]^2)),
+                                  fn_transport_snaper_direction(direction[-main_rows], previous_factor$us, metric_factor$us) *
+                                      sqrt(sum(direction[-main_rows]^2)))
+                magnitude <-  sqrt(sum(transported^2))
+                if (!is.finite(magnitude) || magnitude == 0) return(fn_initialise_snaper_direction(length(direction)))
+                return(transported / magnitude)
+        }
         theta_space_direction <-  if (is.matrix(previous_factor)) c(backsolve(previous_factor, direction)) else direction / previous_factor
         transported <-  if (is.matrix(metric_factor)) c(metric_factor %*% theta_space_direction) else metric_factor * theta_space_direction
         magnitude <-  sqrt(sum(transported^2))

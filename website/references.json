@@ -112,5 +112,84 @@
     "venue": "Bayesian Analysis; arXiv:2110.13017, version 6, 30 May 2024",
     "url": "https://arxiv.org/abs/2110.13017v6",
     "bibtex_authors": "Margossian, Charles C. and Hoffman, Matthew D. and Sountsov, Pavel and Riou-Durand, Lionel and Vehtari, Aki and Gelman, Andrew"
+  },
+  {
+    "key": "BridgeStan_Roualdes_2023",
+    "authors": "Roualdes, E. A., Ward, B., Carpenter, B., Seyboldt, A. and Axen, S. D.",
+    "year": "2023",
+    "title": "BridgeStan: Efficient in-memory access to the methods of a Stan model",
+    "venue": "Journal of Open Source Software, 8(87), 5236",
+    "url": "https://doi.org/10.21105/joss.05236",
+    "doi": "10.21105/joss.05236",
+    "bibtex_authors": "Roualdes, Edward A. and Ward, Brian and Carpenter, Bob and Seyboldt, Adrian and Axen, Seth D."
+  },
+  {
+    "key": "Qu1996",
+    "authors": "Qu, Y., Tan, M. and Kutner, M. H.",
+    "year": "1996",
+    "title": "Random Effects Models in Latent Class Analysis for Evaluating Accuracy of Diagnostic Tests",
+    "venue": "Biometrics, 52(3), 797-810",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/8805757/",
+    "bibtex_authors": "Qu, Yinsheng and Tan, Ming and Kutner, Michael H."
+  },
+  {
+    "key": "Xu2009",
+    "authors": "Xu, H. and Craig, B. A.",
+    "year": "2009",
+    "title": "A probit latent class model with general correlation structures for evaluating accuracy of diagnostic tests",
+    "venue": "Biometrics, 65(4), 1145-1155",
+    "url": "https://doi.org/10.1111/j.1541-0420.2008.01194.x",
+    "doi": "10.1111/j.1541-0420.2008.01194.x",
+    "bibtex_authors": "Xu, Huiping and Craig, Bruce A."
+  },
+  {
+    "key": "Xu2013",
+    "authors": "Xu, H., Black, M. A. and Craig, B. A.",
+    "year": "2013",
+    "title": "Evaluating accuracy of diagnostic tests with intermediate results in the absence of a gold standard",
+    "venue": "Statistics in Medicine, 32(15), 2571-2584",
+    "url": "https://doi.org/10.1002/sim.5695",
+    "doi": "10.1002/sim.5695",
+    "bibtex_authors": "Xu, Huiping and Black, Michael A. and Craig, Bruce A."
+  },
+  {
+    "key": "Uebersax",
+    "authors": "Uebersax, J. S.",
+    "year": "1999",
+    "title": "Probit latent class analysis with dichotomous or ordered category measures: Conditional independence/dependence models",
+    "venue": "Applied Psychological Measurement, 23(4), 283-297",
+    "url": "https://doi.org/10.1177/01466219922031400",
+    "doi": "10.1177/01466219922031400",
+    "bibtex_authors": "Uebersax, John S."
+  },
+  {
+    "key": "Cotter2013",
+    "authors": "Cotter, S. L., Roberts, G. O., Stuart, A. M. and White, D.",
+    "year": "2013",
+    "title": "MCMC Methods for Functions: Modifying Old Algorithms to Make Them Faster",
+    "venue": "Statistical Science, 28(3), 424-446",
+    "url": "https://arxiv.org/abs/1202.0709",
+    "doi": "10.1214/13-STS421",
+    "bibtex_authors": "Cotter, Simon L. and Roberts, Gareth O. and Stuart, Andrew M. and White, David"
+  },
+  {
+    "key": "Talkouk_2012_mvp_alg_px_gibbs",
+    "authors": "Talhouk, A., Doucet, A. and Murphy, K.",
+    "year": "2012",
+    "title": "Efficient Bayesian inference for multivariate probit models with sparse inverse correlation matrices",
+    "venue": "Journal of Computational and Graphical Statistics, 21(3), 739-757",
+    "url": "https://www.stats.ox.ac.uk/~doucet/talhouk_doucet_murphy_sparseprobit.pdf",
+    "doi": "10.1080/10618600.2012.679239",
+    "bibtex_authors": "Talhouk, Aline and Doucet, Arnaud and Murphy, Kevin"
+  },
+  {
+    "key": "Johnston2024",
+    "authors": "Johnston, C. K., Waterhouse, T., Wiens, M., Mondick, J., French, J. and Gillespie, W. R.",
+    "year": "2024",
+    "title": "Bayesian estimation in NONMEM",
+    "venue": "CPT: Pharmacometrics & Systems Pharmacology, 13, 192-207",
+    "url": "https://doi.org/10.1002/psp4.13088",
+    "doi": "10.1002/psp4.13088",
+    "bibtex_authors": "Johnston, C. K. and Waterhouse, T. and Wiens, M. and Mondick, J. and French, J. and Gillespie, W. R."
   }
 ]

@@ -319,7 +319,7 @@ $(info BRIDGESTAN_SRC is: $(BRIDGESTAN_SRC))
 ##
 ##### RNG paths: ---------------------------------------------------------------------------------------------------------------
 #### ## BOOKMARK:
-#### override RNG_PATH=/home/enzocerullo/pcg_lib/include
+#### override RNG_PATH=/path/to/pcg_lib/include
 #### ##
 ####### PKG_CPPFLAGS / PKG_CXXFLAGS / CPPFLAGS / CXXFLAGS -----------------------------------------------------------------------
 override PKG_CPPFLAGS = $(BASE_FLAGS) \

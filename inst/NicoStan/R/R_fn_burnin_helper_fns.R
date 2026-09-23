@@ -81,7 +81,8 @@ recip <- function(x) {
           
           diag_of_x <- diag(x)
           recip_diag_x <- 1.0 / diag_of_x
-          recip_mat_x <- diag(recip_diag_x)
+          ## nrow = length(...) so a 1x1 matrix stays 1x1 (diag() of a length-1 vector builds a floor(x) x floor(x) identity instead):
+          recip_mat_x <- diag(recip_diag_x, nrow = length(recip_diag_x))
           return(recip_mat_x)
           
         } else {
@@ -524,6 +525,16 @@ update_M_Empirical_main <- function( debug,
                         EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
           }
         } else if (metric_shape_main == "dense") {
+          ##
+          ## A covariance of the wrong SIZE is a bug, not an estimate that is "not yet usable", so stop rather than keep the old
+          ## metric silently (2026-09-22: a 0x0 covariance from diag() of a length-1 vector left 1-parameter models on a unit metric).
+          ##
+          n_params_main_expected <- length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
+          if (!is.null(empicical_cov_main) && is.matrix(empicical_cov_main) &&
+              (nrow(empicical_cov_main) != n_params_main_expected || ncol(empicical_cov_main) != n_params_main_expected)) {
+            stop(paste0("update_M_Empirical_main: empirical covariance is ", nrow(empicical_cov_main), " x ", ncol(empicical_cov_main),
+                        " but there are ", n_params_main_expected, " main parameters."))
+          }
           proposed_covariance_check <- variance_scale * empicical_cov_main
           if (is.null(proposed_covariance_check) ||
               length(proposed_covariance_check) == 0L ||
@@ -568,11 +579,14 @@ update_M_Empirical_main <- function( debug,
                 EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec <- c(M_main_diag_sqrt)
                 ##
                 ## Dummy dense parameters:
+                ## (2026-09-22: nrow = n_params_main, because with ONE main parameter diag(x) of a length-1 vector
+                ##  builds a floor(x) x floor(x) identity - 0x0 for a variance below 1 - instead of the 1x1 matrix x.)
                 ##
-                EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag(EHMC_Metric_as_Rcpp_List$M_main_vec)
-                EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec)
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec)
+                n_params_main_diag_shape <- length(EHMC_Metric_as_Rcpp_List$M_main_vec)
+                EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag(c(EHMC_Metric_as_Rcpp_List$M_main_vec),     nrow = n_params_main_diag_shape)
+                EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(c(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec), nrow = n_params_main_diag_shape)
+                EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), nrow = n_params_main_diag_shape)
+                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(c(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec), nrow = n_params_main_diag_shape)
  
           
                 # outs <- update_M_diag_Empirical_main(     

@@ -40,7 +40,10 @@
 //
 // Kernel dispatch: AVX-512 (8 lanes) when compiled with -mavx512f -mavx512vl -mavx512dq, else AVX2
 // (4 lanes) with -mavx2; anything less is a compile error (a silently scalar build is what we do NOT
-// want to benchmark). Tail handling: a partial final block goes through a padded stack buffer whose
+// want to benchmark). 2026-09-22: compiling with -DBAYESMVP_FORCE_AVX2 selects the 4-lane AVX2 kernels
+// even when AVX-512 is enabled (e.g. BridgeStan make argument CPPFLAGS_OPTIM=-DBAYESMVP_FORCE_AVX2), so an
+// AVX-512 machine can run the AVX2 arm with every other compile flag unchanged; bmvp_simd_lanes() then
+// returns 4, which callers check against the requested backend. Tail handling: a partial final block goes through a padded stack buffer whose
 // spare lanes repeat the last valid element; only the valid lanes are written back.
 //
 // -----------------------------------------------------------------------------------------------------------------------------
@@ -87,7 +90,7 @@ static constexpr double INV_SQRT_2PI        =  0.39894228040143267794;   //  1/s
 #include <BayesMVP/math/fast_and_approx_AVX2_fns.hpp>
 #include <BayesMVP/math/fast_and_approx_AVX512_fns.hpp>
 
-#if defined(__AVX512F__) && defined(__AVX512VL__) && defined(__AVX512DQ__)
+#if defined(__AVX512F__) && defined(__AVX512VL__) && defined(__AVX512DQ__) && !defined(BAYESMVP_FORCE_AVX2)
 #  define BMVP_LANES 8
 #  define BMVP_KERNEL_NAME(stem) stem##_AVX512
 #elif defined(__AVX2__)

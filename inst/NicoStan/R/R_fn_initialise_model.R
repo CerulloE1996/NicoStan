@@ -1,13 +1,13 @@
 
 
 # 
-# json <- jsonlite::fromJSON("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_data/data_6e479c5a0b94fe3f633a31e26aa5dbcc_1000.json")
+# json <- jsonlite::fromJSON("path/to/stan_data/data_<hash>.json")
 # json$n_thr_per_ord_test
 # json$n_cat_per_ord_test
 # json$n_ordinal_tests
 # 
 # 
-# file.remove("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_data/data_6e479c5a0b94fe3f633a31e26aa5dbcc_1000.json")
+# file.remove("path/to/stan_data/data_<hash>.json")
 
 
 ## R_fn_initialise_model.R               
@@ -315,7 +315,6 @@ initialise_model <- function( Model_type,
                        make_args = make_args))
   
 }
-
 
 
 

@@ -229,7 +229,9 @@ create_summary_and_traces <- function(    model_results,
                                           ##
                                           use_disk = TRUE,
                                           use_disk_path = "/tmp/hmc_traces",
-                                          use_disk_path_post_hoc_dir = "/tmp/constrain_traces"
+                                          use_disk_path_post_hoc_dir = "/tmp/constrain_traces",
+                                          ##
+                                          n_threads = NULL
 ) {
   
         require(bridgestan)
@@ -305,6 +307,42 @@ create_summary_and_traces <- function(    model_results,
         n_chains <- n_chains_sampling
         ##
         n_iter <- dim(main_trace[[1]])[2]
+        ##
+        ## ---- Thread budget for the summary (2026-09-22 fix):
+        ##      This function used to set mc.cores, OMP_NUM_THREADS and the RcppParallel/TBB pool to
+        ##      parallel::detectCores() (192 on the local HPC). That ignored the thread count the caller had set,
+        ##      ignored taskset / CPU-affinity limits (detectCores() counts every CPU in the machine), and the TBB
+        ##      setting persisted after $summary() returned. That overloaded the machine on 2026-09-22.
+        ##      Now: the caller's n_threads if given, otherwise the number of sampling chains, never more than the
+        ##      CPUs this process may run on; the previous settings are restored when this function exits.
+        ##
+        n_cpus_available_to_this_process <-  length(tryCatch(parallel::mcaffinity(), error = function(error_object) NULL))
+        if (n_cpus_available_to_this_process < 1) n_cpus_available_to_this_process <-  parallel::detectCores()
+        ##
+        n_threads_summary <-  if_null_then_set_to(n_threads, min(n_chains_sampling, n_cpus_available_to_this_process))
+        ##
+        if (!(is.numeric(n_threads_summary) && length(n_threads_summary) == 1 && is.finite(n_threads_summary) && n_threads_summary >= 1)) {
+              stop(paste0("create_summary_and_traces: n_threads must be a single number >= 1, got: ",
+                          paste(format(n_threads), collapse = ", ")))
+        }
+        n_threads_summary <-  min(round(n_threads_summary), n_cpus_available_to_this_process)
+        ##
+        previous_mc_cores <-  getOption("mc.cores")
+        previous_OMP_NUM_THREADS <-  Sys.getenv("OMP_NUM_THREADS", unset = NA)
+        previous_RcppParallel_num_threads <-  Sys.getenv("RCPP_PARALLEL_NUM_THREADS", unset = NA)
+        ##
+        on.exit({
+              options(mc.cores = previous_mc_cores)
+              if (is.na(previous_OMP_NUM_THREADS)) Sys.unsetenv("OMP_NUM_THREADS") else Sys.setenv(OMP_NUM_THREADS = previous_OMP_NUM_THREADS)
+              if (is.na(previous_RcppParallel_num_threads)) {
+                    RcppParallel::setThreadOptions(numThreads = "auto")
+              } else {
+                    RcppParallel::setThreadOptions(numThreads = as.numeric(previous_RcppParallel_num_threads))
+              }
+        }, add = TRUE)
+        ##
+        message(paste0("create_summary_and_traces: using ", n_threads_summary, " threads (",
+                       n_cpus_available_to_this_process, " CPUs available to this process)."))
         ##
         ## Check if using disk mode:
         # use_disk <- TRUE
@@ -703,9 +741,9 @@ create_summary_and_traces <- function(    model_results,
              pars_indicies_to_track <- 0:(n_par_inc_tp_and_gq - 1) ## start from 0 as C++ uses 0-based indexing
              n_params_full <- n_par_inc_tp_and_gq
              ##
-             options(mc.cores = parallel::detectCores())
-             Sys.setenv(OMP_NUM_THREADS = parallel::detectCores())
-             RcppParallel::setThreadOptions(numThreads = parallel::detectCores())
+             options(mc.cores = n_threads_summary)
+             Sys.setenv(OMP_NUM_THREADS = n_threads_summary)
+             RcppParallel::setThreadOptions(numThreads = n_threads_summary)
              ##
              ##
              read_constrained_traces <- function(result, 
@@ -960,7 +998,7 @@ create_summary_and_traces <- function(    model_results,
              #    }
              # })
           
-             n_cores <- parallel::detectCores()
+             n_cores <- n_threads_summary ## was parallel::detectCores() (2026-09-22 fix, see "Thread budget for the summary")
              
              # try({ 
              #   rm(all_param_outs_trace)

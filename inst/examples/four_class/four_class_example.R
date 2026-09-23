@@ -212,7 +212,7 @@ run_four_class_nicostan_smoke <- function(
     paths = four_class_example_paths(),
     fixture_file = paths$fixture_file,
     stan_file = paths$source_plain,
-    math_backend = c("Stan", "AVX512"),
+    math_backend = c("Stan", "AVX512", "AVX2"),
     avx_header = file.path(dirname(dirname(paths$paper3_directory)), "R_packages", "BayesMVP",
                            "inst", "BayesMVP", "inst", "include", "BayesMVP",
                            "stan_external_functions.hpp"),
@@ -228,20 +228,29 @@ run_four_class_nicostan_smoke <- function(
     if (!file.exists(stan_file)) stop("Stan source missing: ", stan_file)
     if (chains > length(fixture$initial_values))
         stop("The fixture contains only ", length(fixture$initial_values), " initial-value lists")
-    if (math_backend == "AVX512" && !file.exists(avx_header))
+    ## 2026-09-22: math_backend = "AVX2" compiles the same AVX model with the same flags as "AVX512" plus
+    ## -DBAYESMVP_FORCE_AVX2 (make argument CPPFLAGS_OPTIM), which makes the BayesMVP header use its 4-lane AVX2 kernels on an
+    ## AVX-512 machine too. (-mno-avx512f in CXXFLAGS would not work here: BridgeStan's make/local APPENDS -mavx512f to the
+    ## CXXFLAGS environment variable.) The define is part of the build signature, so the AVX2 and AVX512 builds never share
+    ## a cached binary, and four_class_assert_simd_lanes() stops unless the model reports 4 (AVX2) / 8 (AVX512) lanes.
+    uses_avx_backend <- math_backend %in% c("AVX512", "AVX2")
+    if (uses_avx_backend && !file.exists(avx_header))
         stop("AVX header not found: ", avx_header)
-    avx_flags <- if (identical(math_backend, "AVX512"))
+    avx_flags <- if (uses_avx_backend)
         "-O3 -std=c++17 -march=native -mtune=native -mfma -mavx2 -mavx512f -mavx512vl -mavx512dq" else
         "-O3 -std=c++17 -march=native -mtune=native -mfma"
-    build_signature <- if (identical(math_backend, "AVX512"))
-        digest::digest(list(header = digest::digest(file = avx_header, algo = "sha256"),
-                            flags = avx_flags), algo = "sha256") else NULL
+    avx_level_make_args <- if (identical(math_backend, "AVX2")) "CPPFLAGS_OPTIM=-DBAYESMVP_FORCE_AVX2" else character(0)
+    expected_simd_lanes <- if (identical(math_backend, "AVX512")) 8 else if (identical(math_backend, "AVX2")) 4 else NA_real_
+    build_signature <- if (uses_avx_backend)
+        digest::digest(c(list(header = digest::digest(file = avx_header, algo = "sha256"),
+                              flags = avx_flags),
+                         if (length(avx_level_make_args) > 0) list(level = avx_level_make_args)), algo = "sha256") else NULL
     cache <- four_class_external_model_cache(stan_file, paths, paths$runtime_directory,
                                              build_signature = build_signature)
     output_rds <- four_class_external_output_file(output_rds, cache)
     stan_file <- cache$stan_file
     old_cxxflags <- Sys.getenv("CXXFLAGS", unset = NA_character_)
-    if (identical(math_backend, "AVX512")) Sys.setenv(CXXFLAGS = avx_flags)
+    if (uses_avx_backend) Sys.setenv(CXXFLAGS = avx_flags)
     on.exit({
         if (is.na(old_cxxflags)) Sys.unsetenv("CXXFLAGS") else Sys.setenv(CXXFLAGS = old_cxxflags)
     }, add = TRUE)
@@ -250,11 +259,11 @@ run_four_class_nicostan_smoke <- function(
         Stan_data_list = fixture$data,
         Stan_model_file_path = normalizePath(stan_file),
         sample_nuisance = TRUE,
-        Stan_cpp_user_header = if (math_backend == "AVX512") normalizePath(avx_header) else NULL,
-        make_args = if (math_backend == "AVX512")
-            c("STAN_THREADS=true", paste0("USER_HEADER=", normalizePath(avx_header))) else NULL
+        Stan_cpp_user_header = if (uses_avx_backend) normalizePath(avx_header) else NULL,
+        make_args = if (uses_avx_backend)
+            c("STAN_THREADS=true", paste0("USER_HEADER=", normalizePath(avx_header)), avx_level_make_args) else NULL
     )
-    simd_lanes <- if (identical(math_backend, "AVX512")) four_class_assert_simd_lanes(fit) else NA_real_
+    simd_lanes <- if (uses_avx_backend) four_class_assert_simd_lanes(fit, expected_lanes = expected_simd_lanes) else NA_real_
     ## Deliberately no n_nuisance_override: the first u_raw declaration is
     ## recovered from stanc metadata, and its unconstrained dimension is used.
     set.seed(seed)
@@ -312,13 +321,13 @@ run_four_class_nicostan_smoke <- function(
         metric_type_main = metric_type_main,
         M_decay_type = M_decay_type,
         phi_type = fixture$data$Phi_type,
-        avx_kernel_path_active = identical(math_backend, "AVX512") && fixture$data$Phi_type != 1L,
-        avx_kernel_path = if (identical(math_backend, "AVX512") && fixture$data$Phi_type != 1L)
-            "BayesMVP vectorized external branch" else if (identical(math_backend, "AVX512"))
+        avx_kernel_path_active = uses_avx_backend && fixture$data$Phi_type != 1L,
+        avx_kernel_path = if (uses_avx_backend && fixture$data$Phi_type != 1L)
+            "BayesMVP vectorized external branch" else if (uses_avx_backend)
             "Stan exact-CDF branch; external vector functions bypassed" else "Stan built-in math",
         simd_lanes = simd_lanes,
-        avx_compile_flags = if (identical(math_backend, "AVX512")) avx_flags else NA_character_,
-        avx_build_signature = if (identical(math_backend, "AVX512")) build_signature else NA_character_
+        avx_compile_flags = if (uses_avx_backend) paste(c(avx_flags, avx_level_make_args), collapse = " ") else NA_character_,
+        avx_build_signature = if (uses_avx_backend) build_signature else NA_character_
     )
     stopifnot(result$automatic_nuisance_detection,
               is.null(fit$n_nuisance_override),

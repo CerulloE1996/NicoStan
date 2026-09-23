@@ -305,6 +305,12 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          analysis of Hoffman, Radul and Sountsov (2021) - NOT a published method.
                                         ##                                          See docs/adaptation-notes.md.
                                         tau_sampling_scale = "none",
+                                        ##   tau_adaptation_block                 - "main" (default; the behaviour before this option existed): the
+                                        ##                                          trajectory-length criterion uses the main block only. "joint":
+                                        ##                                          main + nuisance concatenated, still adapting the one joint tau.
+                                        ##                                          EXPERIMENTAL, assistant-introduced 2026-09-23 for the ps7 test;
+                                        ##                                          models without a sampled nuisance block fall back to "main".
+                                        tau_adaptation_block = "main",
                                         ##   burnin_TBB_pool_equals_n_chains      - NULL defaults to TRUE for built-in models (separate OpenMP WCP teams).
                                         ##                                          Stan models FORCE FALSE, even if TRUE is supplied: nested TBB work
                                         ##                                          shares the n_threads_WCP_burnin * n_chains_burnin thread budget.
@@ -1292,6 +1298,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                                  ##
                                                                  manual_tau = pre_burnin_params$manual_tau,
                                                                  randomize_tau_burnin = randomize_tau_burnin,
+                                                                 tau_adaptation_block = tau_adaptation_block,
                                                                  tau_if_manual = pre_burnin_params$tau_if_manual,
                                                                  tau_if_manual_in_L_units = pre_burnin_params$tau_if_manual_in_L_units,
                                                                  ##
@@ -1916,6 +1923,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              metric_adaptation_end_iter = metric_adaptation_end_iter,
                                                              share_tau_ii_across_chains_in_burnin = share_tau_ii_across_chains_in_burnin,
                                                              randomize_tau_burnin = randomize_tau_burnin,
+                                                             tau_adaptation_block = tau_adaptation_block,
                                                              ##
                                                              burnin_algorithm = burnin_algorithm,
                                                              diffusion_HMC = diffusion_HMC,
@@ -2339,7 +2347,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                           if (burnin_algorithm %in% c("CHESSR", "SNAPER")) "expected_per_trajectory_rate" else
                                           if (burnin_algorithm == "ChEES") "expected_squared_position_statistic_change" else "squared_kinetic_energy_change",
                    trajectory_coordinates = if (burnin_algorithm == "KE") "kinetic_energy" else "mass_metric",
-                   trajectory_parameter_block = "main",
+                   trajectory_parameter_block = if_null_then_set_to(burnin_object$trajectory_parameter_block, "main"),
+                   ## EXPERIMENTAL (2026-09-23): block feeding the trajectory-length criterion, as requested and as actually used:
+                   tau_adaptation_block_requested = tau_adaptation_block,
+                   tau_adaptation_block = if_null_then_set_to(burnin_object$tau_adaptation_block, "main"),
                    tau_adaptation_enabled = !isTRUE(manual_tau),
                    randomize_tau_burnin = randomize_tau_burnin,
                    randomize_tau_sampling = randomize_tau_sampling,

@@ -165,6 +165,8 @@ def render(text):
 
 
 body_text = template.replace("{{QUICKSTART}}", quickstart).replace("{{REFERENCES}}", reference_list)
+## HTML comments are hidden on GitHub; drop them so the Pages site does not print them as text (2026-09-23).
+body_text = re.sub(r"<!--.*?-->[ \t]*\n?", "", body_text, flags=re.S)
 body = render(body_text)
 navigation = "".join(
     f'<a href="#{section_id}">{title}</a>'
@@ -174,7 +176,7 @@ page = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 <title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="Adaptive Hamiltonian Monte Carlo for general Stan models, with optional diffusion-pathspace dynamics for Gaussian latent blocks. Methods, examples and installation.">
 <meta name="theme-color" content="#163e2e"><link rel="icon" href="assets/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css"><script src="assets/site.js" defer></script></head><body>
 <a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top"><span class="brand-mark">N</span>NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
-<div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>Adaptive HMC<br>for Stan models.</h1><p class="hero-intro">Ordinary HMC for the main parameters.<br>Diffusion-pathspace dynamics for suitable Gaussian latent blocks.</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a><a href="#trajectory-length-adaptation">Explore the methods ↓</a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram" aria-hidden="true"><svg viewBox="0 0 420 340"><g fill="none" stroke="currentColor"><ellipse cx="210" cy="170" rx="171" ry="116" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="136" ry="87" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="98" ry="59" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="59" ry="30" transform="rotate(-28 210 170)"/><path class="hero-path" d="M79 242C64 178 127 70 256 80S370 177 286 237S159 259 143 196S216 119 262 151"/></g><circle cx="262" cy="151" r="7" fill="#eab38f"/><text x="42" y="319">MAIN PARAMETERS + LATENT VARIABLES</text></svg></div></div>
+<div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>Adaptive HMC<br>for Stan models.</h1><p class="hero-intro">Ordinary HMC for the main parameters.<br>Diffusion-pathspace dynamics for suitable Gaussian latent blocks.</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a><a href="#burnin-algorithms">Explore the methods ↓</a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram" aria-hidden="true"><svg viewBox="0 0 420 340"><g fill="none" stroke="currentColor"><ellipse cx="210" cy="170" rx="171" ry="116" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="136" ry="87" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="98" ry="59" transform="rotate(-28 210 170)"/><ellipse cx="210" cy="170" rx="59" ry="30" transform="rotate(-28 210 170)"/><path class="hero-path" d="M79 242C64 178 127 70 256 80S370 177 286 237S159 259 143 196S216 119 262 151"/></g><circle cx="262" cy="151" r="7" fill="#eab38f"/><text x="42" y="319">MAIN PARAMETERS + LATENT VARIABLES</text></svg></div></div>
 <div class="layout"><aside><details open><summary>On this page</summary><nav aria-label="On this page">''' + navigation + '''</nav></details><p class="aside-note">Methods and examples for NicoStan.</p></aside><main id="content">''' + body + '''</main></div>
 <footer><a class="brand" href="#top">NicoStan</a><p>Enzo Cerullo · GPL-3 · Development documentation</p><a href="references.bib">Download references (.bib)</a></footer></body></html>'''
 if "\u2014" in page or "\u2014" in markdown:
@@ -184,10 +186,14 @@ if "\u2014" in page or "\u2014" in markdown:
 (DOCS / "assets" / "icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#163e2e"/><path d="M19 46V18L45 46V18" stroke="#f5f4e9" stroke-width="5" fill="none"/></svg>')
 for name in ["site.css", "site.js"]:
     shutil.copy2(SOURCE / name, DOCS / "assets" / name)
-bibtex = []
-for r in references:
-    # Use an explicit author list for correct BibTeX parsing of the short display citation.
-    authors = re.sub(r", ([A-Z])", r", \1", r["authors"])
-    bibtex.append("@misc{" + r["key"] + ",\n  title = {" + r["title"] + "},\n  author = {" + r.get("bibtex_authors", authors) + "},\n  year = {" + r["year"] + "},\n  howpublished = {" + r["venue"] + "},\n  url = {" + r["url"] + "}" + (",\n  doi = {" + r["doi"] + "}" if "doi" in r else "") + "\n}")
-(DOCS / "references.bib").write_text("\n\n".join(bibtex) + "\n")
+bibliography_source = SOURCE / "references.bib"
+if bibliography_source.exists():
+    shutil.copy2(bibliography_source, DOCS / "references.bib")
+else:
+    bibtex = []
+    for r in references:
+        # Use an explicit author list for correct BibTeX parsing of the short display citation.
+        authors = re.sub(r", ([A-Z])", r", \1", r["authors"])
+        bibtex.append("@misc{" + r["key"] + ",\n  title = {" + r["title"] + "},\n  author = {" + r.get("bibtex_authors", authors) + "},\n  year = {" + r["year"] + "},\n  howpublished = {" + r["venue"] + "},\n  url = {" + r["url"] + "}" + (",\n  doi = {" + r["doi"] + "}" if "doi" in r else "") + "\n}")
+    (DOCS / "references.bib").write_text("\n\n".join(bibtex) + "\n")
 print("Built README.md, docs/index.html, static assets and the complete BibTeX references.")

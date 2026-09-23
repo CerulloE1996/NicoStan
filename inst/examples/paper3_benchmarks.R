@@ -78,12 +78,23 @@ paper3_benchmark_package_fingerprint <- function(package_name) {
         list(path = normalizePath(package_path, mustWork = TRUE), files = paper3_benchmark_hash_files(package_files))
 }
 
+## 2026-09-22: the AVX arms APPEND their ISA flags (CXXFLAGS_OPTIM, which Stan math's make/compiler_flags adds after
+## BridgeStan's make/local CXXFLAGS) instead of passing CXXFLAGS on the make command line. A command-line CXXFLAGS REPLACES
+## make/local's CXXFLAGS, so both AVX arms were compiled WITHOUT -DNDEBUG -DBOOST_DISABLE_ASSERTS -fno-math-errno
+## -fno-signed-zeros -fno-trapping-math, which the plain Stan arm keeps (checked with make -n). All three arms now share
+## make/local's flags. "AVX2" no longer strips AVX-512 from the whole model (-mno-avx512f): it compiles the same model with
+## -DBAYESMVP_FORCE_AVX2, which makes BayesMVP/stan_external_functions.hpp use its 4-lane AVX2 kernels (bmvp_simd_lanes() = 4)
+## while everything else is identical to the AVX512 arm, as vect_type = "AVX2" does for the native BayesMVP models.
+## The fits check simd_lanes (8 / 4) against the requested backend and stop on a mismatch.
 paper3_benchmark_compile_arguments <- function(math_backend) {
         compile_arguments <- c("STAN_THREADS=true", "PRECOMPILED_HEADERS=false")
         if (math_backend == "Stan") return(compile_arguments)
-        isa_flags <- if (math_backend == "AVX512") "-mavx2 -mavx512f -mavx512vl -mavx512dq" else
-                     "-mavx2 -mno-avx512f -mno-avx512vl -mno-avx512dq"
-        c(compile_arguments, paste0("CXXFLAGS=", shQuote(paste("-O3 -std=c++17 -march=native -mtune=native -mfma", isa_flags))))
+        if (!math_backend %in% c("AVX512", "AVX2")) stop("math_backend must be Stan, AVX2 or AVX512, got: ", math_backend)
+        isa_flags <- if (math_backend == "AVX512") "-march=native -mtune=native -mfma -mavx2 -mavx512f -mavx512vl -mavx512dq" else
+                     "-march=native -mtune=native -mfma -mavx2"
+        compile_arguments <- c(compile_arguments, paste0("CXXFLAGS_OPTIM=", shQuote(isa_flags)))
+        if (math_backend == "AVX2") compile_arguments <- c(compile_arguments, "CPPFLAGS_OPTIM=-DBAYESMVP_FORCE_AVX2")
+        compile_arguments
 }
 
 paper3_benchmark_build_fingerprint <- function(engine, math_backend) {

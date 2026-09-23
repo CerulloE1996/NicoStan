@@ -1,5 +1,6 @@
-#### =====================================================================================================================================
-## Paper 3 / NicoStan examples
+##
+## =====================================================================================================================================
+## Alg. paper 3 / NicoStan examples
 ##
 ## Source this file to define the functions; no fits run on sourcing.
 ## The smoke profile checks execution. The analysis profile is a starting configuration, not a convergence guarantee.
@@ -430,7 +431,10 @@ run_paper3_example <-  function( model,
         source_hash <-  digest::digest(file = source_file, algo = "sha256")
         model_build_dir <-  file.path(output_dir, "models", paste0(model, "_", substr(source_hash, 1L, 12L), "_", math_backend))
         dir.create(model_build_dir, recursive = TRUE, showWarnings = FALSE)
-        stan_file <-  file.path(model_build_dir, selected_source)
+        ## 2026-09-22: AVX builds carry the backend in the file name (<model>_avx_AVX2.stan / _AVX512.stan): BridgeStan's R interface
+        ## finds a loaded model library by its base name, so an AVX2 and an AVX512 build of the same _avx.stan loaded in one R
+        ## session shared a name, and the build loaded first then returned an all-zero gradient (A2_simd test 4b).
+        stan_file <-  file.path(model_build_dir, if (math_backend == "Stan") selected_source else sub(".stan$", paste0("_", math_backend, ".stan"), selected_source))
         if (!file.exists(stan_file)) stopifnot(file.copy(source_file, stan_file))
         stan_file <-  normalizePath(stan_file, mustWork = TRUE)
         suffix <-  if (engine == "NicoStan") paste0(burnin_algorithm, "_", math_backend, "_diffusion_", diffusion) else "NUTS"
@@ -458,9 +462,14 @@ run_paper3_example <-  function( model,
                                 stop(paste0("This CPU does not expose the required ", math_backend, " instruction set."))
                         }
                 }
-                isa_flags <-  if (math_backend == "AVX512") "-mavx2 -mavx512f -mavx512vl -mavx512dq" else
-                              "-mavx2 -mno-avx512f -mno-avx512vl -mno-avx512dq"
-                compile_arguments <-  c(compile_arguments, paste0("CXXFLAGS=", shQuote(paste("-O3 -std=c++17 -march=native -mtune=native -mfma", isa_flags))))
+                ## 2026-09-22: ISA flags APPENDED via CXXFLAGS_OPTIM (a command-line CXXFLAGS replaced BridgeStan's make/local
+                ## CXXFLAGS, dropping -DNDEBUG and -fno-math-errno etc. from the AVX arms only), and "AVX2" = the same build as
+                ## "AVX512" plus -DBAYESMVP_FORCE_AVX2 (4-lane BayesMVP kernels; simd_lanes is checked below). Same rule as
+                ## paper3_benchmark_compile_arguments() in paper3_benchmarks.R.
+                isa_flags <-  if (math_backend == "AVX512") "-march=native -mtune=native -mfma -mavx2 -mavx512f -mavx512vl -mavx512dq" else
+                              "-march=native -mtune=native -mfma -mavx2"
+                compile_arguments <-  c(compile_arguments, paste0("CXXFLAGS_OPTIM=", shQuote(isa_flags)))
+                if (math_backend == "AVX2") compile_arguments <-  c(compile_arguments, "CPPFLAGS_OPTIM=-DBAYESMVP_FORCE_AVX2")
                 header_files <-  c(header, file.path(dirname(header), "math", c("fast_and_approx_AVX2_fns.hpp", "fast_and_approx_AVX512_fns.hpp")))
                 header_hashes <-  setNames(vapply(header_files, function(path) digest::digest(file = path, algo = "sha256"), character(1L)), basename(header_files))
         }

@@ -405,6 +405,7 @@ MVP_model <- R6Class("MVP_model",
                           #'@param randomize_tau_burnin Randomise trajectory length during burn-in. Default FALSE; length can still adapt between iterations.
                           #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from zero to twice the adapted scale (at least one integration step). Default TRUE.
                           #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an assistant-introduced unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
+                          #'@param tau_adaptation_block "main" (default; unchanged behaviour): the trajectory-length criterion uses the main parameters only. "joint": main and nuisance parameters concatenated, still adapting the one joint tau. EXPERIMENTAL (2026-09-23), for testing only; models without a sampled nuisance block fall back to "main".
                           #'@param manual_tau If \code{FALSE}, then the selected burnin_algorithm will be used to adapt \eqn{\tau} during the burnin phase. Otherwise if \code{TRUE}, \eqn{\tau} will be
                           #' fixed to the value given in the \code{tau_if_manual} argument. 
                           #'@param tau_if_manual The HMC path length (\eqn{\tau}) to use for the HMC sampling. This will be used for both the burnin and sampling phases. 
@@ -631,6 +632,7 @@ MVP_model <- R6Class("MVP_model",
                                               randomize_tau_burnin = FALSE,
                                               randomize_tau_sampling = TRUE,
                                               tau_sampling_scale = "none",
+                                              tau_adaptation_block = "main",
                                               burnin_TBB_pool_equals_n_chains = NULL,
                                               store_log_lik_trace = NULL,
                                               use_disk_path = "/tmp/hmc_traces",
@@ -821,6 +823,7 @@ MVP_model <- R6Class("MVP_model",
                                                             randomize_tau_burnin = randomize_tau_burnin,
                                                             randomize_tau_sampling = randomize_tau_sampling,
                                                             tau_sampling_scale = tau_sampling_scale,
+                                                            tau_adaptation_block = tau_adaptation_block,
                                                             burnin_TBB_pool_equals_n_chains = burnin_TBB_pool_equals_n_chains,
                                                             store_log_lik_trace = store_log_lik_trace,
                                                             use_disk_path = use_disk_path,
@@ -932,6 +935,8 @@ MVP_model <- R6Class("MVP_model",
                           #'Only relevant if \code{compute_nested_rhat = TRUE}.
                           #'@param save_trace_tibbles Whether to save the trace as tibble dataframes as well as 3D arrays. 
                           #'Default is FALSE. 
+                          #'@param n_threads Threads used to compute the summary. Default NULL: the number of sampling chains,
+                          #'never more than the CPUs this R process may run on (taskset / CPU affinity respected).
                           #'@param ... Any other arguments to be passed to NicoStan::create_summary_and_traces.
                           #'@return Returns a new MVP_plot_and_diagnose object (from the "MVP_plot_and_diagnose" R6 class) for creating MCMC diagnostics and plots.
                           summary = function(       compute_main_params = TRUE,
@@ -950,7 +955,9 @@ MVP_model <- R6Class("MVP_model",
                                                     ##
                                                     use_disk = NULL,
                                                     use_disk_path = "/tmp/hmc_traces",
-                                                    use_disk_path_post_hoc_dir = "/tmp/constrain_traces"
+                                                    use_disk_path_post_hoc_dir = "/tmp/constrain_traces",
+                                                    ##
+                                                    n_threads = NULL
                                                     ) {
                             
                                 # validate initialization
@@ -986,7 +993,9 @@ MVP_model <- R6Class("MVP_model",
                                                                                                   ##
                                                                                                   use_disk = use_disk,
                                                                                                   use_disk_path = use_disk_path,
-                                                                                                  use_disk_path_post_hoc_dir = use_disk_path_post_hoc_dir)
+                                                                                                  use_disk_path_post_hoc_dir = use_disk_path_post_hoc_dir,
+                                                                                                  ##
+                                                                                                  n_threads = n_threads)
                                 
                                 # return the plotting class instance with the summary
                                 MVP_class_plot_object <- MVP_plot_and_diagnose$new(  model_summary =   self$model_fit_object,
