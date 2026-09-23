@@ -3,7 +3,7 @@
 ## R_LIBS determines which installed NicoStan build is used.
 ##
 script <-  sub("^--file=", "", commandArgs()[startsWith(commandArgs(), "--file=")])
-source(file.path(dirname(normalizePath(script, mustWork = TRUE)), "paper3_examples.R"))
+source(file.path(dirname(normalizePath(script, mustWork = TRUE)), "NicoStan_examples.R"))
 arguments <-  commandArgs(trailingOnly = TRUE)
 stopifnot(length(arguments) >= 4L)
 result <-  run_NicoStan_example(model = arguments[1L], engine = arguments[2L], math_backend = arguments[3L],

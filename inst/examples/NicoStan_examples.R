@@ -5,12 +5,12 @@
 ## Source this file to define the functions; no fits run on sourcing.
 ## The smoke profile checks execution. The analysis profile is a starting configuration, not a convergence guarantee.
 ##
-.paper3_source_files <-  as.character(unlist(lapply(sys.frames(), function(frame) frame$ofile)))
-.paper3_source_directory <-  if (length(.paper3_source_files)) {
-        dirname(normalizePath(tail(.paper3_source_files, 1L), mustWork = TRUE))
+.NicoStan_examples_source_files <-  as.character(unlist(lapply(sys.frames(), function(frame) frame$ofile)))
+.NicoStan_examples_source_directory <-  if (length(.NicoStan_examples_source_files)) {
+        dirname(normalizePath(tail(.NicoStan_examples_source_files, 1L), mustWork = TRUE))
 } else system.file("examples", package = "NicoStan")
 ##
-paper3_example_registry <-  function() {
+NicoStan_example_registry <-  function() {
         data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic", "joint_longitudinal_survival", "gaussian_process", "stochastic_volatility",
                       "latent_diffusion_survival"),
@@ -23,7 +23,7 @@ paper3_example_registry <-  function() {
             stringsAsFactors = FALSE)
 }
 ##
-paper3_quadrature <-  function(n_points = 15L) {
+NicoStan_quadrature <-  function(n_points = 15L) {
         index <-  seq_len(n_points - 1L)
         off_diagonal <-  index / sqrt(4 * index^2 - 1)
         jacobi <-  matrix(0, nrow = n_points, ncol = n_points)
@@ -144,13 +144,13 @@ fn_simulate_latent_diffusion_survival_data <- function( N_subjects,
                                              hazard_scale          = true_hazard_scale))
 }
 ##
-make_paper3_example <-  function( model,
-                                  profile = c("smoke", "analysis"),
-                                  seed = 2026L,
-                                  chains = 4L,
-                                  N = NULL) {
+make_NicoStan_example <-  function( model,
+                                    profile = c("smoke", "analysis"),
+                                    seed = 2026L,
+                                    chains = 4L,
+                                    N = NULL) {
         profile <-  match.arg(profile)
-        registry <-  paper3_example_registry()
+        registry <-  NicoStan_example_registry()
         stopifnot(length(model) == 1L, model %in% registry$model, chains >= 2L)
         set.seed(seed)
         small <-  profile == "smoke"
@@ -249,7 +249,7 @@ make_paper3_example <-  function( model,
                 main <-  c("lengthscale", "sigma_f", "sigma_n")
         } else if (model == "joint_longitudinal_survival") {
                 n_subjects <-  size(if (small) 12L else 100L)
-                q <-  paper3_quadrature()
+                q <-  NicoStan_quadrature()
                 x_surv <-  matrix(rnorm(n_subjects), ncol = 1L)
                 raw <-  matrix(rnorm(2L * n_subjects), nrow = 2L)
                 b0 <-  0.5 * raw[1L, ]
@@ -299,12 +299,12 @@ make_paper3_example <-  function( model,
              source_file = registry$file[match(model, registry$model)], seed = seed, profile = profile)
 }
 ##
-paper3_check_gradient <-  function(model, example, expected_simd_lanes = NULL) {
+NicoStan_check_gradient <-  function(model, example, expected_simd_lanes = NULL) {
         bs <-  bridgestan::StanModel$new(lib = model$init_object$model_so_file,
                                         data = model$init_object$json_file_path, seed = example$seed, warn = FALSE)
         density_environment <-  new.env(parent = environment())
-        sys.source(file.path(.paper3_source_directory, "check_model_densities.R"), envir = density_environment)
-        density_error <-  density_environment$paper3_check_density(bs, example, tolerance = if (is.null(expected_simd_lanes)) 1e-7 else 1e-6)
+        sys.source(file.path(.NicoStan_examples_source_directory, "check_model_densities.R"), envir = density_environment)
+        density_error <-  density_environment$NicoStan_check_density(bs, example, tolerance = if (is.null(expected_simd_lanes)) 1e-7 else 1e-6)
         observed_simd_lanes <-  NULL
         unconstrained <-  bs$param_unconstrain_json(jsonlite::toJSON(example$initial_values[[1L]], auto_unbox = TRUE, digits = NA))
         if (!is.null(expected_simd_lanes)) {
@@ -350,7 +350,7 @@ paper3_check_gradient <-  function(model, example, expected_simd_lanes = NULL) {
 ## benchmark runs can still verify automatic nuisance detection and the AVX
 ## generated quantity without paying for an independent finite-difference pass
 ## for every arm and sample size.
-paper3_check_model_structure <- function(model, example, expected_simd_lanes = NULL) {
+NicoStan_check_model_structure <- function(model, example, expected_simd_lanes = NULL) {
         init <- model$init_object
         stopifnot(identical(as.integer(init$n_nuisance), as.integer(example$n_nuisance)))
         bs <- init$bs_model
@@ -377,7 +377,7 @@ paper3_check_model_structure <- function(model, example, expected_simd_lanes = N
              n_params = as.integer(init$n_params), simd_lanes = observed_simd_lanes)
 }
 ##
-paper3_compare_avx <-  function(avx_model, example, plain_file) {
+NicoStan_compare_avx <-  function(avx_model, example, plain_file) {
         plain_library <-  bridgestan::compile_model(plain_file, make_args = c("STAN_THREADS=true", "PRECOMPILED_HEADERS=false"))
         plain <-  bridgestan::StanModel$new(plain_library, data = avx_model$init_object$json_file_path, seed = example$seed, warn = FALSE)
         avx <-  bridgestan::StanModel$new(avx_model$init_object$model_so_file, data = avx_model$init_object$json_file_path,
@@ -408,8 +408,8 @@ run_NicoStan_example <-  function( model,
                                    adapt_delta = NULL,
                                    N = NULL,
                                    validate = NULL,
-                                   output_dir = file.path(getwd(), "paper3_example_results"),
-                                   model_dir = file.path(.paper3_source_directory, "models")) {
+                                   output_dir = file.path(getwd(), "NicoStan_example_results"),
+                                   model_dir = file.path(.NicoStan_examples_source_directory, "models")) {
         engine <-  match.arg(engine)
         math_backend <-  match.arg(math_backend)
         if (engine == "cmdstanr" && math_backend != "Stan") stop("The CmdStanR comparison arm uses the plain Stan model.")
@@ -419,7 +419,7 @@ run_NicoStan_example <-  function( model,
         if (is.null(adapt_delta)) adapt_delta <-  if (model == "stochastic_volatility") 0.999 else 0.9
         if (is.null(validate)) validate <-  profile == "smoke"
         stopifnot(is.numeric(adapt_delta), length(adapt_delta) == 1L, adapt_delta > 0, adapt_delta < 1)
-        example <-  make_paper3_example(model = model, profile = profile, seed = seed, chains = chains, N = N)
+        example <-  make_NicoStan_example(model = model, profile = profile, seed = seed, chains = chains, N = N)
         if (is.null(diffusion)) diffusion <-  example$diffusion_eligible
         if (isTRUE(diffusion) && !example$diffusion_eligible) stop("This model has no explicit Gaussian nuisance block.")
         if (engine == "cmdstanr") diffusion <-  FALSE
@@ -438,7 +438,7 @@ run_NicoStan_example <-  function( model,
         if (!file.exists(stan_file)) stopifnot(file.copy(source_file, stan_file))
         stan_file <-  normalizePath(stan_file, mustWork = TRUE)
         suffix <-  if (engine == "NicoStan") paste0(burnin_algorithm, "_", math_backend, "_diffusion_", diffusion) else "NUTS"
-        settings_hash <-  substr(digest::digest(list(chains, warmup, iterations, adapt_delta, burnin_algorithm, diffusion, source_hash, example$data, example$initial_values, digest::digest(file = file.path(.paper3_source_directory, "paper3_examples.R"), algo = "sha256")), algo = "sha256"), 1L, 10L)
+        settings_hash <-  substr(digest::digest(list(chains, warmup, iterations, adapt_delta, burnin_algorithm, diffusion, source_hash, example$data, example$initial_values, digest::digest(file = file.path(.NicoStan_examples_source_directory, "NicoStan_examples.R"), algo = "sha256")), algo = "sha256"), 1L, 10L)
         run_dir <-  file.path(output_dir, paste0(model, "_N", example$N, "_", engine, "_", suffix, "_", profile, "_seed_", seed, "_", settings_hash))
         dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
         data_file <-  file.path(run_dir, "data.json")
@@ -478,16 +478,16 @@ run_NicoStan_example <-  function( model,
                     Stan_model_file_path = stan_file, sample_nuisance = example$n_nuisance > 0L,
                     Stan_cpp_user_header = header, make_args = compile_arguments)
                 compilation_seconds <-  proc.time()[[3L]] - compile_started
-                structure_check <- paper3_check_model_structure(fit, example,
+                structure_check <- NicoStan_check_model_structure(fit, example,
                     expected_simd_lanes = if (math_backend == "Stan") NULL else if (math_backend == "AVX512") 8 else 4)
-                if (isTRUE(validate)) gradient_check <-  paper3_check_gradient(model = fit, example = example,
+                if (isTRUE(validate)) gradient_check <-  NicoStan_check_gradient(model = fit, example = example,
                     expected_simd_lanes = if (math_backend == "Stan") NULL else if (math_backend == "AVX512") 8 else 4)
                 if (math_backend != "Stan" && isTRUE(validate)) {
                         plain_build_dir <-  file.path(output_dir, "models", paste0(model, "_", substr(digest::digest(file = plain_source, algo = "sha256"), 1L, 12L), "_Stan"))
                         dir.create(plain_build_dir, recursive = TRUE, showWarnings = FALSE)
                         plain_file <-  file.path(plain_build_dir, example$source_file)
                         if (!file.exists(plain_file)) stopifnot(file.copy(plain_source, plain_file))
-                        avx_comparison <-  paper3_compare_avx(fit, example, normalizePath(plain_file, mustWork = TRUE))
+                        avx_comparison <-  NicoStan_compare_avx(fit, example, normalizePath(plain_file, mustWork = TRUE))
                 }
                 sample_started <-  proc.time()[[3L]]
                 set.seed(seed)
@@ -570,7 +570,7 @@ run_NicoStan_example <-  function( model,
             warmup = warmup, iterations = iterations, seed = seed, burnin_algorithm = burnin_algorithm, adapt_delta = adapt_delta),
             source_sha256 = source_hash, plain_source_sha256 = digest::digest(file = plain_source, algo = "sha256"),
             external_header_sha256 = header_hashes, compile_arguments = compile_arguments,
-            harness_sha256 = digest::digest(file = file.path(.paper3_source_directory, "paper3_examples.R"), algo = "sha256"),
+            harness_sha256 = digest::digest(file = file.path(.NicoStan_examples_source_directory, "NicoStan_examples.R"), algo = "sha256"),
             data_sha256 = digest::digest(example$data, algo = "sha256"),
             initial_values_sha256 = digest::digest(example$initial_values, algo = "sha256"),
             structure_check = structure_check, gradient_check = gradient_check, avx_comparison = avx_comparison,

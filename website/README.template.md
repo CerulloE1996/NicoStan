@@ -147,7 +147,7 @@ The wider comparison examples are available through:
 
 
 ```r
-source(system.file("examples", "paper3_examples.R", package = "NicoStan"))
+source(system.file("examples", "NicoStan_examples.R", package = "NicoStan"))
 result <-  run_NicoStan_example(model = "hierarchical_logistic",
                                 engine = "NicoStan", math_backend = "Stan")
 ```

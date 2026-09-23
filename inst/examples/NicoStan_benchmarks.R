@@ -8,7 +8,7 @@
 ## its configuration fingerprint.
 ##
 
-paper3_benchmark_registry <- function() {
+NicoStan_benchmark_registry <- function() {
         data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic",
                       "joint_longitudinal_survival", "gaussian_process", "stochastic_volatility",
@@ -22,7 +22,7 @@ paper3_benchmark_registry <- function() {
             stringsAsFactors = FALSE)
 }
 
-paper3_benchmark_arms <- function(include_avx2 = FALSE) {
+NicoStan_benchmark_arms <- function(include_avx2 = FALSE) {
         arms <- data.frame(
             arm = c("CmdStanR", "NicoStan", "NicoStan_AVX512"),
             engine = c("cmdstanr", "NicoStan", "NicoStan"),
@@ -35,8 +35,8 @@ paper3_benchmark_arms <- function(include_avx2 = FALSE) {
         arms
 }
 
-paper3_benchmark_grid <- function(models = NULL, N_grid = NULL) {
-        registry <- paper3_benchmark_registry()
+NicoStan_benchmark_grid <- function(models = NULL, N_grid = NULL) {
+        registry <- NicoStan_benchmark_registry()
         if (is.null(models)) models <- registry$model
         stopifnot(all(models %in% registry$model))
         rows <- lapply(models, function(model) {
@@ -52,7 +52,7 @@ paper3_benchmark_grid <- function(models = NULL, N_grid = NULL) {
         do.call(rbind, rows)
 }
 
-paper3_benchmark_cpu_has_isa <- function(math_backend) {
+NicoStan_benchmark_cpu_has_isa <- function(math_backend) {
         if (math_backend == "Stan") return(TRUE)
         if (!file.exists("/proc/cpuinfo")) return(NA)
         lines <- readLines("/proc/cpuinfo", warn = FALSE)
@@ -61,7 +61,7 @@ paper3_benchmark_cpu_has_isa <- function(math_backend) {
         all(vapply(required, function(flag) grepl(paste0("\\b", flag, "\\b"), flags), logical(1L)))
 }
 
-paper3_benchmark_hash_files <- function(paths) {
+NicoStan_benchmark_hash_files <- function(paths) {
         paths <- unique(as.character(paths))
         paths <- paths[nzchar(paths)]
         setNames(vapply(paths, function(path) {
@@ -70,12 +70,12 @@ paper3_benchmark_hash_files <- function(paths) {
         }, character(1L)), basename(paths))
 }
 
-paper3_benchmark_package_fingerprint <- function(package_name) {
+NicoStan_benchmark_package_fingerprint <- function(package_name) {
         package_path <- tryCatch(find.package(package_name), error = function(error) "")
         if (!nzchar(package_path)) return(list(path = NA_character_, files = NA_character_))
         package_files <- list.files(package_path, recursive = TRUE, full.names = TRUE)
         package_files <- package_files[grepl("(^|/)(R/.*\\.(rdb|rdx|rds)|libs/.*\\.(so|dll|dylib))$", package_files)]
-        list(path = normalizePath(package_path, mustWork = TRUE), files = paper3_benchmark_hash_files(package_files))
+        list(path = normalizePath(package_path, mustWork = TRUE), files = NicoStan_benchmark_hash_files(package_files))
 }
 
 ## 2026-09-22: the AVX arms APPEND their ISA flags (CXXFLAGS_OPTIM, which Stan math's make/compiler_flags adds after
@@ -86,7 +86,7 @@ paper3_benchmark_package_fingerprint <- function(package_name) {
 ## -DBAYESMVP_FORCE_AVX2, which makes BayesMVP/stan_external_functions.hpp use its 4-lane AVX2 kernels (bmvp_simd_lanes() = 4)
 ## while everything else is identical to the AVX512 arm, as vect_type = "AVX2" does for the native BayesMVP models.
 ## The fits check simd_lanes (8 / 4) against the requested backend and stop on a mismatch.
-paper3_benchmark_compile_arguments <- function(math_backend) {
+NicoStan_benchmark_compile_arguments <- function(math_backend) {
         compile_arguments <- c("STAN_THREADS=true", "PRECOMPILED_HEADERS=false")
         if (math_backend == "Stan") return(compile_arguments)
         if (!math_backend %in% c("AVX512", "AVX2")) stop("math_backend must be Stan, AVX2 or AVX512, got: ", math_backend)
@@ -97,12 +97,12 @@ paper3_benchmark_compile_arguments <- function(math_backend) {
         compile_arguments
 }
 
-paper3_benchmark_build_fingerprint <- function(engine, math_backend) {
+NicoStan_benchmark_build_fingerprint <- function(engine, math_backend) {
         package_fingerprints <- list()
-        if (engine == "NicoStan") package_fingerprints$NicoStan <- paper3_benchmark_package_fingerprint("NicoStan")
-        if (engine == "cmdstanr") package_fingerprints$cmdstanr <- paper3_benchmark_package_fingerprint("cmdstanr")
+        if (engine == "NicoStan") package_fingerprints$NicoStan <- NicoStan_benchmark_package_fingerprint("NicoStan")
+        if (engine == "cmdstanr") package_fingerprints$cmdstanr <- NicoStan_benchmark_package_fingerprint("cmdstanr")
         if (math_backend != "Stan") {
-                package_fingerprints$BayesMVP <- paper3_benchmark_package_fingerprint("BayesMVP")
+                package_fingerprints$BayesMVP <- NicoStan_benchmark_package_fingerprint("BayesMVP")
                 header <- system.file("include", "BayesMVP", "stan_external_functions.hpp", package = "BayesMVP")
                 header_files <- if (nzchar(header)) c(header, file.path(dirname(header), "math", c("fast_and_approx_AVX2_fns.hpp", "fast_and_approx_AVX512_fns.hpp"))) else character()
         } else header_files <- character()
@@ -110,9 +110,9 @@ paper3_benchmark_build_fingerprint <- function(engine, math_backend) {
         cmdstan_version <- tryCatch(as.character(cmdstanr::cmdstan_version()), error = function(error) NA_character_)
         compiler <- tryCatch(system2("R", c("CMD", "config", "CXX17"), stdout = TRUE, stderr = TRUE), error = function(error) NA_character_)
         payload <- list(engine = engine, math_backend = math_backend,
-                        compile_arguments = paper3_benchmark_compile_arguments(math_backend),
+                        compile_arguments = NicoStan_benchmark_compile_arguments(math_backend),
                         package_fingerprints = package_fingerprints,
-                        external_header_hashes = paper3_benchmark_hash_files(header_files),
+                        external_header_hashes = NicoStan_benchmark_hash_files(header_files),
                         R = R.version$version.string, platform = R.version$platform,
                         cmdstan_path = cmdstan_path, cmdstan_version = cmdstan_version,
                         R_CXX17 = compiler,
@@ -120,11 +120,11 @@ paper3_benchmark_build_fingerprint <- function(engine, math_backend) {
         list(hash = digest::digest(payload, algo = "sha256"), payload = payload)
 }
 
-paper3_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, chains, warmup,
-                                               iterations, adapt_delta, burnin_algorithm,
-                                               include_avx2, harness_path, model_dir,
-                                               build_fingerprint = NULL) {
-        registry <- paper3_example_registry()
+NicoStan_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, chains, warmup,
+                                                 iterations, adapt_delta, burnin_algorithm,
+                                                 include_avx2, harness_path, model_dir,
+                                                 build_fingerprint = NULL) {
+        registry <- NicoStan_example_registry()
         source_file <- registry$file[match(model, registry$model)]
         avx_file <- if (arm$math_backend == "Stan") source_file else sub(".stan$", "_avx.stan", source_file)
         source_paths <- file.path(model_dir, c(source_file, avx_file))
@@ -133,7 +133,7 @@ paper3_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, chai
                 digest::digest(file = path, algo = "sha256")
         }, character(1L))
         harness_hash <- digest::digest(file = harness_path, algo = "sha256")
-        orchestration_path <- file.path(dirname(harness_path), "paper3_benchmarks.R")
+        orchestration_path <- file.path(dirname(harness_path), "NicoStan_benchmarks.R")
         orchestration_hash <- if (file.exists(orchestration_path)) digest::digest(file = orchestration_path, algo = "sha256") else NA_character_
         substr(digest::digest(list(version = "paper3_benchmark_v1", model = model, N = N,
                                    arm = arm, seed = seed, profile = profile, chains = chains,
@@ -144,18 +144,18 @@ paper3_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, chai
                                    build_fingerprint = build_fingerprint), algo = "sha256"), 1L, 16L)
 }
 
-paper3_benchmark_read_manifest <- function(path) {
+NicoStan_benchmark_read_manifest <- function(path) {
         if (!file.exists(path)) return(data.frame(stringsAsFactors = FALSE))
         utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
 }
 
-paper3_benchmark_write_manifest <- function(manifest, path) {
+NicoStan_benchmark_write_manifest <- function(manifest, path) {
         dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
         utils::write.csv(manifest, path, row.names = FALSE)
         invisible(manifest)
 }
 
-paper3_benchmark_upsert_manifest <- function(manifest, row) {
+NicoStan_benchmark_upsert_manifest <- function(manifest, row) {
         if (!nrow(manifest)) return(row)
         for (name in setdiff(names(row), names(manifest))) manifest[[name]] <- NA_character_
         for (name in setdiff(names(manifest), names(row))) row[[name]] <- NA_character_
@@ -165,7 +165,7 @@ paper3_benchmark_upsert_manifest <- function(manifest, row) {
         manifest
 }
 
-paper3_benchmark_summary_row <- function(record, model, N, arm, replicate, fingerprint) {
+NicoStan_benchmark_summary_row <- function(record, model, N, arm, replicate, fingerprint) {
         settings <- record$settings
         nested_status <- if (!is.null(record$nested_rhat_grouping$status)) record$nested_rhat_grouping$status else "unavailable"
         nested_value <- if (!is.null(record$max_nested_rhat_main)) record$max_nested_rhat_main else NA_real_
@@ -196,27 +196,27 @@ paper3_benchmark_summary_row <- function(record, model, N, arm, replicate, finge
             run_dir = record$run_dir, stringsAsFactors = FALSE)
 }
 
-paper3_benchmark_run <- function(models = NULL, N_grid = NULL,
-                                  arms = NULL,
-                                  profile = c("analysis", "smoke"), seed = 2026L,
-                                  replicate = 1L, chains = 4L, warmup = NULL, iterations = NULL,
-                                  adapt_delta = NULL, burnin_algorithm = "CHESSR",
-                                  include_avx2 = FALSE, validate = FALSE, fail_fast = FALSE,
-                                  output_dir = file.path(getwd(), "paper3_benchmark_results"),
-                                  model_dir = file.path(.paper3_source_directory, "models")) {
+NicoStan_benchmark_run <- function(models = NULL, N_grid = NULL,
+                                    arms = NULL,
+                                    profile = c("analysis", "smoke"), seed = 2026L,
+                                    replicate = 1L, chains = 4L, warmup = NULL, iterations = NULL,
+                                    adapt_delta = NULL, burnin_algorithm = "CHESSR",
+                                    include_avx2 = FALSE, validate = FALSE, fail_fast = FALSE,
+                                    output_dir = file.path(getwd(), "NicoStan_benchmark_results"),
+                                    model_dir = file.path(.NicoStan_examples_source_directory, "models")) {
         profile <- match.arg(profile)
         stopifnot(length(replicate) == 1L, replicate >= 1L, replicate == as.integer(replicate))
         if (is.null(warmup)) warmup <- if (profile == "smoke") 100L else 1000L
         if (is.null(iterations)) iterations <- if (profile == "smoke") 100L else 1000L
-        grid <- paper3_benchmark_grid(models = models, N_grid = N_grid)
-        if (is.null(arms)) arms <- paper3_benchmark_arms(include_avx2 = include_avx2)
+        grid <- NicoStan_benchmark_grid(models = models, N_grid = N_grid)
+        if (is.null(arms)) arms <- NicoStan_benchmark_arms(include_avx2 = include_avx2)
         arms <- as.data.frame(arms, stringsAsFactors = FALSE)
         required_arm_columns <- c("arm", "engine", "math_backend")
         stopifnot(all(required_arm_columns %in% names(arms)), nrow(arms) > 0L)
         if (is.null(models)) models <- unique(grid$model)
-        harness_path <- file.path(.paper3_source_directory, "paper3_examples.R")
+        harness_path <- file.path(.NicoStan_examples_source_directory, "NicoStan_examples.R")
         manifest_path <- file.path(output_dir, "benchmark_manifest.csv")
-        manifest <- paper3_benchmark_read_manifest(manifest_path)
+        manifest <- NicoStan_benchmark_read_manifest(manifest_path)
         dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
         summary_rows <- list()
         counter <- 0L
@@ -224,21 +224,21 @@ paper3_benchmark_run <- function(models = NULL, N_grid = NULL,
         for (grid_index in seq_len(nrow(grid))) {
                 model <- grid$model[grid_index]
                 N <- grid$N[grid_index]
-                model_registry <- paper3_example_registry()
+                model_registry <- NicoStan_example_registry()
                 diffusion_eligible <- model_registry$diffusion_eligible[match(model, model_registry$model)]
                 for (arm_index in seq_len(nrow(arms))) {
                         arm <- arms[arm_index, , drop = FALSE]
                         if (arm$engine == "cmdstanr" && arm$math_backend != "Stan") stop("CmdStanR benchmark arms must use math_backend='Stan'.")
                         if (arm$engine == "NicoStan" && arm$math_backend == "AVX2" && !isTRUE(include_avx2)) stop("AVX2 requested but include_avx2=FALSE.")
-                        if (arm$math_backend != "Stan" && identical(paper3_benchmark_cpu_has_isa(arm$math_backend), FALSE)) {
+                        if (arm$math_backend != "Stan" && identical(NicoStan_benchmark_cpu_has_isa(arm$math_backend), FALSE)) {
                                 stop(paste0("This CPU does not expose the required ", arm$math_backend, " instruction set."))
                         }
                         ## The arm is deliberately absent from the seed.  This is
                         ## what makes the simulated data and every chain's initial
                         ## values identical across CmdStanR, NicoStan, and AVX.
                         item_seed <- as.integer(seed + 100000L * (grid_index - 1L) + replicate - 1L)
-                        build_fingerprint <- paper3_benchmark_build_fingerprint(engine = arm$engine, math_backend = arm$math_backend)
-                        fingerprint <- paper3_benchmark_item_fingerprint(model = model, N = N, arm = arm,
+                        build_fingerprint <- NicoStan_benchmark_build_fingerprint(engine = arm$engine, math_backend = arm$math_backend)
+                        fingerprint <- NicoStan_benchmark_item_fingerprint(model = model, N = N, arm = arm,
                             seed = item_seed, profile = profile, chains = chains, warmup = warmup,
                             iterations = iterations, adapt_delta = adapt_delta, burnin_algorithm = burnin_algorithm,
                             include_avx2 = include_avx2, harness_path = harness_path, model_dir = model_dir,
@@ -250,7 +250,7 @@ paper3_benchmark_run <- function(models = NULL, N_grid = NULL,
                                 if (file.exists(result_path)) {
                                         record <- tryCatch(readRDS(result_path), error = function(error) NULL)
                                         if (is.list(record) && is.list(record$benchmark) && identical(record$benchmark$fingerprint, fingerprint)) {
-                                                summary_rows[[length(summary_rows) + 1L]] <- paper3_benchmark_summary_row(record, model, N, arm$arm, replicate, fingerprint)
+                                                summary_rows[[length(summary_rows) + 1L]] <- NicoStan_benchmark_summary_row(record, model, N, arm$arm, replicate, fingerprint)
                                                 next
                                         }
                                 }
@@ -277,19 +277,19 @@ paper3_benchmark_run <- function(models = NULL, N_grid = NULL,
                                                          model = model, N = N, arm = arm$arm, replicate = replicate)
                                 result_path <- file.path(item_output, "benchmark_record.rds")
                                 saveRDS(result, result_path)
-                                summary_rows[[length(summary_rows) + 1L]] <- paper3_benchmark_summary_row(result, model, N, arm$arm, replicate, fingerprint)
+                                summary_rows[[length(summary_rows) + 1L]] <- NicoStan_benchmark_summary_row(result, model, N, arm$arm, replicate, fingerprint)
                         }
                         manifest_row <- data.frame(fingerprint = fingerprint, model = model, N = N, arm = arm$arm,
                             replicate = replicate, seed = item_seed, profile = profile, status = status,
                             started = as.character(started), finished = as.character(Sys.time()),
                             build_fingerprint = build_fingerprint$hash, result_path = result_path,
                             error_message = error_message, stringsAsFactors = FALSE)
-                        manifest <- paper3_benchmark_upsert_manifest(manifest, manifest_row)
-                        paper3_benchmark_write_manifest(manifest, manifest_path)
+                        manifest <- NicoStan_benchmark_upsert_manifest(manifest, manifest_row)
+                        NicoStan_benchmark_write_manifest(manifest, manifest_path)
                 }
         }
         summary <- if (length(summary_rows)) do.call(rbind, summary_rows) else data.frame(stringsAsFactors = FALSE)
-        comparison <- paper3_benchmark_compare(summary)
+        comparison <- NicoStan_benchmark_compare(summary)
         output <- list(summary = summary, comparison = comparison, manifest = manifest,
                        grid = grid, arms = arms, output_dir = normalizePath(output_dir, mustWork = TRUE))
         saveRDS(output, file.path(output_dir, "benchmark_results.rds"))
@@ -300,7 +300,7 @@ paper3_benchmark_run <- function(models = NULL, N_grid = NULL,
         output
 }
 
-paper3_benchmark_compare <- function(summary) {
+NicoStan_benchmark_compare <- function(summary) {
         empty <- data.frame(stringsAsFactors = FALSE)
         if (!nrow(summary)) return(list(efficiency = empty, posterior_agreement = empty, checks = empty))
         keys <- unique(summary[c("model", "N", "replicate")])
@@ -371,16 +371,16 @@ paper3_benchmark_compare <- function(summary) {
              checks = if (length(check_rows)) do.call(rbind, check_rows) else empty)
 }
 
-paper3_benchmark_collect <- function(output_dir) {
+NicoStan_benchmark_collect <- function(output_dir) {
         path <- file.path(output_dir, "benchmark_results.rds")
         if (file.exists(path)) return(readRDS(path))
-        manifest <- paper3_benchmark_read_manifest(file.path(output_dir, "benchmark_manifest.csv"))
+        manifest <- NicoStan_benchmark_read_manifest(file.path(output_dir, "benchmark_manifest.csv"))
         if (!nrow(manifest)) return(list(summary = data.frame(stringsAsFactors = FALSE)))
         records <- lapply(manifest$result_path[manifest$status == "complete"], function(path) if (file.exists(path)) readRDS(path) else NULL)
         records <- Filter(Negate(is.null), records)
         if (!length(records)) return(list(summary = data.frame(stringsAsFactors = FALSE)))
-        summary <- do.call(rbind, lapply(records, function(record) paper3_benchmark_summary_row(record,
+        summary <- do.call(rbind, lapply(records, function(record) NicoStan_benchmark_summary_row(record,
             record$benchmark$model, record$benchmark$N, record$benchmark$arm, record$benchmark$replicate,
             record$benchmark$fingerprint)))
-        list(summary = summary, comparison = paper3_benchmark_compare(summary), manifest = manifest)
+        list(summary = summary, comparison = NicoStan_benchmark_compare(summary), manifest = manifest)
 }

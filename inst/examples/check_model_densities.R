@@ -2,7 +2,7 @@
 ## Independent R log-density checks for the Stan examples, including all density constants but no constraint Jacobian.
 ## Non-centred Gaussian priors are checked through their equivalent centred densities and transformation Jacobians.
 ##
-paper3_reference_log_density <-  function(example, p) {
+NicoStan_reference_log_density <-  function(example, p) {
         d <-  example$data
         normal <-  function(x, mean = 0, sd = 1) sum(dnorm(x, mean, sd, log = TRUE))
         if (example$model == "cox_frailty") {
@@ -105,10 +105,10 @@ paper3_reference_log_density <-  function(example, p) {
         stop("Unknown example model.")
 }
 ##
-paper3_check_density <-  function(bs, example, tolerance = 1e-7) {
+NicoStan_check_density <-  function(bs, example, tolerance = 1e-7) {
         errors <-  vapply(example$initial_values, function(point) {
                 u <-  bs$param_unconstrain_json(jsonlite::toJSON(point, auto_unbox = TRUE, digits = NA))
-                abs(bs$log_density(u, propto = FALSE, jacobian = FALSE) - paper3_reference_log_density(example, point))
+                abs(bs$log_density(u, propto = FALSE, jacobian = FALSE) - NicoStan_reference_log_density(example, point))
         }, numeric(1L))
         stopifnot(all(is.finite(errors)), max(errors) < tolerance)
         max(errors)

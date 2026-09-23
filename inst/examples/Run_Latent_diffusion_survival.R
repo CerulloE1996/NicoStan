@@ -15,7 +15,7 @@
 {
         model <- "latent_diffusion_survival"
         N_values <- c(100, 200, 800)
-        profile <- Sys.getenv("PAPER3_PROFILE", unset = "analysis")
+        profile <- Sys.getenv("NICOSTAN_EXAMPLE_PROFILE", unset = "analysis")
         burnin_algorithm <- "CHESSR"
 }
 ##
@@ -33,7 +33,7 @@
 ## ---- select a separate library only when explicitly requested:
 ##
 {
-        example_library_path <- Sys.getenv("PAPER3_R_LIB", unset = "")
+        example_library_path <- Sys.getenv("NICOSTAN_EXAMPLE_R_LIB", unset = "")
         if (nzchar(example_library_path)) {
                 if ("NicoStan" %in% loadedNamespaces() &&
                     normalizePath(getNamespaceInfo(asNamespace("NicoStan"), "path")) !=
@@ -42,8 +42,8 @@
                 }
                 .libPaths(c(example_library_path, .libPaths()))
         }
-        source(file.path(example_directory, "paper3_examples.R"))
-        source(file.path(example_directory, "paper3_benchmarks.R"))
+        source(file.path(example_directory, "NicoStan_examples.R"))
+        source(file.path(example_directory, "NicoStan_benchmarks.R"))
 }
 ##
 ## ---- benchmark arms:
@@ -52,11 +52,11 @@
 ## On AVX2-only hardware the third arm uses AVX2 and is labelled accordingly.
 ##
 {
-        benchmark_arms <- paper3_benchmark_arms()
-        if (identical(paper3_benchmark_cpu_has_isa("AVX512"), FALSE)) {
+        benchmark_arms <- NicoStan_benchmark_arms()
+        if (identical(NicoStan_benchmark_cpu_has_isa("AVX512"), FALSE)) {
                 benchmark_arms <- benchmark_arms[benchmark_arms$math_backend != "AVX512", ]
-                if (isTRUE(paper3_benchmark_cpu_has_isa("AVX2"))) {
-                        benchmark_arms_with_avx2 <- paper3_benchmark_arms(include_avx2 = TRUE)
+                if (isTRUE(NicoStan_benchmark_cpu_has_isa("AVX2"))) {
+                        benchmark_arms_with_avx2 <- NicoStan_benchmark_arms(include_avx2 = TRUE)
                         benchmark_arms <- rbind(benchmark_arms, benchmark_arms_with_avx2[benchmark_arms_with_avx2$math_backend == "AVX2", ])
                 }
                 message("AVX-512 is unavailable on this CPU; the arm table records the supported comparisons.")
@@ -66,15 +66,15 @@
 ## ---- run the three sample sizes:
 ##
 {
-        benchmark_result <- paper3_benchmark_run(models           = model,
-                                                 N_grid           = setNames(list(N_values), model),
-                                                 arms             = benchmark_arms,
-                                                 include_avx2     = any(benchmark_arms$math_backend == "AVX2"),
-                                                 profile          = profile,
-                                                 burnin_algorithm = burnin_algorithm,
-                                                 validate         = profile == "smoke",
-                                                 output_dir       = file.path(getwd(), paste0("NicoStan_benchmark_", model)),
-                                                 model_dir        = file.path(example_directory, "models"))
+        benchmark_result <- NicoStan_benchmark_run(models           = model,
+                                                   N_grid           = setNames(list(N_values), model),
+                                                   arms             = benchmark_arms,
+                                                   include_avx2     = any(benchmark_arms$math_backend == "AVX2"),
+                                                   profile          = profile,
+                                                   burnin_algorithm = burnin_algorithm,
+                                                   validate         = profile == "smoke",
+                                                   output_dir       = file.path(getwd(), paste0("NicoStan_benchmark_", model)),
+                                                   model_dir        = file.path(example_directory, "models"))
 }
 ##
 ## ---- check that the requested model and sample sizes are the ones that ran:

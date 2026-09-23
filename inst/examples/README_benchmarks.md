@@ -1,4 +1,4 @@
-# Paper 3 example benchmarks
+# NicoStan example benchmarks
 
 The benchmark launcher compares the same simulated data, priors, user-provided initial values, and chain seeds across:
 
@@ -6,7 +6,7 @@ The benchmark launcher compares the same simulated data, priors, user-provided i
 - NicoStan with the plain Stan model; and
 - NicoStan with the custom AVX-512 Stan functions.
 
-AVX-2 is available as an optional fourth arm when the host supports it. The default size grid contains three values for every model, with smaller sizes for the joint longitudinal-survival example and larger sizes for the inexpensive regression examples. The grid is editable through `paper3_benchmark_registry()` or by passing a named `N_grid` list to `paper3_benchmark_run()`.
+AVX-2 is available as an optional fourth arm when the host supports it. The default size grid contains three values for every model, with smaller sizes for the joint longitudinal-survival example and larger sizes for the inexpensive regression examples. The grid is editable through `NicoStan_benchmark_registry()` or by passing a named `N_grid` list to `NicoStan_benchmark_run()`.
 
 Each completed arm is recorded under a configuration fingerprint. A later call with the same model, size, arm, seed, sampler settings, Stan source hash, and benchmark harness hash reuses the saved result. A partial run can therefore be resumed after a compilation or sampling failure.
 
@@ -34,7 +34,7 @@ The `Run_*.R` files in this directory are benchmark drivers. Each has an editabl
 source("path/to/NicoStan/inst/examples/Run_robust_t4_regression.R")
 ```
 
-The drivers use the analysis profile by default. Set `PAPER3_PROFILE=smoke` for a shorter execution check. On AVX2-only hardware, the driver replaces the unavailable AVX-512 comparison with an explicitly labelled AVX2 arm. On hardware without either instruction set, it runs the two plain-model arms. The generic `paper3_benchmark_run()` function also accepts a custom arm table and `include_avx2 = TRUE`.
+The drivers use the analysis profile by default. Set `NICOSTAN_EXAMPLE_PROFILE=smoke` for a shorter execution check. On AVX2-only hardware, the driver replaces the unavailable AVX-512 comparison with an explicitly labelled AVX2 arm. On hardware without either instruction set, it runs the two plain-model arms. The generic `NicoStan_benchmark_run()` function also accepts a custom arm table and `include_avx2 = TRUE`.
 
 | Model | Three default sample sizes |
 | --- | --- |
@@ -49,7 +49,7 @@ The drivers use the analysis profile by default. Set `PAPER3_PROFILE=smoke` for 
 
 ### Latent diffusion survival validation (round 4, 2026-09-22)
 
-The model was changed on 2026-09-22: a hazard offset of 0.01 and drift priors centred at the Beskos et al. values. The old model diverged in both engines. See `MODEL_NOTES.md` for what changed and why. Earlier LDS benchmark or validation results are for the old model and should not be mixed with new ones. The Paper 3 runner's resume check now refuses a saved run whose `.stan` sha256 differs from the current file.
+The model was changed on 2026-09-22: a hazard offset of 0.01 and drift priors centred at the Beskos et al. values. The old model diverged in both engines. See `MODEL_NOTES.md` for what changed and why. Earlier LDS benchmark or validation results are for the old model and should not be mixed with new ones. The benchmark runner's resume check now refuses a saved run whose `.stan` sha256 differs from the current file.
 
 Validation with `alg_paper_3_validate_estimates.R`, run unchanged apart from command-line options:
 

@@ -4,7 +4,7 @@
 ##
 model <-  "joint_longitudinal_survival"
 N_values <-  c(25L, 75L, 200L)
-profile <-  Sys.getenv("PAPER3_PROFILE", unset = "analysis")
+profile <-  Sys.getenv("NICOSTAN_EXAMPLE_PROFILE", unset = "analysis")
 burnin_algorithm <-  "CHESSR"
 ##
 ## Resolve this example folder without changing the working directory.
@@ -13,7 +13,7 @@ if (!length(.example_sources)) .example_sources <-  sub("^--file=", "", commandA
 if (!length(.example_sources)) stop("Source this file or run it with Rscript.")
 .example_directory <-  dirname(normalizePath(tail(.example_sources, 1L), mustWork = TRUE))
 ## Select a separate library only when explicitly requested.
-.example_library <-  Sys.getenv("PAPER3_R_LIB", unset = "")
+.example_library <-  Sys.getenv("NICOSTAN_EXAMPLE_R_LIB", unset = "")
 if (nzchar(.example_library)) {
         if ("NicoStan" %in% loadedNamespaces() &&
             normalizePath(getNamespaceInfo(asNamespace("NicoStan"), "path")) !=
@@ -22,21 +22,21 @@ if (nzchar(.example_library)) {
         }
         .libPaths(c(.example_library, .libPaths()))
 }
-source(file.path(.example_directory, "paper3_examples.R"))
-source(file.path(.example_directory, "paper3_benchmarks.R"))
+source(file.path(.example_directory, "NicoStan_examples.R"))
+source(file.path(.example_directory, "NicoStan_benchmarks.R"))
 ##
 ## On AVX-512 hardware this gives CmdStanR, NicoStan, and NicoStan + AVX-512.
 ## On AVX2-only hardware the third arm uses AVX2 and is labelled accordingly.
-benchmark_arms <-  paper3_benchmark_arms()
-if (identical(paper3_benchmark_cpu_has_isa("AVX512"), FALSE)) {
+benchmark_arms <-  NicoStan_benchmark_arms()
+if (identical(NicoStan_benchmark_cpu_has_isa("AVX512"), FALSE)) {
         benchmark_arms <-  benchmark_arms[benchmark_arms$math_backend != "AVX512", ]
-        if (isTRUE(paper3_benchmark_cpu_has_isa("AVX2"))) {
-                avx2 <-  paper3_benchmark_arms(include_avx2 = TRUE)
+        if (isTRUE(NicoStan_benchmark_cpu_has_isa("AVX2"))) {
+                avx2 <-  NicoStan_benchmark_arms(include_avx2 = TRUE)
                 benchmark_arms <-  rbind(benchmark_arms, avx2[avx2$math_backend == "AVX2", ])
         }
         message("AVX-512 is unavailable on this CPU; the arm table records the supported comparisons.")
 }
-benchmark_result <-  paper3_benchmark_run(models = model, N_grid = setNames(list(N_values), model),
+benchmark_result <-  NicoStan_benchmark_run(models = model, N_grid = setNames(list(N_values), model),
     arms = benchmark_arms, include_avx2 = any(benchmark_arms$math_backend == "AVX2"), profile = profile,
     burnin_algorithm = burnin_algorithm, validate = profile == "smoke",
     output_dir = file.path(getwd(), paste0("NicoStan_benchmark_", model)),
