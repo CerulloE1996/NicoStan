@@ -169,7 +169,8 @@ def render(text):
     return "\n".join(out)
 
 
-body_text = template.replace("{{QUICKSTART}}", quickstart).replace("{{REFERENCES}}", reference_list)
+template_for_site = re.sub(r"\$`([^`]+)`\$", r"$\1$", template)
+body_text = template_for_site.replace("{{QUICKSTART}}", quickstart).replace("{{REFERENCES}}", reference_list)
 ## HTML comments are hidden on GitHub; drop them so the Pages site does not print them as text (2026-09-23).
 body_text = re.sub(r"<!--.*?-->[ \t]*\n?", "", body_text, flags=re.S)
 body = render(body_text)
@@ -184,7 +185,7 @@ banner_title_html = "<br>".join(escape(line) for line in banner_lines[:banner_sp
 banner_intro_html = "<br>".join(escape(line) for line in banner_lines[banner_split + 1:] if line.strip())
 page = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="Adaptive Hamiltonian Monte Carlo for general Stan models, with optional diffusion-pathspace HMC for Gaussian latent blocks. Methods, examples and installation.">
-<meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css"><script src="assets/site.js" defer></script></head><body>
+<meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['script','noscript','style','textarea','pre','code'],throwOnError:false})"></script><script src="assets/site.js" defer></script></head><body>
 <a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top"><img class="brand-logo" src="assets/NicoStan_logo_128.png" alt="" width="34" height="34">NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
 <div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>''' + banner_title_html + '''</h1><p class="hero-intro">''' + banner_intro_html + '''</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram"><img class="hero-logo" src="assets/NicoStan_logo_720.png" alt="NicoStan logo"></div></div>
 <div class="layout"><aside><details open><summary>On this page</summary><nav aria-label="On this page">''' + navigation + '''</nav></details></aside><main id="content">''' + body + '''</main></div>
