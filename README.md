@@ -3,7 +3,8 @@
 # NicoStan <img src="docs/assets/NicoStan_logo_720.png" align="right" height="140" alt="NicoStan logo" />
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
-[Installation](#installation) ·
+[What is NicoStan?](#what-is-NicoStan) ·
+[How is NicoStan different to Stan](#how-is-NicoStan-different-to-Stan) ·
 [Examples](#examples) ·
 [Benchmarks](#benchmarks) ·
 [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
@@ -13,7 +14,7 @@
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
-## What is NicoStan, and how is it different to Stan (e.g., cmdstanr/rstan)?
+## What is NicoStan?
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
@@ -23,6 +24,69 @@ NicoStan accesses Stan's log posterior and gradients through our integration of
 into NicoStan's R/C++ code;
 more specifically, NicoStan's C++ sampler calls the compiled Stan model directly through BridgeStan's C/C++ interface.
 NicoStan handles the burnin/warmup, sampling and posterior summaries.
+
+
+NicoStan grew out of our work on efficient sampling for multivariate probit (MVP) models,
+specifically their latent class extensions (e.g., the LC-MVP), which are used for the evaluation
+of diagnostic/screening test accuracy without a perfect gold standard
+(see e.g., [Xu et al., 2013](https://doi.org/10.1002/sim.5695); [Xu and Craig, 2009](https://doi.org/10.1111/j.1541-0420.2008.01194.x);
+[Uebersax, 1999](https://doi.org/10.1177/01466219922031400); and [Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)).
+
+
+NicoStan was formerly called "BayesMVP" (since we have mainly been working with multivariate probit [MVP] models);
+however, it has now been split into 2 R packages: NicoStan, for the general Stan interface
+(which relies heavily on [BridgeStan](https://roualdes.us/bridgestan/latest/)),
+and [BayesMVP](https://github.com/CerulloE1996/BayesMVP), which is now an extension to NicoStan, rather than a standalone R package.
+Also, NicoStan is named after a cat.
+
+
+The [BayesMVP R package extension](https://github.com/CerulloE1996/BayesMVP) to NicoStan adds highly optimised,
+specialised implementations of these models,
+with manually implemented gradients
+(see the [BayesMVP](#bayesmvp-multivariate-probit-models) section below).
+For instance, we used [BayesMVP](https://github.com/CerulloE1996/BayesMVP) to fit the models in our simulation study
+([Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)),
+which compared the LC-MVP and latent trait ([Qu et al., 1996](https://pubmed.ncbi.nlm.nih.gov/8805757/)) models,
+which are used for the estimation of diagnostic/screening test accuracy without a perfect gold standard.
+
+
+To summarise, the NicoStan R package provides:
+<!-- ----------------------------------------------------------------------------------------- -->
+- **A general Stan interface**, so that existing Stan models can be fitted via NicoStan
+(directly, using the user's existing `.stan` model files).
+<!-- ----------------------------------------------------------------------------------------- -->
+- **Hybrid diffusion-pathspace HMC** for models with suitable Gaussian latent/nuisance blocks,
+based on [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003),
+and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001).
+<!-- ----------------------------------------------------------------------------------------- -->
+- **ChEES, ChEES-R and SNAPER-HMC trajectory-length adaptation during burnin**,
+based on [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html),
+and [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
+See [Efficient burnin algorithms](#efficient-burnin-algorithms) for more information.
+<!-- ----------------------------------------------------------------------------------------- -->
+- **Custom AVX2 and AVX-512 maths functions**, supplied through the
+[BayesMVP](https://github.com/CerulloE1996/BayesMVP) R package extension to NicoStan,
+and available to general Stan models;
+however, note that your `.stan` model file will need to be re-written to declare the custom functions,
+with the NicoStan/BayesMVP C++ `.hpp` header file supplied when compiling (via `Stan_cpp_user_header`),
+as well as replacing standard Stan math functions (e.g. `Phi()`)
+with their custom AVX2 or AVX-512 counterparts (e.g. `fast_Phi()`).
+<!-- ----------------------------------------------------------------------------------------- -->
+- **Partially-dense metric:**
+NicoStan allows you to set a dense HMC mass matrix for the main model parameters,
+combined with a diagonal M for the high-dimensional nuisance parameters.
+In other words, the main and nuisance metrics can be chosen separately.
+This is ideal, because it is often intractable to fit a dense M on the entire parameter set,
+and a dense M for the main model parameters often leads to better sampling than a diagonal M,
+since it takes posterior correlations into account.
+Furthermore, users can set either an Empirical M or a Hessian-based
+(using numerical differentiation) M for the main model parameters.
+<!-- ----------------------------------------------------------------------------------------- -->
+
+
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+## How is NicoStan different to Stan (e.g., cmdstanr/rstan)?
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
 For the burnin (or "warmup") phase, Stan uses a well-established, state-of-the-art No-U-Turn HMC
@@ -52,50 +116,13 @@ NicoStan offers a hybrid diffusion-pathspace HMC sampling algorithm
 and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)),
 which can greatly increase efficiency - especially for large N.
 
+Furthermore, as we mentioned above (see [this section](#what-is-NicoStan)), unlike Stan,
+NicoStan allows you to set a dense HMC mass matrix for the main model parameters,
+combined with a diagonal M for the high-dimensional nuisance parameters.
 
 
 Note that NicoStan can also fit any Stan model (i.e., any `.stan` model file);
 however, expect efficiency gains (relative to Stan) to be less dramatic for models without high-dimensional nuisance parameters.
-
-
-The NicoStan R package provides:
-
-- **A general Stan interface**, so that existing Stan models can be fitted via NicoStan
-(directly, using the user's existing `.stan` model files).
-- **Hybrid diffusion-pathspace HMC** for models with suitable Gaussian latent/nuisance blocks,
-based on [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003),
-and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001).
-- **ChEES, ChEES-R and SNAPER-HMC trajectory-length adaptation**,
-based on [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html),
-and [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
-- **Custom AVX2 and AVX-512 maths functions**, supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension, and available to general Stan models; however, note that your `.stan` model file will need to be re-written to declare the custom functions, with the NicoStan/BayesMVP C++ `.hpp` header file supplied when compiling (via `Stan_cpp_user_header`),
-as well as replacing standard Stan math functions (e.g. `Phi()`) with their custom AVX2 or AVX-512 counterparts (e.g. `fast_Phi()`).
-- **Parallel chains, diagonal/dense empirical or numerical-Hessian mass matrices for the main parameters, posterior summaries and MCMC diagnostics**
-(see [Efficient burnin algorithms](#efficient-burnin-algorithms)); the main/nuisance metrics can be chosen separately.
-
-
-NicoStan grew out of our work on efficient sampling for multivariate probit (MVP) models,
-specifically their latent class extensions (e.g., the LC-MVP), which are used for the evaluation
-of diagnostic/screening test accuracy without a perfect gold standard
-(see e.g., [Xu et al., 2013](https://doi.org/10.1002/sim.5695); [Xu and Craig, 2009](https://doi.org/10.1111/j.1541-0420.2008.01194.x);
-[Uebersax, 1999](https://doi.org/10.1177/01466219922031400); and [Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)).
-
-
-NicoStan was formerly called "BayesMVP" (since we have mainly been working with multivariate probit [MVP] models);
-however, it has now been split into 2 R packages: NicoStan, for the general Stan interface
-(which relies heavily on [BridgeStan](https://roualdes.us/bridgestan/latest/)),
-and [BayesMVP](https://github.com/CerulloE1996/BayesMVP), which is now an extension to NicoStan, rather than a standalone R package.
-Also, NicoStan is named after a cat.
-
-
-The [BayesMVP R package extension](https://github.com/CerulloE1996/BayesMVP) to NicoStan adds highly optimised,
-specialised implementations of these models,
-with manually implemented gradients
-(see the [BayesMVP](#bayesmvp-multivariate-probit-models) section below).
-For instance, we used [BayesMVP](https://github.com/CerulloE1996/BayesMVP) to fit the models in our simulation study
-([Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)),
-which compared the LC-MVP and latent trait ([Qu et al., 1996](https://pubmed.ncbi.nlm.nih.gov/8805757/)) models,
-which are used for the estimation of diagnostic/screening test accuracy without a perfect gold standard.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -277,7 +304,7 @@ was **over 1000× faster than Stan**, and around **30-60× more efficient than M
 These numbers are for the latent class multivariate probit model (LC-MVP),
 using an N = 10,000 simulated binary dataset with 6 binary tests in total (hence a total of 60,000 observations),
 which is based on real, publicly available COVID-19 data.
-These models are used in both human and veterinary medicine for estimating diagnostic/screening test accuracy
+These models (LC-MVP) are used in both human and veterinary medicine for estimating diagnostic/screening test accuracy
 without a perfect gold standard.
 
 
@@ -297,12 +324,12 @@ Furthermore, even when using NicoStan **without** BayesMVP
 (i.e., using the `.stan` model file directly - without the manually coded C++ gradients and AVX functions, etc.),
 we still found that NicoStan was **over 10× more efficient than Stan** (via cmdstanr),
 for both the LC-MVP and the LC-MVOP examples described above.
-These comparisons use the standard Stan maths functions, so the gains reflect the sampler and its burnin adaptation.
-Furthermore, the custom AVX functions in the [BayesMVP extension](https://github.com/CerulloE1996/BayesMVP)
+These benchmarks use the standard Stan maths functions, so the gains reflect the sampler and its burnin adaptation.
+Furthermore, note that the custom AVX functions in the [BayesMVP extension](https://github.com/CerulloE1996/BayesMVP)
 provide an additional route to speeding things up.
 
 
-**Detailed benchmarks are coming soon.** The comparisons will cover:
+**More detailed and comprehensive benchmarks are coming soon.** The comparisons will cover:
 
 
 - Plain Stan (via the cmdstanr R package),
