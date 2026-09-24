@@ -227,8 +227,6 @@ When preparing a model for NicoStan:
 - Set `sample_nuisance = TRUE` (or `FALSE` for a model without a nuisance block).
 - Note that NicoStan automatically detects the (unconstrained) dimension of the nuisance block, 
 using the Stan compiler metadata and BridgeStan.
-- For a non-centred Gaussian representation,
-declare standard normal variables in this first block, and then introduce the scales/correlations in the transformed parameters block.
 - Keep the complete posterior density (including the prior on the nuisance parameters) in the Stan model.
 
 
