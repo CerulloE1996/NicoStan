@@ -597,12 +597,14 @@ describes how to check which extensions your CPU supports.
 
 If you use NicoStan in your work, please cite the package as follows:
 
-Cerullo, E. (2026). NicoStan: Adaptive MCMC for Stan models, with advanced between-chain adaptation and diffusion-pathspace HMC
-. R package version 0.1.9000. https://github.com/CerulloE1996/NicoStan
+
+Cerullo, E. (2026). NicoStan: Efficient MCMC for Stan models, with advanced between-chain adaptation and diffusion-pathspace HMC.
+R package version 0.1.9000. https://github.com/CerulloE1996/NicoStan
+
 
 ```bibtex
 @Manual{Cerullo2026NicoStan,
-  title = {NicoStan: Adaptive MCMC for Stan models, 
+  title = {NicoStan: Efficient MCMC for Stan models,
   with advanced between-chain adaptation and diffusion-pathspace HMC},
   author = {Enzo Cerullo},
   year = {2026},
@@ -619,7 +621,8 @@ Please also cite the methodological references relevant to the options used in y
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-If you use the BayesMVP extension (i.e., the specialised MVP models or the custom AVX2/AVX-512 functions), please also cite:
+If you use the BayesMVP extension (i.e., the specialised MVP models and/or the custom AVX2/AVX-512 functions), please also cite:
+
 
 Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoStan.
 R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
