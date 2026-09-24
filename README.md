@@ -4,7 +4,7 @@
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 [What is NicoStan?](#what-is-NicoStan) ·
-[How is NicoStan different to Stan](#how-is-NicoStan-different-to-Stan) ·
+[How is NicoStan different to Stan?](#how-is-NicoStan-different-to-Stan) ·
 [Examples](#examples) ·
 [Benchmarks](#benchmarks) ·
 [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
@@ -569,8 +569,6 @@ Use `burnin_algorithm` to choose the trajectory-length adaptation algorithm:
 
 - `CHEESR` (**ChEES-R**): The original ChEES-rate criterion,
 using the squared change in the main block's centred squared radius per realised trajectory length.
-- `CHEESR_log` (**Log-ChEES-R**): NicoStan's log-ratio formulation of the ChEES-rate criterion,
-which normalises the numerator gradient by a running average of the ChEES numerator.
 - `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction,
 and adapts the trajectory length using squared changes along that direction per unit length.
 - `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
@@ -591,13 +589,6 @@ The position-based criteria use the main parameters in coordinates defined by th
 <!-- If `BᵀB = M`, these coordinates are `z = B(θ - μ)`.  -->
 <!-- Both diagonal and dense main-parameter metrics are supported, -->
 <!-- and SNAPER-HMC learns its direction in the same coordinates. -->
-
-
-<!-- `CHEESR_log` is our log-ratio formulation of the ChEES rate, -->
-<!-- using a running average of the numerator to normalise its gradient. -->
-Note that both `CHEESR` and `CHEESR_log` adapt a positive trajectory length on the log scale.
-Their update algorithms differ; hence, both are available in NicoStan
-(see the [adaptation notes](docs/adaptation-notes.md) for the derivation).
 
 
 The default trajectory-length settings differ between burnin and sampling:
