@@ -36,7 +36,7 @@ see [this section below](#efficient-burnin-algorithms) for more details on NicoS
 
 
 This difference in burnin adaptation algorithm makes NicoStan more efficient than Stan for most models
-(benchmark results coming soon).
+(see the [Benchmarks](#benchmarks) section below).
 In our testing, NicoStan can also perform very well with a very short burnin
 (100-125 iterations with just 4 chains; we are also currently testing shorter burnins).
 Furthermore, the fact that NicoStan uses between-chain adaptation (as opposed to within-chain adaptation, like Stan's NUTS-HMC algorithm)
@@ -81,12 +81,21 @@ of diagnostic/screening test accuracy without a perfect gold standard
 [Uebersax, 1999](https://doi.org/10.1177/01466219922031400); and [Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)).
 
 
+NicoStan was formerly called "BayesMVP" (since we have mainly been working with multivariate probit [MVP] models);
+however, it has now been split into 2 R packages: NicoStan, for the general Stan interface
+(which relies heavily on [BridgeStan](https://roualdes.us/bridgestan/latest/)),
+and [BayesMVP](https://github.com/CerulloE1996/BayesMVP), which is now an extension to NicoStan, rather than a standalone R package.
+Also, NicoStan is named after a cat.
+
+
 The [BayesMVP R package extension](https://github.com/CerulloE1996/BayesMVP) to NicoStan adds highly optimised,
 specialised implementations of these models,
 with manually implemented gradients
 (see the [BayesMVP](#bayesmvp-multivariate-probit-models) section below).
-For instance, we used [BayesMVP](https://github.com/CerulloE1996/BayesMVP) to fit the models in our simulation study ([Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)),
-which compared the LC-MVP and latent trait ([Qu et al., 1996](https://pubmed.ncbi.nlm.nih.gov/8805757/)) models.
+For instance, we used [BayesMVP](https://github.com/CerulloE1996/BayesMVP) to fit the models in our simulation study
+([Cerullo et al., 2025](https://arxiv.org/abs/2509.18489v1)),
+which compared the LC-MVP and latent trait ([Qu et al., 1996](https://pubmed.ncbi.nlm.nih.gov/8805757/)) models,
+which are used for the estimation of diagnostic/screening test accuracy without a perfect gold standard.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -263,8 +272,31 @@ in a comprehensive simulation study, in which the models were fitted using [Baye
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-In our initial tests on models with high-dimensional nuisance parameters/blocks,
-NicoStan has achieved speed-ups (relative to Stan, using cmdstanr) of more than **10×, without enabling AVX**.
+In our initial tests, NicoStan - combined with the [BayesMVP extension](https://github.com/CerulloE1996/BayesMVP) -
+was **over 1000× faster than Stan**, and around **30-60× more efficient than Mplus**.
+These numbers are for the latent class multivariate probit model (LC-MVP),
+using an N = 10,000 simulated binary dataset with 6 binary tests in total (hence a total of 60,000 observations),
+which is based on real, publicly available COVID-19 data.
+These models are used in both human and veterinary medicine for estimating diagnostic/screening test accuracy
+without a perfect gold standard.
+
+
+For our ordinal example dataset, which is based on a real dataset on three tests to screen and/or diagnose depression
+(specifically, the MINI as the imperfect gold standard, and the PHQ-9 and CES-D-10 as the two ordinal tests),
+for N = 5,000 (hence 15,000 total observations), we found that NicoStan/BayesMVP (using the LC-MVOP model)
+was **over 500× more efficient than Stan** and **over 1000× more efficient than Mplus**.
+The latter is because Mplus's Gibbs-based algorithm struggles greatly with ordinal outcomes,
+and Mplus does not let you fit ordinal outcomes with more than 10 categories;
+hence, we had to group categories together just to attempt to measure its efficiency.
+Note that this is not ideal, and we would never recommend grouping categories in real-life data analysis,
+nor would we suggest assuming continuity just because there are a lot of categories
+(especially for single studies and for latent class models).
+
+
+Furthermore, even when using NicoStan **without** BayesMVP
+(i.e., using the `.stan` model file directly - without the manually coded C++ gradients and AVX functions, etc.),
+we still found that NicoStan was **over 10× more efficient than Stan** (via cmdstanr),
+for both the LC-MVP and the LC-MVOP examples described above.
 These comparisons use the standard Stan maths functions, so the gains reflect the sampler and its burnin adaptation.
 Furthermore, the custom AVX functions in the [BayesMVP extension](https://github.com/CerulloE1996/BayesMVP)
 provide an additional route to speeding things up.
