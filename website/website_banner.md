@@ -18,7 +18,7 @@ diffusion-pathspace HMC
 ## ---------------------------------------------------------------------------------
 NicoStan is an R package that works for statistical models programmed in the
 probabilistic programming language Stan.
-For models with high-dimentional Guassian latent variables (or "nuisance" parameters),
+For models with high-dimentional Guassian latent variables/nuisance parameters,
 NicoStan's algorithm uses standard HMC for the main model parameters,
 and diffusion-pathspace HMC for the nuisance parameters.
 Many statistical models require nuisance parameters, such as:
