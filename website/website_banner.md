@@ -31,4 +31,7 @@ It also uses between-chain adaptation to achieve more efficient burnin/warmup,
 as well as state-of-the-art burnin algorithms (e.g., ChEES-R-HMC, SNAPER-HMC).
 ## ---------------------------------------------------------------------------------
 NicoStan also offers rapid parallel estimation of posterior summaries,
-and only monitors/stores the trace for the main model parameters (by default).
+and only monitors/stores the trace for the main model parameters (by default),
+which - especially for large N - can greatly improve efficiency (time to min(ESS))
+as well as lead to dramatic reductions in hard drive storage space.
+## ---------------------------------------------------------------------------------

@@ -13,11 +13,11 @@
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
-## What is NicoStan, and how is it different to Stan (e.g., cmdstanr or rstan)?
+## What is NicoStan, and how is it different to Stan (e.g., cmdstanr/rstan)?
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-NicoStan is an R package for fitting Bayesian models written in the probabilistic programming language [Stan](https://mc-stan.org/).
+NicoStan is an R package for efficiently fitting Bayesian models written in the probabilistic programming language [Stan](https://mc-stan.org/).
 NicoStan accesses Stan's log posterior and gradients through our integration of
 [BridgeStan](https://roualdes.us/bridgestan/latest/) ([Roualdes et al., 2023](https://joss.theoj.org/papers/10.21105/joss.05236))
 into NicoStan's R/C++ code;
