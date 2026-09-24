@@ -9,7 +9,7 @@
 // and treat these as known. Here the drift coefficients and the hazard scale are estimated
 // jointly with the path; sigma_x and x_0 are fixed data.
 //
-// Hazard offset (assistant-introduced; not in Beskos et al.): Beskos et al. use
+// Hazard offset (not in Beskos et al.): Beskos et al. use
 // h(x) = x^2 exactly (x_squared_hazard_offset = 0). Then log h at an event time is 2 log|x(t)|, which is -Inf
 // at x(t) = 0, and h(x) = h(-x). The drift pulls X towards its stable point -0.795 (the drift-only path from
 // x_0 = 2 reaches 0 at t = 1.07, and about 60% of simulated paths cross 0 before t = 1). Once the path gets
@@ -90,7 +90,7 @@ transformed parameters {
 
 model {
     // priors
-    // Drift priors (assistant-introduced): Beskos et al. treat the drift as known,
+    // Drift priors: Beskos et al. treat the drift as known,
     // (1.4, 1). One path on [0, 1] carries little information about the drift (with the earlier normal(0, 2)
     // priors the posterior SDs were about 1.5, close to the prior), so the prior sets how far the sampler goes
     // along the drift_sin_coefficient / drift_constant ridge (posterior correlation about -0.7). With

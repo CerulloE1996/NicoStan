@@ -1170,7 +1170,7 @@ ALWAYS_INLINE    __m256d CopySign VECTORCALL(  const __m256d srcSign,
 //// every x, branch-free, and costs the same as A&S: one exp, one divide and 13 FMAs (A&S: 1 FMA + 9 multiplies + 4 adds).
 ////
 //// Provenance: the Mills-ratio/rational form is standard (e.g. Cody 1969, Math. Comp. 23:631-637, uses rationals for erfc);
-//// THESE coefficients were fitted by an assistant with a relative-error Sanathanan-Koerner / Lawson
+//// THESE coefficients were fitted with a relative-error Sanathanan-Koerner / Lawson
 //// near-minimax fit in 40-digit mpmath, constrained to N6(0) = 0.5 exactly so that fast_Phi(0) = 0.5 with no jump at x = 0.
 //// FAST_PHI_MILLS_Z_CAP caps only the rational's argument (the exp still sees the true z): it keeps N and Q finite for
 //// |x| = inf / huge |x| (exp(-z^2/2) = 0 there, so the result is 0 / 1 exactly as before) and does not change any x in [-37.5, 8.25].

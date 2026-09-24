@@ -5,7 +5,7 @@
 ##
 ## ---- Unit-Gaussian factor for tau_sampling_scale = "gaussian_matched":
 ##
-## PROVENANCE: assistant-introduced heuristic, derived from the Gaussian analysis of
+## Unit-Gaussian heuristic, derived from the Gaussian analysis of
 ## Hoffman, Radul and Sountsov (2021, AISTATS, "An adaptive MCMC scheme for setting trajectory lengths
 ## in Hamiltonian Monte Carlo"). It is NOT a published method. Full derivation: docs/adaptation-notes.md.
 ##
@@ -204,7 +204,7 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #' @param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number. Multiplies the
 #'   adapted tau once at the switch from burn-in to sampling, only when tau was adapted with a fixed length
 #'   (randomize_tau_burnin = FALSE) and sampling is randomised; eps is not re-initialised. "gaussian_matched" uses the
-#'   criterion-specific unit-Gaussian factor (an assistant-introduced heuristic, not a published method; see
+#'   criterion-specific unit-Gaussian factor (a heuristic, not a published method; see
 #'   docs/adaptation-notes.md). The requested value, effective value, factor and tau before/after are returned.
 #' @param vect_type,Phi_type,inv_Phi_type NULL (default) = not supplied, which changes nothing. These settings are NOT
 #'   chosen here: for Model_type = "Stan" they are not used at all (the .stan file defines its own maths), so a non-NULL
@@ -274,7 +274,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## Centre of the nuisance Gaussian rotation in the MAIN burn-in: "running_mean_frozen" (default;
                                         ## running mean, frozen from theta_hat_us_freeze_iter so eps is tuned against the kernel sampling
                                         ## uses), "running_mean" (never frozen - the earlier behaviour, which tunes eps too big)
-                                        ## or "zero" (the Feb 2026 code). See init_and_run_burnin_ChESSR.
+                                        ## or "zero" (the earlier code). See init_and_run_burnin_ChESSR.
                                         theta_hat_us_rule = NULL,
                                         theta_hat_us_freeze_iter = NULL,
                                         burnin_schedule = "automatic",
@@ -301,14 +301,14 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          the behaviour before this option existed; "gaussian_matched" = the
                                         ##                                          criterion-specific unit-Gaussian factor (KE/ChEES 0.7151, CHESSR/SNAPER
                                         ##                                          0.7678, CHESSR_log 0.6738); or one positive number. eps is NOT
-                                        ##                                          re-initialised. Assistant-introduced heuristic derived from the Gaussian
+                                        ##                                          re-initialised. Heuristic derived from the Gaussian
                                         ##                                          analysis of Hoffman, Radul and Sountsov (2021) - NOT a published method.
                                         ##                                          See docs/adaptation-notes.md.
                                         tau_sampling_scale = "none",
                                         ##   tau_adaptation_block                 - "main" (default; the behaviour before this option existed): the
                                         ##                                          trajectory-length criterion uses the main block only. "joint":
                                         ##                                          main + nuisance concatenated, still adapting the one joint tau.
-                                        ##                                          EXPERIMENTAL, assistant-introduced, for testing only;
+                                        ##                                          EXPERIMENTAL, for testing only;
                                         ##                                          models without a sampled nuisance block fall back to "main".
                                         tau_adaptation_block = "main",
                                         ##   burnin_TBB_pool_equals_n_chains      - NULL defaults to TRUE for built-in models (separate OpenMP WCP teams).
@@ -2007,7 +2007,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           ##      the longest chain), but sampling draws tau_ii ~ U(0, 2 * tau_bar), whose optimal mean differs
                           ##      from the fixed-length optimum. Only applied when tau was adapted (manual_tau = FALSE) with a
                           ##      fixed length and sampling is randomised; otherwise the factor is 1. eps is NOT re-initialised.
-                          ##      Assistant-introduced heuristic (Gaussian analysis, Hoffman et al. 2021); see docs/adaptation-notes.md.
+                          ##      Heuristic (Gaussian analysis, Hoffman et al. 2021); see docs/adaptation-notes.md.
                           ##
                           {
                                 tau_sampling_scale_applicable <- !isTRUE(manual_tau) &&

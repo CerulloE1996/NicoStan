@@ -273,7 +273,7 @@ R_fn_compute_gradients_for_tau_using_KE <- function( velocity_initial,
 }
 
 ## ---- KE criterion on the JOINT (main + nuisance) block: the kinetic energies and their rates add over the two blocks, the
-##      gradient is tau * (dK_main + dK_us) * (rate_main + rate_us). EXPERIMENTAL, assistant-introduced (to test
+##      gradient is tau * (dK_main + dK_us) * (rate_main + rate_us). EXPERIMENTAL (to test
 ##      tau_adaptation_block = "joint"); tau_adaptation_block = "main" never calls this.
 ##
 R_fn_kinetic_energy_change <- function( velocity_initial,

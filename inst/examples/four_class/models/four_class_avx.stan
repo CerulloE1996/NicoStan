@@ -56,7 +56,7 @@
 //     as the 2-class beta is, via the normal prior and the fixed induced-Dirichlet anchor.
 //     C_vec is therefore array[2], as in the 2-class file.
 //
-//     IDENTIFICATION (v5, 12 Sept 2026 - after the first smoke test): with ALL tests ordinal and
+//     IDENTIFICATION: with ALL tests ordinal and
 //     fully free own-status cutpoints, delta_own > 0 does NOT pin the class labels - the present-
 //     status cutpoints can shift up by more than delta_own and reverse the direction, and on the
 //     first smoke test they did (Se < 1 - Sp on the ADOS). The 2-class file does not hit this

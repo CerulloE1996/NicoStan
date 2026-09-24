@@ -84,7 +84,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##                           that does not pass it - e.g. the pre-burnin - is unchanged).
                                            ##   "running_mean_frozen" - the same running mean, but FROZEN from theta_hat_us_freeze_iter on,
                                            ##                           so eps finishes adapting against exactly the kernel sampling uses.
-                                           ##   "zero"                - centre fixed at 0 throughout (the Feb 2026 code).
+                                           ##   "zero"                - centre fixed at 0 throughout (the earlier code).
                                            theta_hat_us_rule = c("running_mean", "running_mean_frozen", "zero"),
                                            theta_hat_us_freeze_iter = NULL,   ## automatic: linked to the final metric update; legacy: round(0.6 * n_adapt)
                                            burnin_schedule = "legacy",       ## preserve ordering pre-burn-in and direct historical callers
@@ -101,7 +101,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            share_tau_ii_across_chains_in_burnin = FALSE,
                                            randomize_tau_burnin = FALSE,
                                            ##
-                                           ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL, assistant-introduced):
+                                           ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL):
                                            ##      which parameters feed the trajectory-length criterion. "main" = the main block only (the
                                            ##      behaviour before this option existed). "joint" = main and nuisance blocks concatenated,
                                            ##      still adapting the ONE joint tau_main. Models without a sampled nuisance block fall back
