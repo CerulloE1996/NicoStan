@@ -343,7 +343,7 @@ the diffusion bridge, stochastic volatility and latent diffusion survival applic
 [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001),
 and the function-space applications in [Cotter et al., 2013](https://arxiv.org/abs/1202.0709).
 The [runnable examples](#examples) show the implementations currently supplied with NicoStan.
-The supplied discrete-time AR(1) stochastic-volatility example is a different model from the continuous-time experiments in
+Note that the supplied discrete-time AR(1) stochastic-volatility example is a different model from the continuous-time experiments in
 [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001) and [Beskos et al., 2015](https://doi.org/10.1093/biomet/asv051).
 
 
