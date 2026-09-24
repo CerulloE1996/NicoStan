@@ -9,7 +9,7 @@
 [Examples](#examples) ·
 [Benchmarks](#benchmarks) ·
 [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
-[NicoStan's efficient burnin algorithms](#efficient-burnin-algorithms) ·
+[NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms) ·
 [How to cite](#how-to-cite-nicostan) ·
 [References](#references)
 
@@ -19,7 +19,8 @@
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-NicoStan is an R package for efficiently fitting Bayesian models written in the probabilistic programming language [Stan](https://mc-stan.org/).
+NicoStan is an R package for efficiently fitting Bayesian models written in the probabilistic programming language
+[Stan](https://mc-stan.org/).
 NicoStan accesses Stan's log posterior and gradients through our integration of
 [BridgeStan](https://roualdes.us/bridgestan/latest/) ([Roualdes et al., 2023](https://joss.theoj.org/papers/10.21105/joss.05236))
 into NicoStan's R/C++ code;
@@ -104,7 +105,8 @@ This difference in burnin adaptation algorithm makes NicoStan more efficient tha
 (see the [Benchmarks](#benchmarks) section below).
 In our testing, NicoStan can also perform very well with a very short burnin
 (100-125 iterations with just 4 chains; we are also currently testing shorter burnins).
-Furthermore, the fact that NicoStan uses between-chain adaptation (as opposed to within-chain adaptation, like Stan's NUTS-HMC algorithm)
+Furthermore, the fact that NicoStan uses between-chain adaptation
+(as opposed to within-chain adaptation, like Stan's NUTS-HMC algorithm)
 means that all chains finish the sampling phase at approximately the same time, avoiding the common issue of "stuck chains",
 which is often seen with complex models when using Stan directly
 (e.g., via [cmdstanr](https://mc-stan.org/cmdstanr/) or [rstan](https://mc-stan.org/rstan/)).
@@ -147,7 +149,8 @@ with the C++ source trees at `~/.cmdstan/cmdstan-2.36.0` and `~/.bridgestan/brid
 
 It should also work on Windows and macOS; however, we have only briefly tested it on Windows, and not yet on macOS.
 
-If you have any installation issues (e.g., C++ compiler errors) or bugs, please email me at: enzo.cerullo@bath.edu, or open an issue on [GitHub](https://github.com/CerulloE1996/NicoStan/issues).
+If you have any installation issues (e.g., C++ compiler errors) or bugs, please email me at:
+enzo.cerullo@bath.edu, or open an issue on [GitHub](https://github.com/CerulloE1996/NicoStan/issues).
 
 ### Installation from local source files
 
@@ -189,7 +192,8 @@ BayesMVP::install_BayesMVP()
 ## Restart R before loading the compiled BayesMVP package.
 ```
 
-Note that this command installs the [main branch](https://github.com/CerulloE1996/BayesMVP/tree/main) of [BayesMVP](https://github.com/CerulloE1996/BayesMVP).
+Note that this command installs the
+[main branch](https://github.com/CerulloE1996/BayesMVP/tree/main) of [BayesMVP](https://github.com/CerulloE1996/BayesMVP).
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -366,7 +370,8 @@ however, it does not remove the nuisance block - the corresponding latent variab
 Such blocks occur in many commonly-used models; such as:
 
 - **MVP, LC-MVP, MVOP and LC-MVOP:** latent-Gaussian/auxiliary variables for correlated binary and/or ordinal outcomes.
-The augmented state grows with the number of individuals and outcomes; evaluating the marginal likelihood instead involves multivariate Gaussian rectangle probabilities.
+The augmented state grows with the number of individuals and outcomes;
+evaluating the marginal likelihood instead involves multivariate Gaussian rectangle probabilities.
 - **Generalised linear mixed models:** Gaussian random intercepts/slopes for binary, ordinal or count outcomes,
 particularly when there are many subjects/groups or crossed random effects.
 - **Generalised additive mixed models:** Gaussian spline coefficients and random effects,
@@ -487,7 +492,8 @@ for instance, a non-centred parameterisation such as `x = μ(θ) + L(θ)u`, with
 The nuisance posterior itself does not need to be Gaussian - its departure from the reference is retained in the correction term.
 
 
-NicoStan samples the main parameters `θ` and the latent/nuisance parameters `u` **jointly**, within the same hybrid HMC/diffusion-pathspace trajectory:
+NicoStan samples the main parameters `θ` and the latent/nuisance parameters `u` **jointly**,
+within the same hybrid HMC/diffusion-pathspace trajectory:
 
 - The main model parameters are updated using standard HMC dynamics.
 - For models with nuisance parameters,
@@ -529,7 +535,7 @@ is based on the main parameters only; hence, a large nuisance block does not dom
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
-## Efficient burnin algorithms
+## Efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
