@@ -104,7 +104,7 @@ The default phase settings are:
 
 ## Rescaling tau for randomised sampling (`tau_sampling_scale`)
 
-**Provenance.** This option is our own heuristic, introduced on 2026-09-22. It is not a published method. It rests on the exact-dynamics Gaussian analysis in [Hoffman et al. (2021)](https://proceedings.mlr.press/v130/hoffman21a.html) and on the $\mathrm{Unif}(0,2\bar\tau)$ jitter discussed by [Sountsov and Hoffman (2022)](https://arxiv.org/abs/2110.11576v3). The two optima and their ratios below are our own derivation.
+**Provenance.** This option is our own heuristic. It is not a published method. It rests on the exact-dynamics Gaussian analysis in [Hoffman et al. (2021)](https://proceedings.mlr.press/v130/hoffman21a.html) and on the $\mathrm{Unif}(0,2\bar\tau)$ jitter discussed by [Sountsov and Hoffman (2022)](https://arxiv.org/abs/2110.11576v3). The two optima and their ratios below are our own derivation.
 
 **Why.** By default NicoStan adapts $\tau$ with a fixed length during burn-in (`randomize_tau_burnin = FALSE`). This is deliberate: the burn-in chains run in lockstep, so per-chain jitter would make every iteration wait for the longest chain. Sampling then draws $\tau_i\sim\mathrm{Unif}(0,2\bar\tau)$ with $\bar\tau$ equal to the adapted value (`randomize_tau_sampling = TRUE`). The fixed-length optimum is not the optimal mean of a jittered length, so the adapted $\bar\tau$ is not the value the same criterion would pick for the jittered sampler.
 

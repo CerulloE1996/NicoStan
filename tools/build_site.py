@@ -29,9 +29,9 @@ algorithm_table = "\n".join(f"- `{a['id']}` (**{a['name']}**): {a['summary']}" f
 reference_list = "\n\n".join(f"{i}. {r['authors']} ({r['year']}). [{r['title']}]({r['url']}). {r['venue']}." for i, r in enumerate(references, 1))
 template = (SOURCE / "README.template.md").read_text()
 markdown = template.replace("{{QUICKSTART}}", quickstart).replace("{{ALGORITHMS}}", algorithm_table).replace("{{REFERENCES}}", reference_list)
-## The reference-flow figure appears on the GitHub Pages site only; the README carries no figure (2026-09-22).
+## The reference-flow figure appears on the GitHub Pages site only; the README carries no figure.
 markdown = re.sub(r"\{\{REFERENCE_FLOW\}\}\n+", "", markdown)
-## The Nico logo sits beside the title in the GitHub README only (the website shows it in the banner) (2026-09-23).
+## The Nico logo sits beside the title in the GitHub README only (the website shows it in the banner).
 markdown = markdown.replace("# NicoStan\n", '# NicoStan <img src="docs/assets/NicoStan_logo_720.png" align="right" height="140" alt="NicoStan logo" />\n', 1)
 (ROOT / "README.md").write_text(markdown)
 
@@ -62,7 +62,7 @@ def inline(text):
         if token.startswith("`"):
             result.append("<code>" + escape(token[1:-1]) + "</code>")
         elif token.startswith("**"):
-            ## Bold text is rendered recursively, so code and links inside it work (2026-09-24: "**Specialised [BayesMVP](...) models:**"
+            ## Bold text is rendered recursively, so code and links inside it work ("**Specialised [BayesMVP](...) models:**"
             ## showed the raw link and its long URL pushed the page wider than a phone screen).
             result.append("<strong>" + inline(token[2:-2]) + "</strong>")
         else:
@@ -173,14 +173,14 @@ def render(text):
 
 template_for_site = re.sub(r"\$`([^`]+)`\$", r"$\1$", template)
 body_text = template_for_site.replace("{{QUICKSTART}}", quickstart).replace("{{REFERENCES}}", reference_list)
-## HTML comments are hidden on GitHub; drop them so the Pages site does not print them as text (2026-09-23).
+## HTML comments are hidden on GitHub; drop them so the Pages site does not print them as text.
 body_text = re.sub(r"<!--.*?-->[ \t]*\n?", "", body_text, flags=re.S)
 body = render(body_text)
 navigation = "".join(
     f'<a href="#{section_id}">{re.sub(r"<[^>]+>", "", title)}</a>'
     for section_id, title in re.findall(r'<section class="doc-section" id="([^"]+)"><h2>(.*?)</h2>', body)
 )
-## Banner title and paragraph come from website/website_banner.md (one website line per file line) (2026-09-23).
+## Banner title and paragraph come from website/website_banner.md (one website line per file line).
 banner_lines = [line.rstrip("\n") for line in (SOURCE / "website_banner.md").read_text().split("\n") if not line.startswith("##")]
 banner_description = next(line.split(":", 1)[1].strip() for line in banner_lines if line.startswith("description:"))
 banner_lines = [line for line in banner_lines if not line.startswith("description:")]
