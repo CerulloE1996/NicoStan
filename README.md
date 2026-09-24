@@ -3,8 +3,9 @@
 # NicoStan <img src="docs/assets/NicoStan_logo_720.png" align="right" height="140" alt="NicoStan logo" />
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
-[What is NicoStan?](#what-is-NicoStan) ·
-[How is NicoStan different to Stan?](#how-is-NicoStan-different-to-Stan) ·
+[What is NicoStan?](#what-is-nicostan) ·
+[How is NicoStan different to Stan?](#how-is-nicostan-different-to-stan-eg-cmdstanrrstan) ·
+[Installation](#installation) ·
 [Examples](#examples) ·
 [Benchmarks](#benchmarks) ·
 [Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
@@ -116,7 +117,7 @@ NicoStan offers a hybrid diffusion-pathspace HMC sampling algorithm
 and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)),
 which can greatly increase efficiency - especially for large N.
 
-Furthermore, as we mentioned above (see [this section](#what-is-NicoStan)), unlike Stan,
+Furthermore, as we mentioned above (see [this section](#what-is-nicostan)), unlike Stan,
 NicoStan allows you to set a dense HMC mass matrix for the main model parameters,
 combined with a diagonal M for the high-dimensional nuisance parameters.
 
@@ -141,8 +142,12 @@ See the [BridgeStan installation guide](https://roualdes.us/bridgestan/latest/la
 
 The current development build uses CmdStan 2.36.0 and BridgeStan 2.6.2.
 
-We have tested NicoStan on Linux, using R 4.3.3 and GCC 11.4,
+We have tested NicoStan mostly on Linux, using R 4.3.3 and GCC 11.4,
 with the C++ source trees at `~/.cmdstan/cmdstan-2.36.0` and `~/.bridgestan/bridgestan-2.6.2`.
+
+It should also work on Windows and macOS; however, we have only briefly tested it on Windows, and not yet on macOS.
+
+If you have any installation issues (e.g., C++ compiler errors) or bugs, please email me at: enzo.cerullo@bath.edu, or open an issue on [GitHub](https://github.com/CerulloE1996/NicoStan/issues).
 
 ### Installation from local source files
 
