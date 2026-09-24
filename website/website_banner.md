@@ -5,10 +5,10 @@
 ## The "description:" line is the one-line package description, used for the GitHub "About" box and the
 ## website's search-engine description.
 ## ----
-description: Adaptive MCMC for Stan models, with advanced between-chain adaptation and diffusion-pathspace HMC
+description: Efficient MCMC for Stan models, with advanced between-chain adaptation and diffusion-pathspace HMC
 ## ----
 NicoStan:
-Adaptive MCMC
+Efficient MCMC
 for Stan models,
 with advanced
 between-chain
@@ -21,6 +21,7 @@ probabilistic programming language Stan.
 For models with high-dimentional Guassian latent variables/nuisance parameters,
 NicoStan's algorithm uses standard HMC for the main model parameters,
 and diffusion-pathspace HMC for the nuisance parameters.
+## ---------------------------------------------------------------------------------
 Many statistical models require nuisance parameters, such as:
 binary/ordinal multivariate probit models
 (e.g., for econometrics and diagnostic test accuracy with imperfect gold standards),
