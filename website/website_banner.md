@@ -16,17 +16,18 @@ adaptation and
 diffusion-pathspace HMC
 ---
 ## ---------------------------------------------------------------------------------
-NicoStan uses standard HMC for the main model parameters,
-and diffusion-pathspace HMC for the high-dimensional Gaussian latent variables
-(or "nuisance" parameters), which many models require, such as:
+NicoStan is an R package that works for statistical models programmed in the
+probabilistic programming language Stan.
+For models with high-dimentional Guassian latent variables (or "nuisance" parameters),
+NicoStan's algorithm uses standard HMC for the main model parameters,
+and diffusion-pathspace HMC for the nuisance parameters.
+Many statistical models require nuisance parameters, such as:
 binary/ordinal multivariate probit models
 (e.g., for econometrics and diagnostic test accuracy with imperfect gold standards),
 and stochastic volatility (e.g., for quantitative finance, econometrics, medicine).
 ## ---------------------------------------------------------------------------------
 It also uses between-chain adaptation to achieve more efficient burnin/warmup,
-as well as state-of-the-art burnin algorithms (such as ChEES-R-HMC, SNAPER-HMC).
+as well as state-of-the-art burnin algorithms (e.g., ChEES-R-HMC, SNAPER-HMC).
 ## ---------------------------------------------------------------------------------
 NicoStan also offers rapid parallel estimation of posterior summaries,
 and only monitors/stores the trace for the main model parameters (by default).
-## ---------------------------------------------------------------------------------
-Note that NicoStan also works for general Stan models without nuisance parameters.
