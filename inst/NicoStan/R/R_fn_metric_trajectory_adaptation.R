@@ -23,7 +23,7 @@ fn_trajectory_metric_factor <-  function( mass_matrix,
 
 ##
 ## ---- Joint (main + nuisance) metric factor: a list applied block-wise, so a dense main metric never has to be expanded to the full
-##      (n_main + n_nuisance)^2 matrix. EXPERIMENTAL, assistant-introduced 2026-09-23 for the ps7 test of tau_adaptation_block = "joint".
+##      (n_main + n_nuisance)^2 matrix. EXPERIMENTAL, assistant-introduced, for testing tau_adaptation_block = "joint".
 ##      Rows 1..n_main of a position/velocity are the main block, the remaining rows the nuisance block (diagonal mass M_us).
 ##
 fn_trajectory_joint_metric_factor <-  function( mass_main,

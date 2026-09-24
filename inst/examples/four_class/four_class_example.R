@@ -228,7 +228,7 @@ run_four_class_nicostan_smoke <- function(
     if (!file.exists(stan_file)) stop("Stan source missing: ", stan_file)
     if (chains > length(fixture$initial_values))
         stop("The fixture contains only ", length(fixture$initial_values), " initial-value lists")
-    ## 2026-09-22: math_backend = "AVX2" compiles the same AVX model with the same flags as "AVX512" plus
+    ## math_backend = "AVX2" compiles the same AVX model with the same flags as "AVX512" plus
     ## -DBAYESMVP_FORCE_AVX2 (make argument CPPFLAGS_OPTIM), which makes the BayesMVP header use its 4-lane AVX2 kernels on an
     ## AVX-512 machine too. (-mno-avx512f in CXXFLAGS would not work here: BridgeStan's make/local APPENDS -mavx512f to the
     ## CXXFLAGS environment variable.) The define is part of the build signature, so the AVX2 and AVX512 builds never share

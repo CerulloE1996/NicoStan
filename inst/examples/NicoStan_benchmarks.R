@@ -85,7 +85,7 @@ NicoStan_benchmark_package_fingerprint <- function(package_name) {
         list(path = normalizePath(package_path, mustWork = TRUE), files = NicoStan_benchmark_hash_files(package_files))
 }
 
-## 2026-09-22: the AVX arms APPEND their ISA flags (CXXFLAGS_OPTIM, which Stan math's make/compiler_flags adds after
+## The AVX arms APPEND their ISA flags (CXXFLAGS_OPTIM, which Stan math's make/compiler_flags adds after
 ## BridgeStan's make/local CXXFLAGS) instead of passing CXXFLAGS on the make command line. A command-line CXXFLAGS REPLACES
 ## make/local's CXXFLAGS, so both AVX arms were compiled WITHOUT -DNDEBUG -DBOOST_DISABLE_ASSERTS -fno-math-errno
 ## -fno-signed-zeros -fno-trapping-math, which the plain Stan arm keeps (checked with make -n). All three arms now share

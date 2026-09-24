@@ -1,7 +1,7 @@
 #### =====================================================================================================================================
 ## R_fn_check_sample_math_settings.R
 ##
-## ---- $sample() / R_fn_sample_model math settings (vect_type, Phi_type, inv_Phi_type) - 2026-09-22:
+## ---- $sample() / R_fn_sample_model math settings (vect_type, Phi_type, inv_Phi_type):
 ##
 ##      These three arguments of $sample() / R_fn_sample_model used to be SILENTLY IGNORED:
 ##        - vect_type was overwritten with detect_vectorization_support() whatever the user passed;

@@ -57,7 +57,7 @@ NicoStan_quadrature <-  function(n_points = 15L) {
 ## and dX_u = -(drift_sin_coefficient * sin(X_u) + drift_constant) du + sigma_x dB_u, X_0 = x_0.
 ## The defaults are their eq. (51) on the window [0, 1] shown in their Figure 1, with h(x) = x^2 + 0.01.
 ##
-## x_squared_hazard_offset (round-4 change, 2026-09-22, not in Beskos et al., who use 0):
+## x_squared_hazard_offset (not in Beskos et al., who use 0):
 ## with h(x) = x^2 exactly, log h(t) = 2 log|x(t)| is -Inf at x(t) = 0 and h(x) = h(-x), so once the path nears
 ## zero the posterior splits into sign patterns separated by -Inf walls at the event times, and HMC diverges
 ## there (cmdstanr: divergences and x_path R-hat 1.5 even with every parameter fixed at the Beskos et al. values).
@@ -450,7 +450,7 @@ run_NicoStan_example <-  function( model,
         source_hash <-  digest::digest(file = source_file, algo = "sha256")
         model_build_dir <-  file.path(output_dir, "models", paste0(model, "_", substr(source_hash, 1L, 12L), "_", math_backend))
         dir.create(model_build_dir, recursive = TRUE, showWarnings = FALSE)
-        ## 2026-09-22: AVX builds carry the backend in the file name (<model>_avx_AVX2.stan / _AVX512.stan): BridgeStan's R interface
+        ## AVX builds carry the backend in the file name (<model>_avx_AVX2.stan / _AVX512.stan): BridgeStan's R interface
         ## finds a loaded model library by its base name, so an AVX2 and an AVX512 build of the same _avx.stan loaded in one R
         ## session shared a name, and the build loaded first then returned an all-zero gradient (A2_simd test 4b).
         stan_file <-  file.path(model_build_dir, if (math_backend == "Stan") selected_source else sub(".stan$", paste0("_", math_backend, ".stan"), selected_source))
@@ -481,7 +481,7 @@ run_NicoStan_example <-  function( model,
                                 stop(paste0("This CPU does not expose the required ", math_backend, " instruction set."))
                         }
                 }
-                ## 2026-09-22: ISA flags APPENDED via CXXFLAGS_OPTIM (a command-line CXXFLAGS replaced BridgeStan's make/local
+                ## ISA flags APPENDED via CXXFLAGS_OPTIM (a command-line CXXFLAGS replaced BridgeStan's make/local
                 ## CXXFLAGS, dropping -DNDEBUG and -fno-math-errno etc. from the AVX arms only), and "AVX2" = the same build as
                 ## "AVX512" plus -DBAYESMVP_FORCE_AVX2 (4-lane BayesMVP kernels; simd_lanes is checked below). Same rule as
                 ## NicoStan_benchmark_compile_arguments() in NicoStan_benchmarks.R.

@@ -76,7 +76,7 @@ NicoStan_reference_log_density <-  function(example, p) {
                 ##
                 ## ---- independent check: Euler-Maruyama path, then the trapezoid rule on the node set
                 ## {grid points up to t} plus t itself, with x(t) from approx() on the grid path.
-                ## h(x) = hazard_scale * (x^2 + x_squared_hazard_offset) (round-4 offset, 2026-09-22).
+                ## h(x) = hazard_scale * (x^2 + x_squared_hazard_offset).
                 ##
                 if (is.null(d$x_squared_hazard_offset)) stop("latent_diffusion_survival: the data list has no x_squared_hazard_offset.")
                 grid_step_length <- d$t_max / d$M

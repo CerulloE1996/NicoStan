@@ -405,7 +405,7 @@ MVP_model <- R6Class("MVP_model",
                           #'@param randomize_tau_burnin Randomise trajectory length during burn-in. Default FALSE; length can still adapt between iterations.
                           #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from zero to twice the adapted scale (at least one integration step). Default TRUE.
                           #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an assistant-introduced unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
-                          #'@param tau_adaptation_block "main" (default; unchanged behaviour): the trajectory-length criterion uses the main parameters only. "joint": main and nuisance parameters concatenated, still adapting the one joint tau. EXPERIMENTAL (2026-09-23), for testing only; models without a sampled nuisance block fall back to "main".
+                          #'@param tau_adaptation_block "main" (default; unchanged behaviour): the trajectory-length criterion uses the main parameters only. "joint": main and nuisance parameters concatenated, still adapting the one joint tau. EXPERIMENTAL, for testing only; models without a sampled nuisance block fall back to "main".
                           #'@param manual_tau If \code{FALSE}, then the selected burnin_algorithm will be used to adapt \eqn{\tau} during the burnin phase. Otherwise if \code{TRUE}, \eqn{\tau} will be
                           #' fixed to the value given in the \code{tau_if_manual} argument. 
                           #'@param tau_if_manual The HMC path length (\eqn{\tau}) to use for the HMC sampling. This will be used for both the burnin and sampling phases. 
@@ -424,7 +424,7 @@ MVP_model <- R6Class("MVP_model",
                           #'validates it and defaults it to the SIMD level compiled into the installed BayesMVP), and for \code{Model_type = "Stan"} it is
                           #'not used at all (the .stan file defines its own maths). A non-NULL value stops with an error for Stan models; for built-in
                           #'models it must equal the initialised \code{model_args_list$vect_type}, otherwise it stops and points to \code{model_args_list}.
-                          #'(Before 2026-09-22 this argument was silently ignored.)
+                          #'(Previously this argument was silently ignored.)
                           #'@param Phi_type Leave NULL (the default). Same rules as \code{vect_type}: set it through \code{model_args_list$Phi_type} at
                           #'initialisation for the built-in models (only the exact setting "Phi" is currently accepted by BayesMVP); not used for Stan models,
                           #'where a non-NULL value stops.

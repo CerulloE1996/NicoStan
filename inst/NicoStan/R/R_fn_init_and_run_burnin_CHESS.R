@@ -71,7 +71,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## eps at iteration gap (the handover to the tau adaptation):
                                            ##   TRUE  - re-initialise eps with find_initial_eps (halves from 0.5 until ONE leapfrog step
                                            ##           from the chain mean accepts at >= 0.8, so it returns 0.0625, 0.125, ...) and reset
-                                           ##           the eps ADAM moments. The behaviour since at least 2026-09-06.
+                                           ##           the eps ADAM moments. The long-standing behaviour.
                                            ##   FALSE - keep the eps (and its ADAM moments) adapted up to gap. tau is reset either way.
                                            eps_reinit_at_ChEES_handover = TRUE,
                                            ##
@@ -80,7 +80,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##                           nuisance states. The centre then follows the chains, which inflates
                                            ##                           the burn-in acceptance (same state/eps/metric: ~0.7 vs ~0.45 with the
                                            ##                           centre frozen, as it is in sampling), so eps is tuned too big for
-                                           ##                           sampling. The behaviour up to 2026-09-18 (default here, so a call
+                                           ##                           sampling. The earlier behaviour (default here, so a call
                                            ##                           that does not pass it - e.g. the pre-burnin - is unchanged).
                                            ##   "running_mean_frozen" - the same running mean, but FROZEN from theta_hat_us_freeze_iter on,
                                            ##                           so eps finishes adapting against exactly the kernel sampling uses.
@@ -91,7 +91,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            metric_adaptation_end_iter = NULL,
                                            ##
                                            ## Non-adapting iterations to run after n_adapt. NULL = all of them, up to n_burnin (the behaviour
-                                           ## up to 2026-09-18). eps, the metric and tau are frozen after n_adapt, so these iterations only let
+                                           ## without this option). eps, the metric and tau are frozen after n_adapt, so these iterations only let
                                            ## the few burn-in chains settle - which the many sampling chains do far more cheaply. e.g. 5.
                                            ## Historical early-stop description above is retired: the loop now always runs to n_burnin.
                                            ##
@@ -101,7 +101,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            share_tau_ii_across_chains_in_burnin = FALSE,
                                            randomize_tau_burnin = FALSE,
                                            ##
-                                           ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL, assistant-introduced 2026-09-23 for ps7):
+                                           ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL, assistant-introduced):
                                            ##      which parameters feed the trajectory-length criterion. "main" = the main block only (the
                                            ##      behaviour before this option existed). "joint" = main and nuisance blocks concatenated,
                                            ##      still adapting the ONE joint tau_main. Models without a sampled nuisance block fall back
@@ -134,7 +134,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            force_PartialLog_for_metric,
                                            force_multi_attempts_for_metric,
                                            ##
-                                           ## (vect_type / Phi_type / inv_Phi_type were removed from this signature on 2026-09-22: they were
+                                           ## (vect_type / Phi_type / inv_Phi_type were removed from this signature: they were
                                            ##  accepted but never used. The native models read them from model_args_list at initialisation;
                                            ##  Stan models do not use them. A caller still passing them now gets an "unused argument" error.)
                                            ##
@@ -1140,8 +1140,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                      ## at eps = 0.05). Floor the fixed stages at where the leapfrog
                                      ## phase ended so the ramp only ever lengthens; the fixed targets
                                      ## take over again as soon as they exceed that floor.
-                                     ## (Restored 2026-09-18: this floor was active in every run up to
-                                     ## 09-18 10:21; removing it changed the burn-in relative to those runs.)
+                                     ## (Restored: this floor was active in every earlier run;
+                                     ## removing it changed the burn-in relative to those runs.)
                                      ##
                                      tau_ramp_floor <- max(tau_ramp_leapfrog_steps) * EHMC_args_as_Rcpp_List$eps_main
                                      ##
@@ -1454,7 +1454,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
            if (metric_estimator %in% c("chain_mean", "chain_mean_scaled")) {
               if ((metric_type_main == "Empirical") && (metric_shape_main == "dense")) {
                   if (ii < 20) {
-                    ## 2026-09-22: nrow = length(...) is needed for models with ONE main parameter: diag(x) of a length-1
+                    ## nrow = length(...) is needed for models with ONE main parameter: diag(x) of a length-1
                     ## vector builds a floor(x) x floor(x) identity (0x0 for a variance below 1), so update_cov_Welford then
                     ## failed at every iteration ("non-conformable arrays", swallowed by try()) and the dense metric was never adapted.
                     empicical_cov_main <- diag(c(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical),
@@ -1767,7 +1767,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           ##
           ## ---- Metric-coordinate principal directions, held fixed during this transition -------------------------------------------------
           if (!isTRUE(manual_tau) && burnin_algorithm != "KE") {
-              adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" = main + nuisance (EXPERIMENTAL, 2026-09-23)
+              adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" = main + nuisance (EXPERIMENTAL)
               for (adapted_block in adapted_blocks) {
                   states <- if (adapted_block == "main") theta_main_vectors_all_chains_input_from_R else
                             if (adapted_block == "joint") rbind(theta_main_vectors_all_chains_input_from_R, theta_us_vectors_all_chains_input_from_R) else
@@ -2391,7 +2391,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         if (ii >= gap && ii < n_adapt && !isTRUE(manual_tau)) {
                             tau_adaptation_iteration <- ii - gap + 1
                             tau_adaptation_iteration_vec[ii] <- tau_adaptation_iteration
-                            adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" (EXPERIMENTAL, 2026-09-23)
+                            adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" (EXPERIMENTAL)
                             for (adapted_block in adapted_blocks) {
                                 is_main <- adapted_block == "main"
                                 is_joint <- adapted_block == "joint"   ## main + nuisance concatenated (main rows first); updates tau_main
@@ -2696,7 +2696,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 ChEES_per_tau_gradient_vec = ChEES_per_tau_gradient_vec,
                 tau_adaptation_version = 4,
                 trajectory_parameter_block = tau_adaptation_block_effective,
-                ## EXPERIMENTAL (2026-09-23): requested and effective block feeding the trajectory-length criterion ("main" | "joint"):
+                ## EXPERIMENTAL: requested and effective block feeding the trajectory-length criterion ("main" | "joint"):
                 tau_adaptation_block_requested = tau_adaptation_block,
                 tau_adaptation_block = tau_adaptation_block_effective,
                 snaper_direction_main = trajectory_direction$main,

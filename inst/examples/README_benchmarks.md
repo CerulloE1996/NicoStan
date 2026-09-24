@@ -47,7 +47,7 @@ The drivers use the analysis profile by default. Set `NICOSTAN_EXAMPLE_PROFILE=s
 | Stochastic volatility (discrete-time AR(1)) | 250, 1000, 4000 time points |
 | Latent diffusion survival | 100, 200, 800 subjects (50 path increments for every size) |
 
-### Latent diffusion survival validation (round 4)
+### Latent diffusion survival validation
 
 The model was changed: a hazard offset of 0.01 and drift priors centred at the Beskos et al. values. The old model diverged in both engines. See `MODEL_NOTES.md` for what changed and why. Earlier LDS benchmark or validation results are for the old model and should not be mixed with new ones. The benchmark runner's resume check now refuses a saved run whose `.stan` sha256 differs from the current file.
 

@@ -527,7 +527,7 @@ update_M_Empirical_main <- function( debug,
         } else if (metric_shape_main == "dense") {
           ##
           ## A covariance of the wrong SIZE is a bug, not an estimate that is "not yet usable", so stop rather than keep the old
-          ## metric silently (2026-09-22: a 0x0 covariance from diag() of a length-1 vector left 1-parameter models on a unit metric).
+          ## metric silently (a 0x0 covariance from diag() of a length-1 vector left 1-parameter models on a unit metric).
           ##
           n_params_main_expected <- length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
           if (!is.null(empicical_cov_main) && is.matrix(empicical_cov_main) &&
@@ -579,7 +579,7 @@ update_M_Empirical_main <- function( debug,
                 EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec <- c(M_main_diag_sqrt)
                 ##
                 ## Dummy dense parameters:
-                ## (2026-09-22: nrow = n_params_main, because with ONE main parameter diag(x) of a length-1 vector
+                ## (nrow = n_params_main, because with ONE main parameter diag(x) of a length-1 vector
                 ##  builds a floor(x) x floor(x) identity - 0x0 for a variance below 1 - instead of the 1x1 matrix x.)
                 ##
                 n_params_main_diag_shape <- length(EHMC_Metric_as_Rcpp_List$M_main_vec)

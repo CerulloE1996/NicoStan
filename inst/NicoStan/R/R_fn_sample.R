@@ -5,7 +5,7 @@
 ##
 ## ---- Unit-Gaussian factor for tau_sampling_scale = "gaussian_matched":
 ##
-## PROVENANCE: assistant-introduced heuristic (2026-09-22), derived from the Gaussian analysis of
+## PROVENANCE: assistant-introduced heuristic, derived from the Gaussian analysis of
 ## Hoffman, Radul and Sountsov (2021, AISTATS, "An adaptive MCMC scheme for setting trajectory lengths
 ## in Hamiltonian Monte Carlo"). It is NOT a published method. Full derivation: docs/adaptation-notes.md.
 ##
@@ -263,7 +263,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         tau_weight_by_p_jump = NULL,
                                         ##
                                         ## Burn-in tau ramp before the adaptation takes over: "original" (default; the
-                                        ## ramp used up to 2026-09-17 12:17 BST) or "staged" (5/10/20 leapfrog steps then
+                                        ## ramp used in all earlier runs) or "staged" (5/10/20 leapfrog steps then
                                         ## pi/8 .. pi, floored at 20 * eps). See init_and_run_burnin_ChESSR.
                                         tau_ramp = NULL,
                                         ##
@@ -273,7 +273,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##
                                         ## Centre of the nuisance Gaussian rotation in the MAIN burn-in: "running_mean_frozen" (default;
                                         ## running mean, frozen from theta_hat_us_freeze_iter so eps is tuned against the kernel sampling
-                                        ## uses), "running_mean" (never frozen - the pre-2026-09-18 behaviour, which tunes eps too big)
+                                        ## uses), "running_mean" (never frozen - the earlier behaviour, which tunes eps too big)
                                         ## or "zero" (the Feb 2026 code). See init_and_run_burnin_ChESSR.
                                         theta_hat_us_rule = NULL,
                                         theta_hat_us_freeze_iter = NULL,
@@ -308,7 +308,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##   tau_adaptation_block                 - "main" (default; the behaviour before this option existed): the
                                         ##                                          trajectory-length criterion uses the main block only. "joint":
                                         ##                                          main + nuisance concatenated, still adapting the one joint tau.
-                                        ##                                          EXPERIMENTAL, assistant-introduced 2026-09-23 for the ps7 test;
+                                        ##                                          EXPERIMENTAL, assistant-introduced, for testing only;
                                         ##                                          models without a sampled nuisance block fall back to "main".
                                         tau_adaptation_block = "main",
                                         ##   burnin_TBB_pool_equals_n_chains      - NULL defaults to TRUE for built-in models (separate OpenMP WCP teams).
@@ -418,7 +418,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 }
                 ##
                 ##
-                ## ---- vect_type / Phi_type / inv_Phi_type are not used for Stan models: stop if supplied (2026-09-22;
+                ## ---- vect_type / Phi_type / inv_Phi_type are not used for Stan models: stop if supplied (
                 ##      previously silently ignored). Built-in models are checked after the model is (re-)initialised below:
                 ##
                 fn_stop_if_sample_math_settings_supplied_for_Stan_model( Model_type   = init_object$Model_type,
@@ -2348,7 +2348,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                           if (burnin_algorithm == "ChEES") "expected_squared_position_statistic_change" else "squared_kinetic_energy_change",
                    trajectory_coordinates = if (burnin_algorithm == "KE") "kinetic_energy" else "mass_metric",
                    trajectory_parameter_block = if_null_then_set_to(burnin_object$trajectory_parameter_block, "main"),
-                   ## EXPERIMENTAL (2026-09-23): block feeding the trajectory-length criterion, as requested and as actually used:
+                   ## EXPERIMENTAL: block feeding the trajectory-length criterion, as requested and as actually used:
                    tau_adaptation_block_requested = tau_adaptation_block,
                    tau_adaptation_block = if_null_then_set_to(burnin_object$tau_adaptation_block, "main"),
                    tau_adaptation_enabled = !isTRUE(manual_tau),

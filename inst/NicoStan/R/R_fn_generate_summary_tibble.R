@@ -15,7 +15,7 @@ generate_summary_tibble <- function(n_threads = NULL,
   
         
               ##
-              ## ---- 2026-09-22 fix: the n_threads argument used to be overwritten here with detectCores() / 2 (96 on the
+              ## ---- Fix: the n_threads argument used to be overwritten here with detectCores() / 2 (96 on the
               ##      local HPC), so the caller's thread count was silently ignored. Honour it; only when it is NULL use
               ##      half of the CPUs this process may run on (taskset / CPU affinity respected).
               ##

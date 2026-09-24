@@ -308,11 +308,11 @@ create_summary_and_traces <- function(    model_results,
         ##
         n_iter <- dim(main_trace[[1]])[2]
         ##
-        ## ---- Thread budget for the summary (2026-09-22 fix):
+        ## ---- Thread budget for the summary:
         ##      This function used to set mc.cores, OMP_NUM_THREADS and the RcppParallel/TBB pool to
         ##      parallel::detectCores() (192 on the local HPC). That ignored the thread count the caller had set,
         ##      ignored taskset / CPU-affinity limits (detectCores() counts every CPU in the machine), and the TBB
-        ##      setting persisted after $summary() returned. That overloaded the machine on 2026-09-22.
+        ##      setting persisted after $summary() returned. That overloaded the machine.
         ##      Now: the caller's n_threads if given, otherwise the number of sampling chains, never more than the
         ##      CPUs this process may run on; the previous settings are restored when this function exits.
         ##
@@ -998,7 +998,7 @@ create_summary_and_traces <- function(    model_results,
              #    }
              # })
           
-             n_cores <- n_threads_summary ## was parallel::detectCores() (2026-09-22 fix, see "Thread budget for the summary")
+             n_cores <- n_threads_summary ## was parallel::detectCores() (see "Thread budget for the summary")
              
              # try({ 
              #   rm(all_param_outs_trace)

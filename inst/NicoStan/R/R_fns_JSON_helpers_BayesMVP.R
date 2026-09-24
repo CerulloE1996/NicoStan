@@ -7,7 +7,7 @@
 
 #### =====================================================================================================================================
 ##
-## ---- Atomic file writes into the SHARED stan_data folder (2026-09-22):
+## ---- Atomic file writes into the SHARED stan_data folder:
 ##
 ##      convert_stan_data_list_to_JSON() and friends write content-addressed files (data_<md5>.json, and the per-stream
 ##      copies data_<md5>_<stream>.json) into the installed package's stan_data folder, which every R process on the
