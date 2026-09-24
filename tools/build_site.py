@@ -62,7 +62,9 @@ def inline(text):
         if token.startswith("`"):
             result.append("<code>" + escape(token[1:-1]) + "</code>")
         elif token.startswith("**"):
-            result.append("<strong>" + escape(token[2:-2]) + "</strong>")
+            ## Bold text is rendered recursively, so code and links inside it work (2026-09-24: "**Specialised [BayesMVP](...) models:**"
+            ## showed the raw link and its long URL pushed the page wider than a phone screen).
+            result.append("<strong>" + inline(token[2:-2]) + "</strong>")
         else:
             link = re.fullmatch(r"\[([^\]]+)\]\(([^)]+)\)", token)
             result.append('<a href="' + escape(url(link[2]), quote=True) + '">' + escape(link[1]) + "</a>")
