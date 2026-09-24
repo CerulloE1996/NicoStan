@@ -164,7 +164,6 @@ joint longitudinal-survival modelling, and a discrete-time AR(1) stochastic-vola
 Continuous-time SV can introduce the additional path-discretisation difficulties described
 [below](#models-with-nuisance-parameters-diffusion-pathspace-hmc).
 - **Standard HMC:** Weibull survival regression, robust Student-t regression and marginal Gaussian process (GP) regression.
-Note that the GP example analytically integrates out the latent function, and the Student-t example evaluates its likelihood directly.
 
 
 The logistic random-intercept example gives a short introduction to the API:
@@ -185,7 +184,7 @@ This example simulates data with 20 groups and 200 observations, with a standard
 (i.e., the non-centred random intercepts) declared first in the Stan model.
 See the complete [R example](inst/examples/random_intercepts.R) and [Stan model](inst/examples/random_intercepts.stan)
 for the full parameterisation and settings.
-Note that the R6 class is called `NicoStan::Nico_model` (`NicoStan::MVP_model` also still works, for compatibility);
+Note that the R6 class is called `NicoStan::Nico_model` (`NicoStan::MVP_model` also still works, for compatibility reasons);
 `Model_type = "Stan"` must be selected when using a `.stan` model file; the other `Model_type` options require the
 [BayesMVP R package extension](https://github.com/CerulloE1996/BayesMVP) to be installed
 (see [BayesMVP: multivariate probit models](#bayesmvp-multivariate-probit-models)).
@@ -201,7 +200,7 @@ result <-  run_NicoStan_example(model = "hierarchical_logistic",
 ```
 
 
-To compare implementations:
+To select implementation:
 
 
 - Use `engine = "cmdstanr"` for Stan/NUTS.
@@ -216,9 +215,6 @@ selecting an AVX backend does not automatically replace standard Stan function c
 (see [Custom AVX2 and AVX-512 functions](#custom-avx2-and-avx-512-functions)).
 
 
-The output records the model/data fingerprints, sampler settings, posterior summaries and timings.
-Furthermore, the model definitions, prior scales and validation results are provided alongside the examples.
-
 ### Preparing your own Stan model
 
 When preparing a model for NicoStan:
@@ -227,7 +223,6 @@ When preparing a model for NicoStan:
 - Set `sample_nuisance = TRUE` (or `FALSE` for a model without a nuisance block).
 - Note that NicoStan automatically detects the (unconstrained) dimension of the nuisance block, 
 using the Stan compiler metadata and BridgeStan.
-- Keep the complete posterior density (including the prior on the nuisance parameters) in the Stan model.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -246,7 +241,7 @@ more specifically, it provides the following models:
 - **Latent trait:** the 2-class implementation, using `Model_type = "latent_trait"`.
 
 
-These models handle correlated binary and/or ordinal outcomes; more specifically, the latent class extensions allow
+These models handle correlated binary and/or ordinal outcomes, and their latent class extensions (LC-MVP, LC-MVOP) allow
 diagnostic/screening test accuracy to be estimated when a perfect reference/gold standard is unavailable.
 
 
@@ -272,7 +267,7 @@ In our initial tests on models with high-dimensional nuisance parameters/blocks,
 NicoStan has achieved speed-ups (relative to Stan, using cmdstanr) of more than **10×, without enabling AVX**.
 These comparisons use the standard Stan maths functions, so the gains reflect the sampler and its burnin adaptation.
 Furthermore, the custom AVX functions in the [BayesMVP extension](https://github.com/CerulloE1996/BayesMVP)
-provide an additional route to speeding things up; more specifically, they reduce the cost of evaluating the model and its gradients.
+provide an additional route to speeding things up.
 
 
 **Detailed benchmarks are coming soon.** The comparisons will cover:
@@ -304,7 +299,7 @@ or numerical marginalisation is too expensive. Techniques such as non-centring c
 however, it does not remove the nuisance block - the corresponding latent variables still have to be handled during posterior computation.
 
 
-Such blocks occur in many commonly-used models; more specifically:
+Such blocks occur in many commonly-used models; such as:
 
 - **MVP, LC-MVP, MVOP and LC-MVOP:** latent-Gaussian/auxiliary variables for correlated binary and/or ordinal outcomes.
 The augmented state grows with the number of individuals and outcomes; evaluating the marginal likelihood instead involves multivariate Gaussian rectangle probabilities.
@@ -379,7 +374,8 @@ the calculation for one outcome depends on the preceding outcomes within the sam
 more specifically, the conditional bounds and latent-variable transformations are built up in sequence.
 Similarly, forward simulation/non-centred reconstruction of nonlinear state-space models and diffusion paths
 often requires each state to be available before the next state can be calculated.
-These dependencies limit parallelism within an individual/path, although independent individuals, paths and chains can still be processed in parallel.
+These dependencies limit parallelism within an individual/path, although independent individuals,
+paths and chains can still be processed in parallel.
 
 
 Additionally, a model may require many small calculations, irregular indexing or repeated transfers between CPU and GPU memory,
@@ -434,7 +430,8 @@ NicoStan samples the main parameters `θ` and the latent/nuisance parameters `u`
 the nuisance parameters are updated using **diffusion-pathspace HMC** ([Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001)),
 where the Gaussian part of the dynamics is solved exactly (it is a rotation),
 so this Gaussian substep adds no integration error, regardless of the size of the nuisance block.
-The complete trajectory also contains numerical steps for the remaining terms; the Metropolis-Hastings acceptance step corrects their integration error.
+The complete trajectory also contains numerical steps for the remaining terms; 
+the Metropolis-Hastings acceptance step corrects their integration error.
 
 
 Models without a nuisance block (e.g., standard univariate logistic regression) use standard HMC throughout.
@@ -462,10 +459,6 @@ estimated during burnin (`metric_type_nuisance = "Empirical"`);
 alternatively, you can use a single common mass (`"uniform_diag"`) or unit mass (`"unit"`).
 
 
-Note that neither of the above options changes the target distribution -
-they change the reference dynamics used in the splitting.
-
-
 <!-- Furthermore, the trajectory-length adaptation used during burnin 
 (e.g., ChEES-R or SNAPER; see the [Efficient burnin algorithms](#efficient-burnin-algorithms) section below) 
 is based on the main parameters only; hence, a large nuisance block does not dominate the adaptation.  -->
@@ -488,33 +481,38 @@ and SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)
 
 More specifically, during burnin, NicoStan adapts:
 
-- The step size, targeting a mean acceptance probability of `adapt_delta` (0.80 by default), using an ADAM-type update ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980)).
-- The mass matrix (i.e., metric) for the main parameters, using either empirical covariance/variance estimates from the burnin chains (`metric_type_main = "Empirical"`)
-or a numerical Hessian (`metric_type_main = "Hessian"`); more specifically, the Hessian is computed by finite differences of the main-parameter gradients.
-Both methods support a diagonal/dense Euclidean metric (`metric_shape_main = "diag"` or `"dense"`).
+- The step size, targeting a mean acceptance probability of `adapt_delta` (0.80 by default),
+using an ADAM-type update ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980)).
+- The mass matrix (i.e., metric) for the main parameters, 
+using either empirical covariance/variance estimates from the burnin chains (`metric_type_main = "Empirical"`)
+or a numerical Hessian (`metric_type_main = "Hessian"`); 
+more specifically, the Hessian is computed by finite differences of the main-parameter gradients.
+Both methods support a diagonal or dense Euclidean metric (`metric_shape_main = "diag"` or `"dense"`).
 The nuisance masses and centre are adapted separately (see [How NicoStan works](#how-nicostan-works)).
 - The trajectory length, using the criterion selected via `burnin_algorithm`
-(see [Trajectory-length adaptation rules](#trajectory-length-adaptation-rules) below).
+(see [Trajectory-length adaptation algorithms](#trajectory-length-adaptation-algorithms) below).
 
 
-The main/nuisance separation means that NicoStan can use a dense empirical/Hessian metric for the main block
-whilst retaining a diagonal/unit metric for a much larger nuisance block.
+The main/nuisance separation means that NicoStan can use a dense empirical or Hessian metric for the main block,
+whilst retaining a diagonal for a much larger nuisance block (where computing a dense metric would be prohibitively expensive).
 Stan's [standard HMC/NUTS metric interface](https://mc-stan.org/docs/cmdstan-guide/mcmc_config.html#metric)
 selects a unit, diagonal or dense metric for the complete unconstrained parameter vector;
 its dense option therefore includes the nuisance parameters too, rather than exposing separate main/nuisance metric choices.
-This distinction allows NicoStan to use a dense main-parameter metric without constructing/storing a dense metric for the entire latent/nuisance block.
+This distinction allows NicoStan to use a dense main-parameter metric without constructing/storing a dense metric 
+for the entire latent/nuisance block.
 
 
-### Trajectory-length adaptation rules
+### Trajectory-length adaptation algorithms
 
-Use `burnin_algorithm` to choose the trajectory-length adaptation rule:
+
+Use `burnin_algorithm` to choose the trajectory-length adaptation algorithm:
 
 
 - `CHEESR` (**ChEES-R**): The original ChEES-rate criterion,
 using the squared change in the main block's centred squared radius per realised trajectory length.
 - `CHEESR_log` (**Log-ChEES-R**): NicoStan's log-ratio formulation of the ChEES-rate criterion,
 which normalises the numerator gradient by a running average of the ChEES numerator.
-- `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction with a metric-aware Oja update,
+- `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction,
 and adapts the trajectory length using squared changes along that direction per unit length.
 - `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
 without dividing by trajectory length.
@@ -526,8 +524,7 @@ ChEES-R (the ChEES-Rate criterion of [Sountsov and Hoffman, 2022](https://arxiv.
 divides this change by the trajectory length, so that trajectory length is used as a proxy for computational cost.
 SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3))
 focuses the corresponding criterion along the first principal component
-(i.e., the direction of largest variance in the coordinates used for adaptation),
-learned during warm-up with Oja's algorithm.
+(i.e., the direction of largest variance in the coordinates used for adaptation).
 
 
 The position-based criteria use the main parameters in coordinates defined by the current mass matrix
@@ -540,7 +537,7 @@ The position-based criteria use the main parameters in coordinates defined by th
 <!-- `CHEESR_log` is our log-ratio formulation of the ChEES rate, -->
 <!-- using a running average of the numerator to normalise its gradient. -->
 Note that both `CHEESR` and `CHEESR_log` adapt a positive trajectory length on the log scale.
-Their update rules differ; hence, both are available in NicoStan
+Their update algorithms differ; hence, both are available in NicoStan
 (see the [adaptation notes](docs/adaptation-notes.md) for the derivation).
 
 
@@ -548,9 +545,9 @@ The default trajectory-length settings differ between burnin and sampling:
 
 
 - **Burn-in:** fixed trajectory length (`randomize_tau_burnin = FALSE`)
-for each burnin iteration at the current tuning setting.
+for each burnin iteration at the current tuning setting. This saves burnin time compared to using a randomized $\tau$.
 - **Post-burn-in sampling:** randomised trajectory length (`randomize_tau_sampling = TRUE`) -
-drawn uniformly between zero and twice the adapted scale -
+drawn uniformly between zero and twice the adapted scale (i.e., $\tau \sim \text{uniform}(0, 2 \bar\tau)$) -
 with at least one integration step.
 
 
@@ -562,7 +559,8 @@ Note that `manual_tau` separately controls whether the trajectory length is adap
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-NicoStan can use our custom vectorised (i.e., SIMD) mathematical functions, which are supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension.
+NicoStan can also use our custom vectorised (i.e., SIMD) mathematical functions,
+which are supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension R package.
 These include, for instance, exponentials (`exp()`), logarithms (`log()`)
 and normal distribution functions (`Phi()`, `inv_Phi()`, `Phi_approx()` and `inv_Phi_approx()`),
 as well as their derivatives.
@@ -570,18 +568,25 @@ as well as their derivatives.
 
 - **AVX2:** four double-precision values per vector operation; supported by many x86 CPUs.
 - **AVX-512:** eight double-precision values per vector operation on supported processors.
-- **General Stan models:** declare and call the custom AVX functions in the `.stan` model, then supply their C++ header via `Stan_cpp_user_header`;
-standard Stan function calls are not automatically rewritten to use them.
-- **Specialised [BayesMVP](https://github.com/CerulloE1996/BayesMVP) models:** the same kernels are used within the native implementations.
+- **General Stan models:** declare and call the custom AVX functions in the `.stan` model, 
+then supply their C++ header via `Stan_cpp_user_header`.
+- **Specialised [BayesMVP](https://github.com/CerulloE1996/BayesMVP) models:** 
+the same AVX functions are used within the native implementations.
 
 
 Note that the AVX options are not a drop-in switch for an existing Stan model;
-more specifically, the user has to re-write their Stan model (i.e., the `.stan` file) so that it calls the custom AVX2/AVX-512 functions from BayesMVP,
-which is not straightforward for most models.
-The comparison examples (whose Stan models have already been re-written in this way) support separate `math_backend = "Stan"`, `"AVX2"` and `"AVX512"` options.
-The compiled AVX model reports its lane count (i.e., four for AVX2 and eight for AVX-512), so you can check which implementation is being used.
-Note that you should compile the model on the same machine you will use for sampling, since the available instruction sets depend on the CPU;
-for instance, [Intel's processor guidance](https://www.intel.com/content/www/us/en/support/articles/000090473/processors/intel-core-processors.html)
+more specifically, the user has to re-write their Stan model (i.e., the `.stan` file), 
+so that it calls the custom AVX2/AVX-512 functions from BayesMVP.
+
+
+The comparison examples (whose Stan models have already been re-written in this way) 
+support separate `math_backend = "Stan"`, `"AVX2"` and `"AVX512"` options.
+The compiled AVX model reports its vector size (i.e., four for AVX2 and eight for AVX-512), 
+so you can check which implementation is being used.
+Note that you should compile the model on the same machine you will use for sampling,
+since the available instruction sets depend on the CPU;
+for instance, 
+[Intel's processor guidance](https://www.intel.com/content/www/us/en/support/articles/000090473/processors/intel-core-processors.html)
 describes how to check which extensions your CPU supports.
 
 
@@ -592,11 +597,13 @@ describes how to check which extensions your CPU supports.
 
 If you use NicoStan in your work, please cite the package as follows:
 
-Cerullo, E. (2026). NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models. R package version 0.1.9000. https://github.com/CerulloE1996/NicoStan
+Cerullo, E. (2026). NicoStan: Adaptive MCMC for Stan models, with advanced between-chain adaptation and diffusion-pathspace HMC
+. R package version 0.1.9000. https://github.com/CerulloE1996/NicoStan
 
 ```bibtex
 @Manual{Cerullo2026NicoStan,
-  title = {NicoStan: Adaptive Hamiltonian Monte Carlo for Stan Models},
+  title = {NicoStan: Adaptive MCMC for Stan models, 
+  with advanced between-chain adaptation and diffusion-pathspace HMC},
   author = {Enzo Cerullo},
   year = {2026},
   note = {R package version 0.1.9000},
@@ -614,7 +621,8 @@ Please also cite the methodological references relevant to the options used in y
 
 If you use the BayesMVP extension (i.e., the specialised MVP models or the custom AVX2/AVX-512 functions), please also cite:
 
-Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoStan. R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
+Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoStan.
+R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
 
 ```bibtex
 @Manual{Cerullo2026BayesMVP,
@@ -656,7 +664,6 @@ Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoS
 
 12. Margossian, C. C., Hoffman, M. D., Sountsov, P., Riou-Durand, L., Vehtari, A. and Gelman, A. (2024). [Nested R-hat: Assessing the convergence of Markov chain Monte Carlo when running many short chains](https://arxiv.org/abs/2110.13017v6). Bayesian Analysis; arXiv:2110.13017, version 6, 30 May 2024.
 
-
 13. Roualdes, E. A., Ward, B., Carpenter, B., Seyboldt, A. and Axen, S. D. (2023). [BridgeStan: Efficient in-memory access to the methods of a Stan model](https://doi.org/10.21105/joss.05236). Journal of Open Source Software, 8(87), 5236.
 
 14. Qu, Y., Tan, M. and Kutner, M. H. (1996). [Random effects models in latent class analysis for evaluating accuracy of diagnostic tests](https://pubmed.ncbi.nlm.nih.gov/8805757/). Biometrics, 52(3), 797-810.
@@ -684,9 +691,6 @@ Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoS
 NicoStan is developed by Enzo Cerullo and licensed under GPL-3.
 Package citation metadata is provided in [CITATION.cff](CITATION.cff),
 and the references above are available as a [BibTeX file](docs/references.bib).
-
-
-The source includes the example models and validation scripts.
 
 
 
