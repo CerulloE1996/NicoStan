@@ -161,9 +161,6 @@ The general examples are grouped by their parameterisation:
 - **Hybrid/joint HMC with nuisance diffusion:** Cox shared frailty, hierarchical logistic regression,
 joint longitudinal-survival modelling, and a discrete-time AR(1) stochastic-volatility model
 ([Stochastic_volatility_discrete_time.stan](inst/examples/models/Stochastic_volatility_discrete_time.stan)).
-Even this non-centred discrete-time example produced 9 Stan NUTS divergences at `adapt_delta = 0.99` in a saved N = 60 validation check;
-a separate, longer check on different simulated data had none at `0.999`
-(see the [saved validation settings and results](inst/examples/README_benchmarks.md#discrete-time-stochastic-volatility-validation)).
 Continuous-time SV can introduce the additional path-discretisation difficulties described
 [below](#models-with-nuisance-parameters-diffusion-pathspace-hmc).
 - **Standard HMC:** Weibull survival regression, robust Student-t regression and marginal Gaussian process (GP) regression.
