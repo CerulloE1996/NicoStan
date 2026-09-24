@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "website"
 DOCS = ROOT / "docs"
 REPO = "https://github.com/CerulloE1996/NicoStan"
+## Absolute site address: Facebook/Twitter link previews need full https URLs for og:url and og:image (relative paths fail).
+SITE_URL = "https://cerulloe1996.github.io/NicoStan/"
 DOCS.mkdir(exist_ok=True)
 (DOCS / "assets").mkdir(exist_ok=True)
 algorithms = json.loads((SOURCE / "algorithms.json").read_text())
@@ -189,6 +191,7 @@ banner_title_html = "<br>".join(escape(line) for line in banner_lines[:banner_sp
 banner_intro_html = "<br>".join(escape(line) for line in banner_lines[banner_split + 1:] if line.strip())
 page = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="''' + escape(banner_description, quote=True) + '''">
+<meta property="og:type" content="website"><meta property="og:site_name" content="NicoStan"><meta property="og:url" content="''' + SITE_URL + '''"><meta property="og:title" content="NicoStan | Adaptive HMC for Stan models"><meta property="og:description" content="''' + escape(banner_description, quote=True) + '''"><meta property="og:image" content="''' + SITE_URL + '''assets/NicoStan_social_card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="NicoStan logo"><meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['script','noscript','style','textarea','pre','code'],throwOnError:false})"></script><script src="assets/site.js" defer></script><script data-goatcounter="https://cerulloe1996.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script></head><body>
 <a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top"><img class="brand-logo" src="assets/NicoStan_logo_128.png" alt="" width="34" height="34">NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
 <div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>''' + banner_title_html + '''</h1><p class="hero-intro">''' + banner_intro_html + '''</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram"><img class="hero-logo" src="assets/NicoStan_logo_720.png" alt="NicoStan logo"></div></div>
@@ -198,7 +201,8 @@ if "\u2014" in page or "\u2014" in markdown:
     raise ValueError("An em dash was introduced into the generated prose")
 (DOCS / "index.html").write_text(page)
 (DOCS / ".nojekyll").write_text("")
-for name in ["site.css", "site.js", "NicoStan_logo_720.png", "NicoStan_logo_128.png", "NicoStan_logo_64.png"]:
+## NicoStan_social_card.png (1200x630) is the link-preview image for Facebook etc. (see the og:image tag in the page head).
+for name in ["site.css", "site.js", "NicoStan_logo_720.png", "NicoStan_logo_128.png", "NicoStan_logo_64.png", "NicoStan_social_card.png"]:
     shutil.copy2(SOURCE / name, DOCS / "assets" / name)
 bibliography_source = SOURCE / "references.bib"
 if bibliography_source.exists():
