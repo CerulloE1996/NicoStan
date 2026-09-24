@@ -182,8 +182,8 @@ MVP_model <- R6Class("MVP_model",
                           #'    The number of chunks to use in the log-probability and gradient function. By default, the number selected will depend on your CPU. 
                           #'    
                           #'*  \code{Phi_type}:
-                          #'    Type of \eqn{\Phi()} function implementation to use, where \eqn{\Phi()} is the standard normal CDF. The default is "Phi" (and, with \code{inv_Phi_type = "inv_Phi"}, currently the only 
-                          #'    setting BayesMVP accepts for the built-in models; anything else stops with an error). Note that \eqn{\Phi()} will use a fast, highly accurate polynomial approximation of \eqn{\Phi()} if 
+                          #'    Type of \eqn{\Phi()} function implementation to use, where \eqn{\Phi()} is the standard normal CDF. The default is "Phi" (with \code{inv_Phi_type = "inv_Phi"}); the built-in models also 
+                          #'    accept "Phi_approx" (with \code{inv_Phi_type = "inv_Phi_approx"}). Note that \eqn{\Phi()} will use a fast, highly accurate polynomial approximation of \eqn{\Phi()} if 
                           #'    \code{vect_type} is either AVX-512 or AVX2. Otherwise, it will use the Phi function from the Stan math C++ library. Set it here, not in \code{$sample()}. Not used for \code{Model_type = "Stan"}. 
                           #'    
                           #' Arguments which are only relevant to the MVP and LC_MVP include:
@@ -426,10 +426,10 @@ MVP_model <- R6Class("MVP_model",
                           #'models it must equal the initialised \code{model_args_list$vect_type}, otherwise it stops and points to \code{model_args_list}.
                           #'(Previously this argument was silently ignored.)
                           #'@param Phi_type Leave NULL (the default). Same rules as \code{vect_type}: set it through \code{model_args_list$Phi_type} at
-                          #'initialisation for the built-in models (only the exact setting "Phi" is currently accepted by BayesMVP); not used for Stan models,
+                          #'initialisation for the built-in models ("Phi" or "Phi_approx"); not used for Stan models,
                           #'where a non-NULL value stops.
-                          #'@param inv_Phi_type Leave NULL (the default). Same rules as \code{Phi_type}, via \code{model_args_list$inv_Phi_type} (only
-                          #'"inv_Phi" is currently accepted by BayesMVP for the built-in models).
+                          #'@param inv_Phi_type Leave NULL (the default). Same rules as \code{Phi_type}, via \code{model_args_list$inv_Phi_type} ("inv_Phi" or
+                          #'"inv_Phi_approx" for the built-in models).
                           #'@param n_params_main Number of main parameters. See class documentation for details.
                           #'@param n_nuisance Number of nuisance parameters. See class documentation for details.
                           #'@param n_chains_burnin Number of chains used for burnin. See class documentation for details.
