@@ -210,5 +210,15 @@
     "url": "https://doi.org/10.1016/j.csda.2013.01.002",
     "doi": "10.1016/j.csda.2013.01.002",
     "bibtex_authors": "Kastner, Gregor and Fr{\\\"u}hwirth-Schnatter, Sylvia"
+  },
+  {
+    "key": "Pinkney2024",
+    "authors": "Pinkney, S.",
+    "year": "2024",
+    "title": "A Short Note on a Flexible Cholesky Parameterization of Correlation Matrices",
+    "venue": "arXiv:2405.07286",
+    "url": "https://arxiv.org/abs/2405.07286",
+    "doi": "",
+    "bibtex_authors": ""
   }
 ]

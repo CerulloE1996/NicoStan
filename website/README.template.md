@@ -8,7 +8,7 @@
 [Installation](#installation) ·
 [Examples](#examples) ·
 [Benchmarks](#benchmarks) ·
-[Models](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
+[Models with nuisance parameters (diffusion-pathspace HMC)](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
 [NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms) ·
 [How to cite](#how-to-cite-nicostan) ·
 [References](#references)
@@ -288,6 +288,10 @@ more specifically, it provides the following models:
 
 These models handle correlated binary and/or ordinal outcomes, and their latent class extensions (LC-MVP, LC-MVOP) allow
 diagnostic/screening test accuracy to be estimated when a perfect reference/gold standard is unavailable.
+
+The correlation matrices use the flexible Cholesky parameterisation of [Sean Pinkney](https://github.com/spinkney)
+([Pinkney, 2024](https://arxiv.org/abs/2405.07286)), which also allows the correlations to be constrained to be positive
+(`corr_force_positive = TRUE`).
 
 
 The ordinal latent class model is described in [Cerullo et al., 2022](https://doi.org/10.1002/jrsm.1567).
@@ -572,7 +576,7 @@ This distinction allows NicoStan to use a dense main-parameter metric without co
 for the entire latent/nuisance block.
 
 
-### Trajectory-length adaptation algorithms
+### HMC Trajectory length ($\tau$) adaptation algorithms
 
 
 Use `burnin_algorithm` to choose the trajectory-length adaptation algorithm:
@@ -580,10 +584,13 @@ Use `burnin_algorithm` to choose the trajectory-length adaptation algorithm:
 
 - `CHEESR` (**ChEES-R**): The original ChEES-rate criterion,
 using the squared change in the main block's centred squared radius per realised trajectory length.
+Proposed by [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
 - `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction,
 and adapts the trajectory length using squared changes along that direction per unit length.
+Proposed by [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
 - `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
 without dividing by trajectory length.
+Proposed by [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html).
 
 
 ChEES measures squared changes in the centred squared radius of the parameter vector
@@ -607,12 +614,14 @@ The default trajectory-length settings differ between burnin and sampling:
 
 - **Burn-in:** fixed trajectory length (`randomize_tau_burnin = FALSE`)
 for each burnin iteration at the current tuning setting. This saves burnin time compared to using a randomized $\tau$.
-- **Post-burn-in sampling:** randomised trajectory length (`randomize_tau_sampling = TRUE`) -
+- **Post-burnin (sampling phase):** randomised trajectory length (`randomize_tau_sampling = TRUE`) -
 drawn uniformly between zero and twice the adapted scale (i.e., $\tau \sim \text{uniform}(0, 2 \bar\tau)$) -
-with at least one integration step.
+with at least one integration step ($L \ge 1$).
 
 
-Note that `manual_tau` separately controls whether the trajectory length is adapted at all.
+Note that `manual_tau` separately controls whether the trajectory length is adapted at all -
+you can instead set $\tau$ manually, by specifying `manual_tau = TRUE`, and it's fixed value by specifying
+`tau_if_manual = 3.0` (if one wishes to fix $\tau = 3$).
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -620,11 +629,11 @@ Note that `manual_tau` separately controls whether the trajectory length is adap
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-NicoStan can also use our custom vectorised (i.e., SIMD) mathematical functions,
+NicoStan can also use our custom C++, vectorised (i.e., SIMD) mathematical functions,
 which are supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension R package.
-These include, for instance, exponentials (`exp()`), logarithms (`log()`)
+These include, for instance, exponentials (`exp()`), logarithms (`log()`),
 and normal distribution functions (`Phi()`, `inv_Phi()`, `Phi_approx()` and `inv_Phi_approx()`),
-as well as their derivatives.
+as well as their derivatives and some other maths functions.
 
 
 - **AVX2:** four double-precision values per vector operation; supported by many x86 CPUs.
@@ -656,7 +665,7 @@ describes how to check which extensions your CPU supports.
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-If you use NicoStan in your work, please cite the package as follows:
+If you use NicoStan in your work, you can cite the package as follows:
 
 
 Cerullo, E. (2026). NicoStan: Efficient MCMC for Stan models, with advanced between-chain adaptation and diffusion-pathspace HMC.
@@ -682,7 +691,7 @@ Please also cite the methodological references relevant to the options used in y
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
-If you use the BayesMVP extension (i.e., the specialised MVP models and/or the custom AVX2/AVX-512 functions), please also cite:
+If you use the BayesMVP extension (i.e., the specialised MVP/MVOP-based models and/or the custom AVX2/AVX-512 functions), you can also cite:
 
 
 Cerullo, E. (2026). BayesMVP: Accelerated multivariate probit models using NicoStan.
@@ -745,6 +754,8 @@ R package version 0.1.9000. https://github.com/CerulloE1996/BayesMVP
 20. Johnston, C. K., Waterhouse, T., Wiens, M., Mondick, J., French, J. and Gillespie, W. R. (2024). [Bayesian estimation in NONMEM](https://doi.org/10.1002/psp4.13088). CPT: Pharmacometrics & Systems Pharmacology, 13, 192-207.
 
 21. Kingma, D. P. and Ba, J. (2015). [Adam: A Method for Stochastic Optimization](https://arxiv.org/abs/1412.6980). International Conference on Learning Representations (ICLR); arXiv:1412.6980.
+
+22. Pinkney, S. (2024). [A Short Note on a Flexible Cholesky Parameterization of Correlation Matrices](https://arxiv.org/abs/2405.07286). arXiv:2405.07286.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
