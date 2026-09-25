@@ -7,11 +7,16 @@
 [How is NicoStan different to Stan?](#how-is-nicostan-different-to-stan-eg-cmdstanrrstan) ·
 [Installation](#installation) ·
 [Examples](#examples) ·
+[BayesMVP: multivariate probit models](#bayesmvp-multivariate-probit-models) ·
 [Benchmarks](#benchmarks) ·
 [Models with nuisance parameters (diffusion-pathspace HMC)](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
-[NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms) ·
-[How to cite](#how-to-cite-nicostan) ·
-[References](#references)
+[How NicoStan works](#how-nicostan-works) ·
+[NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) ·
+[Custom AVX2 and AVX-512 functions](#custom-avx2-and-avx-512-functions) ·
+[How to cite NicoStan](#how-to-cite-nicostan) ·
+[How to cite BayesMVP](#how-to-cite-bayesmvp) ·
+[References](#references) ·
+[Package citation and development](#package-citation-and-development)
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -64,7 +69,7 @@ and [Beskos et al., 2013](https://doi.org/10.1016/j.spa.2012.12.001).
 - **ChEES, ChEES-R and SNAPER-HMC trajectory-length adaptation during burnin**,
 based on [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html),
 and [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
-See [Efficient burnin algorithms](#efficient-burnin-algorithms) for more information.
+See [Efficient burnin algorithms](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) for more information.
 <!-- ----------------------------------------------------------------------------------------- -->
 - **Custom AVX2 and AVX-512 maths functions**, supplied through the
 [BayesMVP](https://github.com/CerulloE1996/BayesMVP) R package extension to NicoStan,
@@ -98,7 +103,7 @@ On the other hand, NicoStan provides state-of-the-art, between-chain adaptation 
 such as SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)),
 ChEES-HMC ([Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html)),
 and ChEES-R-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)) -
-see [this section below](#efficient-burnin-algorithms) for more details on NicoStan's burnin algorithms.
+see [this section below](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) for more details on NicoStan's burnin algorithms.
 
 
 This difference in burnin adaptation algorithm makes NicoStan more efficient than Stan for most models
@@ -511,7 +516,7 @@ the Metropolis-Hastings acceptance step corrects their integration error.
 Models without a nuisance block (e.g., standard univariate logistic regression) use standard HMC throughout.
 In our initial tests, we have also found NicoStan to be more efficient than Stan (via cmdstanr) for some of these models;
 we expect the different burnin/adaptation schemes to contribute to this, although the detailed comparisons are still in progress
-(see [Benchmarks](#benchmarks) and [Efficient burnin algorithms](#efficient-burnin-algorithms)).
+(see [Benchmarks](#benchmarks) and [Efficient burnin algorithms](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc)).
 
 
 The hybrid/joint sampling scheme uses a "kick-flow-kick" splitting.
@@ -534,7 +539,7 @@ alternatively, you can use a single common mass (`"uniform_diag"`) or unit mass 
 
 
 <!-- Furthermore, the trajectory-length adaptation used during burnin 
-(e.g., ChEES-R or SNAPER; see the [Efficient burnin algorithms](#efficient-burnin-algorithms) section below) 
+(e.g., ChEES-R or SNAPER; see the [Efficient burnin algorithms](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) section below) 
 is based on the main parameters only; hence, a large nuisance block does not dominate the adaptation.  -->
 
 
@@ -564,7 +569,7 @@ more specifically, the Hessian is computed by finite differences of the main-par
 Both methods support a diagonal or dense Euclidean metric (`metric_shape_main = "diag"` or `"dense"`).
 The nuisance masses and centre are adapted separately (see [How NicoStan works](#how-nicostan-works)).
 - The trajectory length, using the criterion selected via `burnin_algorithm`
-(see [Trajectory-length adaptation algorithms](#trajectory-length-adaptation-algorithms) below).
+(see [Trajectory-length adaptation algorithms](#hmc-trajectory-length-tau-adaptation-algorithms) below).
 
 
 The main/nuisance separation means that NicoStan can use a dense empirical or Hessian metric for the main block,
