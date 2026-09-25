@@ -297,7 +297,9 @@ diagnostic/screening test accuracy to be estimated when a perfect reference/gold
 
 The correlation matrices use the flexible Cholesky parameterisation of [Sean Pinkney](https://github.com/spinkney)
 ([Pinkney, 2024](https://arxiv.org/abs/2405.07286)), which also allows the correlations to be constrained to be positive
-(`corr_force_positive = TRUE`).
+(`corr_force_positive = TRUE`), as well as custom element-specific bounds (via the `lb_corr` and `ub_corr` arguments, with one
+matrix per latent class). Furthermore, any of the correlations can be fixed to known values, via the `known_values_indicator_list`
+argument (which indicates which correlations are known) and the `known_values_list` argument (their values).
 
 
 The ordinal latent class model is described in [Cerullo et al., 2022](https://doi.org/10.1002/jrsm.1567).
