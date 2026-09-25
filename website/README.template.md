@@ -44,7 +44,8 @@ NicoStan was formerly called "BayesMVP" (since we have mainly been working with 
 however, it has now been split into 2 R packages: NicoStan, for the general Stan interface
 (which relies heavily on [BridgeStan](https://roualdes.us/bridgestan/latest/)),
 and [BayesMVP](https://github.com/CerulloE1996/BayesMVP), which is now an extension to NicoStan, rather than a standalone R package.
-Also, NicoStan is named after a cat.
+Also, NicoStan is named after a cat, who provided great stress-relief whilst I was making NicoStan,
+and made waiting 10+ minutes for C++ code to recompile tolerable.
 
 
 The [BayesMVP R package extension](https://github.com/CerulloE1996/BayesMVP) to NicoStan adds highly optimised,
