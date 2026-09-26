@@ -323,7 +323,7 @@ in a comprehensive simulation study, in which the models were fitted using [Baye
 
 
 In our initial tests, NicoStan - combined with the [BayesMVP extension](https://github.com/CerulloE1996/BayesMVP) -
-was **over 1000× faster than Stan**, and around **30-60× more efficient than Mplus**.
+was **over 300× faster than Stan**, and around **50× more efficient than Mplus**.
 These numbers are for the latent class multivariate probit model (LC-MVP),
 using an N = 10,000 simulated binary dataset with 6 binary tests in total (hence a total of 60,000 observations),
 which is based on real, publicly available COVID-19 data.
@@ -331,11 +331,13 @@ These models (LC-MVP) are used in both human and veterinary medicine for estimat
 without a perfect gold standard.
 
 
-For our ordinal example dataset, which is based on a real dataset on three tests to screen and/or diagnose depression
+For our ordinal example dataset (using the LC-MVOP model),
+which is based on a real dataset on three tests to screen and/or diagnose depression
 (specifically, the MINI as the imperfect gold standard, and the PHQ-9 and CES-D-10 as the two ordinal tests),
 for N = 5,000 (hence 15,000 total observations), we found that NicoStan/BayesMVP (using the LC-MVOP model)
-was **over 500× more efficient than Stan** and **over 1000× more efficient than Mplus**.
-The latter is because Mplus's Gibbs-based algorithm struggles greatly with ordinal outcomes,
+was **over 100× more efficient than Stan** and **over 1000× more efficient than Mplus**.
+The latter is because, desite being very efficient for the binary LC-MVP,
+Mplus's Gibbs-based algorithm struggles greatly with ordinal outcomes,
 and Mplus does not let you fit ordinal outcomes with more than 10 categories;
 hence, we had to group categories together just to attempt to measure its efficiency.
 Note that this is not ideal, and we would never recommend grouping categories in real-life data analysis,
