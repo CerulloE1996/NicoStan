@@ -144,6 +144,52 @@ fn_metric_position_criterion <-  function( algorithm,
 
 }
 
+##
+## ---- The same criterion from its per-chain reductions, computed elsewhere: the resident burn-in interface computes them from the
+##      chains' joint (main + nuisance) state inside the worker (fn_persistent_burnin_joint_position_reductions_resident), for
+##      tau_adaptation_block = "joint". The reductions are, per chain,
+##        SNAPER:    projection_initial, projection_proposed, projection_velocity = c(crossprod(direction, initial)), c(crossprod(direction, proposed)),
+##                   c(crossprod(direction, velocity));
+##        otherwise: column_sums_proposed_sq, column_sums_initial_sq, column_sums_proposed_velocity = colSums(proposed^2), colSums(initial^2),
+##                   colSums(proposed * velocity);
+##      everything computed from them below is the code of fn_metric_position_criterion().
+##
+fn_metric_position_criterion_from_reductions <-  function( algorithm,
+                                                           reductions,
+                                                           tau_values) {
+
+        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
+        if (algorithm == "SNAPER") {
+                projection_initial <-  c(reductions$projection_initial)
+                projection_proposed <-  c(reductions$projection_proposed)
+                projection_velocity <-  c(reductions$projection_velocity)
+                if (length(projection_initial) != length(tau_values) || length(projection_proposed) != length(tau_values) ||
+                    length(projection_velocity) != length(tau_values)) stop("Trajectory endpoint dimensions do not agree.")
+                delta <-  projection_proposed^2 - projection_initial^2
+                derivative <-  2 * projection_proposed * projection_velocity
+        } else {
+                column_sums_proposed_sq <-  c(reductions$column_sums_proposed_sq)
+                column_sums_initial_sq <-  c(reductions$column_sums_initial_sq)
+                column_sums_proposed_velocity <-  c(reductions$column_sums_proposed_velocity)
+                if (length(column_sums_proposed_sq) != length(tau_values) || length(column_sums_initial_sq) != length(tau_values) ||
+                    length(column_sums_proposed_velocity) != length(tau_values)) stop("Trajectory endpoint dimensions do not agree.")
+                delta <-  0.5 * (column_sums_proposed_sq - column_sums_initial_sq)
+                derivative <-  column_sums_proposed_velocity
+        }
+        ##
+        numerator <-  delta^2
+        numerator_gradient <-  2 * delta * derivative * tau_values
+        if (algorithm == "ChEES") {
+                return(list(gradient = numerator_gradient, criterion = numerator,
+                            numerator_gradient = numerator_gradient, numerator = numerator))
+        }
+        return(list(gradient = (numerator_gradient - numerator) / tau_values,
+                     criterion = numerator / tau_values,
+                     numerator_gradient = numerator_gradient,
+                     numerator = numerator))
+
+}
+
 fn_metric_tau_block_update <-  function( algorithm,
                                          theta_initial,
                                          theta_proposed,
@@ -173,9 +219,19 @@ fn_metric_tau_block_update <-  function( algorithm,
                                          ##      this one; used ONLY for the ADAM bias correction (iteration keeps driving
                                          ##      the learning-rate schedule). NULL = historical behaviour (uses iteration).
                                          ##
-                                         bias_correction_step = NULL) {
+                                         bias_correction_step = NULL,
+                                         ##
+                                         ## ---- the position criterion (the list returned by fn_metric_position_criterion) when it is computed elsewhere,
+                                         ##      e.g. by fn_metric_position_criterion_from_reductions() for the resident joint block; NULL = computed here
+                                         ##      from the endpoints. When it is supplied, the endpoint arguments, the means, metric_factor and direction
+                                         ##      are not used, except the number of columns (chains) of theta_initial.
+                                         ##
+                                         position_criterion = NULL) {
 
         use_proposals <-  isTRUE(weight_by_probability)
+        if (!is.null(position_criterion)) {
+        criterion <-  position_criterion
+        } else {
         criterion <-  fn_metric_position_criterion(
             algorithm = algorithm,
             theta_initial = theta_initial,
@@ -186,6 +242,7 @@ fn_metric_tau_block_update <-  function( algorithm,
             metric_factor = metric_factor,
             tau_values = tau_values,
             direction = direction)
+        }  ## end of: if (!is.null(position_criterion))
         ##
         if (length(probabilities) != ncol(as.matrix(theta_initial)) ||
             length(divergences) != length(probabilities)) stop("Acceptance probabilities and divergences must match the chains.")
@@ -234,3 +291,25 @@ fn_metric_tau_block_update <-  function( algorithm,
                      criterion_ema = criterion_updated))
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

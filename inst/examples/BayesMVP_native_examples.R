@@ -61,3 +61,25 @@ benchmark_BayesMVP_native_example <-  function(Model_type,
         utils::write.csv(table, file.path(output_directory, "native_efficiency.csv"), row.names = FALSE)
         list(summary = table, results = records)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

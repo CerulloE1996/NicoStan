@@ -100,3 +100,15 @@ fn_nested_rhat_from_draws_array <-  function(draws_array, nested_rhat_grouping) 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+

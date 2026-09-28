@@ -178,7 +178,7 @@ run_NicoStan_admin_install <- function(source_root = NULL,
 
     message(paste0("NicoStan installation completed in: ", lib))
     if (package_was_loaded) {
-        message("Restart R when you are ready to use the new build; the current session still has its previous package loaded.")
+        message("Restart R after the new build is installed; the current session still has its previous package loaded.")
     }
 
     invisible(lib)
@@ -210,3 +210,25 @@ run_NicoStan_admin_install <- function(source_root = NULL,
 if (isTRUE(getOption("NicoStan.admin.autorun", TRUE))) {
     run_NicoStan_admin_install()
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

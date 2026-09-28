@@ -16,7 +16,7 @@
 ##      DIRECTORY (process id + tempfile's random suffix, so concurrent processes never share it) and file.rename()s it
 ##      over the target. rename() within one directory is atomic on POSIX file systems, so a reader sees either the old
 ##      complete file or the new complete file, never a partial one. File names and contents are unchanged, so cached
-##      files keep working. tempfile() does not touch R's random-number stream, so the user's MCMC seed is unaffected.
+##      files keep working. tempfile() does not touch R's random-number stream, so the MCMC seed is unaffected.
 ##
 
 
@@ -292,6 +292,14 @@ convert_JSON_string_to_ordered_R_vector <- function(json_string,
         return(result)
   
 }
+
+
+
+
+
+
+
+
 
 
 

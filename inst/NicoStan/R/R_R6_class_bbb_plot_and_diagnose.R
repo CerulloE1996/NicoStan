@@ -29,7 +29,7 @@ require(R6)
 #'   \item{Basic Diagnostics}{get_divergences() -> get_efficiency_metrics()}
 #'   \item{Parameter Summaries}{get_summary_main() -> get_summary_transformed()}
 #'   \item{Visualization}{plot_traces() -> plot_densities()}
-#'   \item{Custom Analysis}{get_posterior_draws() -> Your analysis}
+#'   \item{Custom Analysis}{get_posterior_draws() -> Analysis of the posterior draws}
 #' }
 #' 
 #' 
@@ -44,12 +44,12 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                     summary_object = NULL,
                                     #' @field init_object Initialization object, obtained from the main "MVP_model" R6 class. 
                                     init_object = NULL,
-                                    #' @field n_nuisance The total number of nuisance parameters, please see the "MVP_model" R6 class documentation for more details. 
+                                    #' @field n_nuisance The total number of nuisance parameters; see the "MVP_model" R6 class documentation for more details. 
                                     n_nuisance = NULL,
                                     
                                     #' @param model_summary The summary object, obtained from the main "MVP_model" R6 class. 
                                     #' @param init_object The Initialization object, obtained from the main "MVP_model" R6 class. 
-                                    #' @param n_nuisance The total number of nuisance parameters, please see the "MVP_model" R6 class documentation for more details. 
+                                    #' @param n_nuisance The total number of nuisance parameters; see the "MVP_model" R6 class documentation for more details. 
                                     initialize = function(model_summary,  
                                                           init_object,
                                                           n_nuisance) {   

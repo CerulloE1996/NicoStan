@@ -227,3 +227,25 @@ template <typename B, typename U, typename Y>
 inline auto fast_normal_binary(const B& bound,const U& uniform,const Y& outcome,std::ostream*) {
     return bmvp_stan_ext::normal_binary(bound,uniform,outcome);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

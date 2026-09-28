@@ -11,7 +11,7 @@ bridgestan_path <- function() {
             return(Sys.getenv("BRIDGESTAN")) # Use the value from the environment variable
           }
 
-          # Get the user's home directory
+          # Get the home directory
           home_dir <- Sys.getenv(if (.Platform$OS.type == "windows") "USERPROFILE" else "HOME")
 
           # Define the default paths for BridgeStan v2.5.0
@@ -53,3 +53,19 @@ bridgestan_path <- function() {
 
  
  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

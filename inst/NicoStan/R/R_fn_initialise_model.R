@@ -1,13 +1,13 @@
 
 
 # 
-# json <- jsonlite::fromJSON("path/to/stan_data/data_<hash>.json")
+# json <- jsonlite::fromJSON("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_data/data_6e479c5a0b94fe3f633a31e26aa5dbcc_1000.json")
 # json$n_thr_per_ord_test
 # json$n_cat_per_ord_test
 # json$n_ordinal_tests
 # 
 # 
-# file.remove("path/to/stan_data/data_<hash>.json")
+# file.remove("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_data/data_6e479c5a0b94fe3f633a31e26aa5dbcc_1000.json")
 
 
 ## R_fn_initialise_model.R               
@@ -76,7 +76,7 @@ initialise_model <- function( Model_type,
         
         if (Model_type != "Stan") {
           if ((is.null(model_args_list$X))) { 
-            warning("Assuming intercept-only model - if not please supply X")
+            warning("Assuming intercept-only model - supply X for a model with covariates")
           }
         }
         
@@ -315,6 +315,24 @@ initialise_model <- function( Model_type,
                        make_args = make_args))
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

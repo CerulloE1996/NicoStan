@@ -4,6 +4,7 @@
 ## ---- Bind the shared R implementation to a package's existing native/model operations ------------------------------------------------
 ##
 .nicostan_model_types <-  "Stan"
+.nicostan_provider_package <-  "NicoStan"
 
 #' Create a package-local interface to the common sampler
 #'
@@ -39,6 +40,7 @@ fn_create_model_backend <-  function( provider,
                 assign(name, value, envir = backend)
         }
         backend$.nicostan_model_types <-  model_types
+        backend$.nicostan_provider_package <-  if (isNamespace(provider)) unname(getNamespaceName(provider)) else NULL
         ##
         fn_bind_class <-  function( prototype) {
 
@@ -61,3 +63,25 @@ fn_create_model_backend <-  function( provider,
         return(backend)
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

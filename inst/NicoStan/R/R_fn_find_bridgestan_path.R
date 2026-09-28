@@ -8,7 +8,7 @@
 bridgestan_path <- function() {
   
   suppressMessages({
-    # Get the user's home directory
+    # Get the home directory
     home_dir <- Sys.getenv(if (.Platform$OS.type == "windows") "USERPROFILE" else "HOME")
     
     # Find installed bridgestan version directories and prefer the NEWEST
@@ -57,3 +57,25 @@ bridgestan_path <- function() {
   })
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

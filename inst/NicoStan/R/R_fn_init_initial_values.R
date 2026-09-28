@@ -16,10 +16,10 @@ R_fn_init_initial_values <- function( Model_type,
 ) {
   
         if (is.null(init_lists_per_chain)) { 
-          stop("initial values per chain (init_lists_per_chain) not supplied - please supply")
+          stop("initial values per chain (init_lists_per_chain) not supplied")
         }
         if (is.null(n_chains_burnin)) { 
-          stop("n_chains_burnin not supplied - please supply")
+          stop("n_chains_burnin not supplied")
         }
         if (length(init_lists_per_chain) != n_chains_burnin) { 
           stop("n_chains_burnin must be equal to the length of the initial values list ('init_lists_per_chain')")
@@ -42,7 +42,7 @@ R_fn_init_initial_values <- function( Model_type,
               ## BridgeStan's param_unconstrain_json() rejects PARTIAL inits, so missing
               ## entries are completed first with the model's own defaults (the
               ## constrained transform of the zero unconstrained vector) and merged with
-              ## the user's values.
+              ## the supplied values.
               ##
               init_list_kk <- init_lists_per_chain[[kk]]
               ##

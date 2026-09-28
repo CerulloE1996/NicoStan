@@ -919,3 +919,11 @@ void update_M_diag_main_Hessian_InPlace(  Eigen::Ref<Eigen::Matrix<double, -1, 1
 
 
 
+
+
+
+
+
+
+
+

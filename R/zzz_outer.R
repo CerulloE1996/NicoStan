@@ -17,7 +17,7 @@
               
               ### TBB_BS <- file.path(system.file(package = "NicoStan"), "tbb_bs", "tbb.dll") 
               try({   TBB_STAN_1 <- file.path(libname, pkgname, "inst", "NicoStan", "inst", "tbb_stan", "tbb.dll")   })
-              try({   TBB_CMDSTAN_DLL <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "tbb.dll")    }) # prioritise user's installed tbb dll/so
+              try({   TBB_CMDSTAN_DLL <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "tbb.dll")    }) # prioritise the installed tbb dll/so
               try({   DUMMY_MODEL_SO_1 <- file.path(libname, pkgname, "inst", "NicoStan", "inst",  "dummy_stan_model_win_model.so")   })
               try({   DUMMY_MODEL_DLL_1 <- file.path(libname, pkgname, "inst", "NicoStan","inst",  "dummy_stan_model_win_model.dll")   })
                           
@@ -32,12 +32,22 @@
                 TBB_STAN_1 <- TBB_STAN_2 <- TBB_CMDSTAN_SO <- DUMMY_MODEL_SO_1 <- DUMMY_MODEL_SO_2 <- NULL
                           
                 try({   TBB_STAN_1 <- file.path(libname, pkgname, "inst", "NicoStan", "inst", "tbb_stan", "libtbb.so.2")   })
-                try({   TBB_CMDSTAN_SO <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "libtbb.so.2")    }) # prioritise user's installed tbb dll/so
+                try({   TBB_CMDSTAN_SO <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "libtbb.so.2")    }) # prioritise the installed tbb dll/so
                 try({   DUMMY_MODEL_SO_1 <- file.path(libname, pkgname, "inst", "NicoStan", "inst", "dummy_stan_model_model.so")   })
                           
                           dll_paths <- c(TBB_STAN_1, 
                                          TBB_CMDSTAN_SO,
                                          DUMMY_MODEL_SO_1)
+                ##
+                ## RcppParallel (loaded first by .onLoad) already provides a TBB library, and the compiled NicoStan package refuses
+                ## to load when a second copy of TBB is mapped in the process (R_fn_stop_if_several_TBB_copies_loaded); hence, the TBB
+                ## libraries above are skipped when a TBB library is already mapped, and only the dummy model library is loaded:
+                if (file.exists("/proc/self/maps")) {
+                      mapped_file_paths <- sub("^.* ", "", readLines("/proc/self/maps", warn = FALSE))
+                      if (any(grepl("/libtbb\\.so(\\.[0-9]+)*$", mapped_file_paths))) {
+                            dll_paths <- DUMMY_MODEL_SO_1
+                      }
+                }
               
             }
                       # Attempt to load each DLL / SO
@@ -120,3 +130,11 @@
 
 
  
+
+
+
+
+
+
+
+

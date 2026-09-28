@@ -124,6 +124,7 @@ struct ModelHandle_struct {
    bs_rng* (*bs_rng_construct)(unsigned int, char**) = nullptr;
    void (*bs_model_destruct)(bs_model*) = nullptr;
    void (*bs_rng_destruct)(bs_rng*) = nullptr;
+   int (*bs_release_thread_memory)() = nullptr;
    
 };
  
@@ -142,6 +143,7 @@ struct Stan_model_struct {
    bs_rng* (*bs_rng_construct)(unsigned int, char**) = nullptr;
    void (*bs_model_destruct)(bs_model*) = nullptr;
    void (*bs_rng_destruct)(bs_rng*) = nullptr;
+   int (*bs_release_thread_memory)() = nullptr;
    
 };
  
@@ -300,6 +302,15 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
              throw std::runtime_error("Error loading symbol 'bs_rng_destruct': " + std::string(dlerror()));
            }     
            
+           // Optional extension: old model libraries remain ABI-compatible.
+           using release_thread_memory_func = int (*)();
+           auto bs_release_thread_memory = reinterpret_cast<release_thread_memory_func>(
+               dlsym(bs_handle, "nicostan_bs_release_thread_memory_v1"));
+           #ifndef _WIN32
+               // Missing optional symbols must not leave a stale loader error.
+               if (!bs_release_thread_memory) dlerror();
+           #endif
+
            ModelHandle_struct model_handle = {bs_handle,
                                               bs_model_construct,
                                               bs_log_density_gradient, 
@@ -307,7 +318,8 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
                                               bs_param_unc_num,
                                               bs_rng_construct,
                                               bs_model_destruct,
-                                              bs_rng_destruct};
+                                              bs_rng_destruct,
+                                              bs_release_thread_memory};
            
            bs_model* bs_model_ptr = fn_convert_JSON_data_to_BridgeStan(model_handle, 
                                                                        json_file,
@@ -324,7 +336,8 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
                    bs_param_unc_num,
                    bs_rng_construct,
                    bs_model_destruct,
-                   bs_rng_destruct};   
+                   bs_rng_destruct,
+                   bs_release_thread_memory};   
            
    
  }
@@ -449,3 +462,42 @@ void fn_bs_destroy_Stan_model(Stan_model_struct &Stan_model_as_cpp_struct) {
  
   
   
+
+
+
+
+
+// Call only on the sampling worker after the complete chain has returned.
+// Cleanup remains inside the model DSO; NicoStan owns a different hidden stack.
+inline void fn_bs_destroy_Stan_model_after_sampling(Stan_model_struct &model) {
+    const int release_status = model.bs_release_thread_memory
+        ? model.bs_release_thread_memory() : 0;
+    fn_bs_destroy_Stan_model(model);
+    if (release_status != 0) {
+        throw std::runtime_error(release_status == 1
+            ? "BridgeStan memory release refused: live autodiff state remains after sampling."
+            : "BridgeStan memory release failed after sampling.");
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

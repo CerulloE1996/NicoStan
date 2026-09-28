@@ -198,7 +198,7 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         # 
         log_tau = log_tau_current + grad_update
         
-        ## Numerical bounds only; the caller applies the user's max_tau limit.
+        ## Numerical bounds only; the caller applies the configured max_tau limit.
         ## An arbitrary 0.05 floor previously overrode smaller valid initial trajectory lengths.
         log_tau = max(log(.Machine$double.xmin), min(log(.Machine$double.xmax) - 1, log_tau))
         
@@ -243,6 +243,17 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
                                              adam_update_performed = adam_update_performed))
   
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

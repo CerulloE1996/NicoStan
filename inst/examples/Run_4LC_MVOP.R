@@ -45,3 +45,25 @@ run_4LC_MVOP <- function(
 
 if (!interactive() && identical(Sys.getenv("NICO_RUN_4LC_MVOP"), "1"))
     run_4LC_MVOP()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

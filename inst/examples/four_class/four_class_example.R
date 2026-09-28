@@ -407,3 +407,25 @@ run_four_class_cmdstanr_smoke <- function(
     saveRDS(result, output_rds)
     result
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -814,7 +814,7 @@ create_summary_and_traces <- function(    model_results,
              ## ---- Which LAYOUT does the model being constrained actually use?
              ##
              ## param_constrain runs against the compiled model in 'model_so_file'. For an external
-             ## Stan model that is the user's model, whose parameters block DECLARES the nuisance
+             ## Stan model whose parameters block DECLARES the nuisance
              ## coordinates, so the complete unconstrained draw is [nuisance | main]. For a BUILT-IN
              ## model it is the cpp SKELETON, and most skeletons (LC_MVP, LC_MVOP, MVP, MVOP)
              ## declare the MAIN parameters only - the latent block lives in the C++ likelihood, not
@@ -1499,5 +1499,27 @@ create_summary_and_traces <- function(    model_results,
 
 
 
-# Now call it with your actual data:
-# summary_table <- create_stan_summary(your_trace_vector, pars_names_wo_nuisance)
+# Call it with the data:
+# summary_table <- create_stan_summary(trace_vector, pars_names_wo_nuisance)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

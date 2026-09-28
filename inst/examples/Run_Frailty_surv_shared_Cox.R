@@ -42,3 +42,25 @@ benchmark_result <-  NicoStan_benchmark_run(models = model, N_grid = setNames(li
     output_dir = file.path(getwd(), paste0("NicoStan_benchmark_", model)),
     model_dir = file.path(.example_directory, "models"))
 benchmark_result$comparison$efficiency
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

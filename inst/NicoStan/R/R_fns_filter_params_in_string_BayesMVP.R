@@ -246,7 +246,7 @@ extract_params_from_tibble_batch <- function(  debugging = FALSE,
         # Extract all parameter names from the tibble
         all_param_names_vec <- unique(tibble$parameter)
         
-        # Use your existing batch function to filter parameter names
+        # Use the existing batch function to filter parameter names
         filtered_params_list <- filter_param_names_string_batched(
           all_param_names_vec = all_param_names_vec,
           param_string_vec = param_strings_vec,
@@ -302,7 +302,7 @@ extract_params_from_array_batch <- function(debugging,
           stop("Array must have named parameters in the third dimension")
         }
         
-        # Use your existing batch function to filter parameter names
+        # Use the existing batch function to filter parameter names
         filtered_params_list <- filter_param_names_string_batched(
           all_param_names_vec = all_param_names_vec,
           param_string_vec = param_strings_vec,
@@ -376,3 +376,18 @@ extract_params_from_array_batch <- function(debugging,
 
 
  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

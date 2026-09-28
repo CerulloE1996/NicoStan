@@ -6,3 +6,25 @@
 #' @rdname MVP_model
 #' @export
 Nico_model <-  MVP_model
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

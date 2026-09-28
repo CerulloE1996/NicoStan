@@ -49,3 +49,25 @@ run_random_intercepts <-  function( burnin_algorithm = "CHESSR",
         return(model)
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -27,3 +27,19 @@ update_cov_Welford <- function(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

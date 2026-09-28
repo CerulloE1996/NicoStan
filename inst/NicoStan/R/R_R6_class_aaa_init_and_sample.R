@@ -21,9 +21,9 @@ require(R6)
 #' 
 #' @section Typical workflow:
 #'  \preformatted{
-#'  #### NOTE: Please see the ".R" example files for full details & examples, 
+#'  #### NOTE: See the ".R" example files for full details & examples, 
 #'  #### as this is NOT a complete working example, but is provided just to show 
-#'  #### what order you should call things in. 
+#'  #### for the order of calls. 
 #'  ####  -----------  Compile + initialise the model using "MVP_model$new(...)"  ---------------- 
 #'    require(NicoStan)
 #'    ## NOTE: The "model_args_list" argument is only needed for BUILT-IN (not Stan) models.
@@ -72,7 +72,7 @@ require(R6)
 #'                    params = c("beta", "Omega", "p"), 
 #'                    batch_size = 12)
 #'    
-#'    ## you can extract parameters by doing: "trace$param_name()". 
+#'    ## parameters can be extracted using: "trace$param_name()". 
 #'    ## For example:
 #'    ## display each panel for beta and Omega ("batch_size" controls the # of plots per panel)
 #'    trace_plots$beta[[1]] # 1st (and only) panel
@@ -86,7 +86,7 @@ require(R6)
 #'                      params = c("Se_bin", "Sp_bin", "p"), 
 #'                      batch_size = 12)
 #'    
-#'    ## you can extract parameters by doing: "trace$param_name()". 
+#'    ## parameters can be extracted using: "trace$param_name()". 
 #'    ## For example:
 #'    ## display each panel for beta and Omega ("batch_size" controls the # of plots per panel)
 #'    density_plots$Se[[1]] # Se - 1st (and only) panel
@@ -143,8 +143,8 @@ MVP_model <- R6Class("MVP_model",
                           y = NULL,
                           #'@field N The total sample size. Note that for built-in models (i.e., MVP, LC_MVP, or latent_trait) this should be equal to: \eqn{N = nrow(y)}.
                           N = NULL,
-                          #'@field n_params_main The total number of main model parameters (i.e., excluding nuisance parameters / high-dimensional latent variables). For Stan models (i.e., if "Model_type" is set to "Stan" and you 
-                          #'are running a Stan model), this should equal the number of parameters that you define in the "parameters" block of the Stan model, EXCEPT for any nuisance parameters (i.e., high-dimensional latent
+                          #'@field n_params_main The total number of main model parameters (i.e., excluding nuisance parameters / high-dimensional latent variables). For Stan models (i.e., if "Model_type" is set to "Stan" and the model 
+                          #'is a Stan model), this should equal the number of parameters defined in the "parameters" block of the Stan model, EXCEPT for any nuisance parameters (i.e., high-dimensional latent
                           #' variables). 
                           n_params_main = NULL,
                           #'@field n_nuisance The total number of nuisance parameters, i.e. the dimension of the high-dimensional latent variable vector. For built-in models (i.e., MVP, LC_MVP, or latent_trait), this should be 
@@ -159,7 +159,7 @@ MVP_model <- R6Class("MVP_model",
                           #'Arguments which are relevant to all three of the built-in models include:
                           #' 
                           #'* \code{n_covariates_per_outcome}: 
-                          #'   A matrix of dimension \code{n_class} x \code{n_outcomes},  which contains the number of covariates per outcome. If your model has no covariates (which is often the case for the LC_MVP or
+                          #'   A matrix of dimension \code{n_class} x \code{n_outcomes},  which contains the number of covariates per outcome. If the model has no covariates (which is often the case for the LC_MVP or
                           #'   latent_trait), this does not need to be included, and it just be a matrix of 1's (since each outcome has 1 intercept). Also note that n_class = 1 for the MVP, and for the LC_MVP and latent_trait 
                           #'   n_class = 2. 
                           #'   
@@ -179,7 +179,7 @@ MVP_model <- R6Class("MVP_model",
                           #'   to set it: the \code{vect_type} argument of \code{$sample()} cannot change it. Not used for \code{Model_type = "Stan"}.  
                           #'   
                           #'*  \code{num_chunks}:
-                          #'    The number of chunks to use in the log-probability and gradient function. By default, the number selected will depend on your CPU. 
+                          #'    The number of chunks to use in the log-probability and gradient function. By default, the number selected will depend on the CPU. 
                           #'    
                           #'*  \code{Phi_type}:
                           #'    Type of \eqn{\Phi()} function implementation to use, where \eqn{\Phi()} is the standard normal CDF. The default is "Phi" (with \code{inv_Phi_type = "inv_Phi"}); the built-in models also 
@@ -230,11 +230,11 @@ MVP_model <- R6Class("MVP_model",
                           #' 
                           #'*  \code{LT_b_priors_shape}: 
                           #'    A matrix of dimension \code{n_class} x \code{n_outcomes}, where each element corresponds to the prior Weibull shape parameter of the "b" parameters in the latent trait model - which are denoted 
-                          #'    as \code{LT_b}. The default is a matrix with with every value equal to 1.33. Please see LT_b_priors_scale below for a justification of this default choice. 
+                          #'    as \code{LT_b}. The default is a matrix with with every value equal to 1.33. See LT_b_priors_scale below for a justification of this default choice. 
                           #'           
                           #'*  \code{LT_b_priors_scale}:
                           #'    A matrix of dimension \code{n_class} x \code{n_outcomes}, where each element corresponds to the prior Weibull scale parameter of the "b" parameters in the latent trait model - which are denoted 
-                          #'    as \code{LT_b}. The default is a matrix with every value equal to 1.25. Together with the default choice \code{LT_b_priors_shape} (please see description above), these priors correspond to the 
+                          #'    as \code{LT_b}. The default is a matrix with every value equal to 1.25. Together with the default choice \code{LT_b_priors_shape} (see description above), these priors correspond to the 
                           #'    following Weibull priors: \eqn{b_{c, t} \sim \text{Weibull}\left(1.33, 1.250\right)}. We chose these as default values because they are equivalent to setting \eqn{\text{truncated-LKJ}\left(1.5\right)}
                           #'     priors in the LC_MVP model, which are very weakly informative, especially if the dimension (i.e. number of outcomes/tests) is small. 
                           #'    
@@ -250,7 +250,7 @@ MVP_model <- R6Class("MVP_model",
                           #'   
                           model_args_list = NULL,
                           #'@field Stan_data_list  List containing data for Stan models (only relevant if "Model_type" is set to "Stan"). The elements of the list should correspond to the variables defined in the "data" block of
-                          #' your Stan model. 
+                          #' the Stan model. 
                           Stan_data_list = NULL,
                           #'@field sample_nuisance Whether or not to sample the high-dimensional nuisance/latent variable vector. 
                           sample_nuisance = NULL,
@@ -279,10 +279,10 @@ MVP_model <- R6Class("MVP_model",
                           #'@param Stan_data_list List of Stan data (optional). See class documentation for details.
                           #'@param sample_nuisance Whether to sample nuisance parameters. See class documentation for details.
                           #'@param Stan_model_file_path The file path to the Stan model, only needed if \code{Model_type = "Stan"}.
-                          #'@param Stan_cpp_user_header The file path to a user-supplied C++ .hpp file to be compiled together with the Stan model. This is optional and only needed if you want to use custom C++ functions in your 
+                          #'@param Stan_cpp_user_header The file path to a user-supplied C++ .hpp file to be compiled together with the Stan model. This is optional and only needed when custom C++ functions are required in the
                           #' Stan model, and is only relvant if \code{Model_type = "Stan"}.
                           #'@param Stan_cpp_flags User-supplied R list containing comma-separated values of compiler flags (e.g. CXX_FLAGS, etc) to be passed on
-                          #' to cmdstanr - the Stan model will then be compiled using these flags. This is optional and only needed if you want to use custom C++ functions in your Stan model. 
+                          #' to cmdstanr - the Stan model will then be compiled using these flags. This is optional and only needed when custom C++ functions are required in the Stan model. 
                           #' Only relevant if \code{Model_type = "Stan"}.
                           #'@param ... Additional arguments passed to NicoStan::initialise_model.
                           #'@return Returns self$init_object, an object generated from the "NicoStan::initialise_model" function which contains information such as which 
@@ -404,13 +404,14 @@ MVP_model <- R6Class("MVP_model",
                           #'@param N The sample size. See class documentation for details.
                           #'@param randomize_tau_burnin Randomise trajectory length during burn-in. Default FALSE; length can still adapt between iterations.
                           #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from zero to twice the adapted scale (at least one integration step). Default TRUE.
-                          #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is a unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
+                          #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an experimental unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
+                          #'@param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in. FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in and skips that search; no effect when no pre-burnin runs.
                           #'@param tau_adaptation_block "main" (default; unchanged behaviour): the trajectory-length criterion uses the main parameters only. "joint": main and nuisance parameters concatenated, still adapting the one joint tau. EXPERIMENTAL, for testing only; models without a sampled nuisance block fall back to "main".
                           #'@param manual_tau If \code{FALSE}, then the selected burnin_algorithm will be used to adapt \eqn{\tau} during the burnin phase. Otherwise if \code{TRUE}, \eqn{\tau} will be
                           #' fixed to the value given in the \code{tau_if_manual} argument. 
                           #'@param tau_if_manual The HMC path length (\eqn{\tau}) to use for the HMC sampling. This will be used for both the burnin and sampling phases. 
                           #'Note that this only works if \code{manual_tau = TRUE}. Otherwise, \eqn{\tau} will be adapted using the selected burnin_algorithm. Also note that if only one value is 
-                          #'given, then this value of tau will be used for both the main parameter sampling and the nuisance parameter sampling. If you want to specify separate
+                          #'given, then this value of tau will be used for both the main parameter sampling and the nuisance parameter sampling. To specify separate
                           #'path lengths for the main and nuisance parameters, provide a vector instead. E.g.  \code{tau_if_manual = c(0.50, 2.0)} will mean that 
                           #'\eqn{\tau} = 0.50 is used for the main parameters and \eqn{\tau} = 2.0 is used for the nuisance parameters. 
                           #'@param sample_nuisance Whether to sample nuisance parameters. See class documentation for details.
@@ -513,6 +514,8 @@ MVP_model <- R6Class("MVP_model",
                           #'@param burnin_TBB_pool_equals_n_chains NULL defaults to TRUE for built-in models, which use OpenMP within chains.
                           #'External Stan models always force FALSE, even when TRUE is supplied, so nested TBB likelihood work can use
                           #'n_chains_burnin * n_threads_WCP_burnin threads. Built-in models can explicitly select FALSE.
+                          #'@param run_in_fresh_R_process TRUE (default) runs burn-in/sampling in a fresh R process and returns
+                          #'the usual draws/diagnostics; native worker memory is released when it exits. FALSE uses this session.
                           sample = function(  force_recompile = FALSE,
                                               ##
                                               n_chains_burnin = self$n_chains_burnin,
@@ -622,6 +625,7 @@ MVP_model <- R6Class("MVP_model",
                                               tau_weight_by_p_jump = NULL,
                                               tau_ramp = NULL,
                                               eps_reinit_at_ChEES_handover = NULL,
+                                              eps_reinit_after_pre_burnin = NULL,
                                               theta_hat_us_rule = NULL,
                                               theta_hat_us_freeze_iter = NULL,
                                               burnin_schedule = "automatic",
@@ -636,7 +640,8 @@ MVP_model <- R6Class("MVP_model",
                                               burnin_TBB_pool_equals_n_chains = NULL,
                                               store_log_lik_trace = NULL,
                                               use_disk_path = "/tmp/hmc_traces",
-                                              test_perm_override = NULL
+                                              test_perm_override = NULL,
+                                              run_in_fresh_R_process = TRUE
                                               ##
                                              ) {
                             ##
@@ -770,6 +775,7 @@ MVP_model <- R6Class("MVP_model",
                             # -----------  call R_fn_sample_model fn ---------------------------------------------------------------------------------------------------
                             self$result <-       R_fn_sample_model(   
                                                             init_object = self$init_object,
+                                                            run_in_fresh_R_process = run_in_fresh_R_process,
                                                             ##
                                                             # Model_type = self$Model_type, ## cannot be changed in "$sample()"
                                                             ##
@@ -813,6 +819,7 @@ MVP_model <- R6Class("MVP_model",
                                                             tau_weight_by_p_jump = tau_weight_by_p_jump,
                                                             tau_ramp = tau_ramp,
                                                             eps_reinit_at_ChEES_handover = eps_reinit_at_ChEES_handover,
+                                                            eps_reinit_after_pre_burnin = eps_reinit_after_pre_burnin,
                                                             theta_hat_us_rule = theta_hat_us_rule,
                                                             theta_hat_us_freeze_iter = theta_hat_us_freeze_iter,
                                                             burnin_schedule = burnin_schedule,
@@ -1008,5 +1015,25 @@ MVP_model <- R6Class("MVP_model",
                           
             )
 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

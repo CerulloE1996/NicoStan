@@ -378,3 +378,25 @@ structure(list(structure(list(24L, 4L, 4L, structure(c(0L, 1L,
 "n_ordinal_tests", "n_cat_per_ord_test", "n_thr_per_ord_test", 
 "ref_thr_cat", "n_covariates", "prior_dirichlet_alpha", "DGM_info"
 ))), names = c("data", "initial_values", "simulation"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

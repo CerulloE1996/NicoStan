@@ -11,11 +11,11 @@
 "fn_prepare_nested_rhat_grouping", "fn_nested_rhat_from_draws_array", 
 "R_fn_detect_vectorisation_support", "bridgestan_path", "cmdstanr_path", 
 "generate_summary_tibble", "init_and_run_burnin_ChESSR", "get_BayesMVP_Stan_paths", 
-"init_bs_model_external", "R_fn_init_initial_values", "initialise_model", 
+"R_fn_create_BridgeStan_model", "init_bs_model_external", "R_fn_init_initial_values", "initialise_model", 
 "fn_trajectory_metric_factor", "fn_apply_trajectory_metric", 
 "fn_transport_snaper_direction", "fn_metric_position_criterion", 
 "fn_metric_tau_block_update", "plot_param_group_batched", "plot_multiple_params_batched", 
-"fn_tau_sampling_scale_gaussian_factor", "R_fn_sample_model", 
+"fn_tau_sampling_scale_gaussian_factor", "fn_sample_model_in_fresh_R_process", "R_fn_sample_model", 
 "set_pkg_example_path_and_wd", "R_fn_update_tau_using_ADAM", 
 "R_fn_update_tau_simple", "R_fn_compute_gradients_for_tau_using_ChEES", 
 "R_fn_compute_gradients_for_tau_using_ChEES_combined", "R_fn_compute_gradients_for_tau_using_KE", 
@@ -38,3 +38,25 @@
 "fn_update_snaper_w_minibatch", "fn_initialise_snaper_direction", 
 "fn_update_snaper_mean", "fn_weighted_proposal_mean", "fn_normalise_burnin_algorithm", 
 "fn_stabilize_snaper_w")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

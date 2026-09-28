@@ -469,3 +469,25 @@ ALWAYS_INLINE void leapfrog_integrator_diag_M_diffusion_HMC_dual_Id_M_us_zero_th
         if (!std::isfinite(lp_and_grad_outs(0))) return;
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

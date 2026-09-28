@@ -32,7 +32,7 @@ setup_env_post_install <- function() {
                     
                     cat("Preloading critical .DLLs / .SOs for BayesMVP package\n")
                     try({   TBB_STAN_DLL <- file.path(mvp_user_dir, "tbb.dll") })
-                    ## try({   TBB_CMDSTAN_DLL <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "tbb.dll") }) # prioritise user's installed tbb dll/so
+                    ## try({   TBB_CMDSTAN_DLL <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "tbb.dll") }) # prioritise the installed tbb dll/so
                     try({   DUMMY_MODEL_SO <- file.path(mvp_user_dir, "dummy_stan_modeL_win_model.so") })
                     try({   DUMMY_MODEL_DLL <- file.path(mvp_user_dir, "dummy_stan_modeL_win_model.dll") })
                     
@@ -67,7 +67,7 @@ setup_env_post_install <- function() {
                     # 
                     # cat("Preloading critical .DLLs / .SOs for BayesMVP package\n")
                     # try({  TBB_STAN_SO <- file.path(mvp_user_dir, "libtbb.so.2") })
-                    # ## try({  TBB_CMDSTAN_SO <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "libtbb.so.2") })  # prioritise user's installed tbb dll/so
+                    # ## try({  TBB_CMDSTAN_SO <- file.path(cmdstan_dir, "stan", "lib", "stan_math", "lib", "tbb", "libtbb.so.2") })  # prioritise the installed tbb dll/so
                     # try({  DUMMY_MODEL_SO <- file.path(mvp_user_dir, "dummy_stan_model_model.so") })
                     # 
                     # dll_paths <- c(TBB_STAN_SO,
@@ -188,6 +188,23 @@ R_fn_stop_if_several_TBB_copies_loaded <- function(package_name) {
       setup_env_post_install()  
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

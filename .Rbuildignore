@@ -6,3 +6,5 @@
 ^tools$
 ^validation$
 ^dummy_stan_model_model\.so$
+^inst/NicoStan/backups_
+^backups_

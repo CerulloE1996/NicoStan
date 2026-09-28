@@ -84,7 +84,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##                           that does not pass it - e.g. the pre-burnin - is unchanged).
                                            ##   "running_mean_frozen" - the same running mean, but FROZEN from theta_hat_us_freeze_iter on,
                                            ##                           so eps finishes adapting against exactly the kernel sampling uses.
-                                           ##   "zero"                - centre fixed at 0 throughout (the earlier code).
+                                           ##   "zero"                - centre fixed at 0 throughout (the Feb 2026 code).
                                            theta_hat_us_rule = c("running_mean", "running_mean_frozen", "zero"),
                                            theta_hat_us_freeze_iter = NULL,   ## automatic: linked to the final metric update; legacy: round(0.6 * n_adapt)
                                            burnin_schedule = "legacy",       ## preserve ordering pre-burn-in and direct historical callers
@@ -178,6 +178,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##             which eps is handed back to the starting value
                                            ##             (heuristic or eps_init) and adapted as normal.
                                            eps_init = NULL,
+                                           ##
+                                           ## eps_carry_over = the final step-sizes of a previous stage (the reorder pre-burnin),
+                                           ##             as list(eps_main = , eps_us = ). NULL (default) = the find_initial_eps
+                                           ##             search runs at the start of this stage. Non-NULL = this
+                                           ##             stage starts from these values and the search is NOT run at all (no
+                                           ##             search cost; unlike eps_init, which still runs it and then overrides
+                                           ##             its result). The joint sampler (partitioned_HMC = FALSE) keeps
+                                           ##             eps_us = eps_main, as after the search. eps_initial still applies.
+                                           eps_carry_over = NULL,
                                            ##
                                            eps_initial = NULL,
                                            eps_initial_iter = NULL,
@@ -510,7 +519,39 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   # str(Model_args_as_Rcpp_List)
   
   
+  ## ---- Threads for the step-size search fn_find_initial_eps_main_and_us() (here and at the ChEES handover). A build whose
+  ##      search has the n_threads argument spreads each lp/grad evaluation of the search over the burn-in's within-chain
+  ##      (WCP) threads and adds the chunk contributions in the serial order, so eps is bitwise the same as single-threaded;
+  ##      a build without it gets the original single-threaded call.
+  eps_search_has_n_threads <- isTRUE(tryCatch("n_threads" %in% names(formals(fn_find_initial_eps_main_and_us)), error = function(e) FALSE))
+  eps_search_n_threads <- if (is.numeric(n_threads_WCP) && (length(n_threads_WCP) == 1) && is.finite(n_threads_WCP) && (n_threads_WCP >= 1)) floor(n_threads_WCP) else 1
+
+
   ## INITIAL VALUE(S) FOR EPSILON (I.E. THE HMC STEP-SIZE(S)) ---- BOOKMARK ------------------------------------------------------------------------------:
+  ##
+  ## ---- eps_carry_over: start from the previous stage's final step-sizes and skip the find_initial_eps search below:
+  ##
+  if (!is.null(eps_carry_over)) {
+
+        eps_carry_over_main <- eps_carry_over$eps_main
+        eps_carry_over_us   <- if (isTRUE(partitioned_HMC)) eps_carry_over$eps_us else eps_carry_over_main
+        ##
+        for (eps_carry_over_value in list(eps_carry_over_main, eps_carry_over_us)) {
+              if (!is.numeric(eps_carry_over_value) || length(eps_carry_over_value) != 1 ||
+                  !is.finite(eps_carry_over_value) || eps_carry_over_value <= 0) {
+                    stop("eps_carry_over must be NULL or list(eps_main = , eps_us = ) holding single positive finite step-sizes.")
+              }
+        }
+        ##
+        EHMC_args_as_Rcpp_List$eps_main <- eps_carry_over_main
+        ## nuisance: its own carried value under partitioned HMC; the joint sampler keeps eps_us = eps_main:
+        EHMC_args_as_Rcpp_List$eps_us   <- eps_carry_over_us
+        ##
+        message(colourise(paste0("Initial step_sizes carried over from the previous stage (find_initial_eps search skipped): eps_main = ",
+                                 signif(EHMC_args_as_Rcpp_List$eps_main, 4), ", eps_us = ", signif(EHMC_args_as_Rcpp_List$eps_us, 4)),
+                          "cyan"))
+
+  } else {
   try({
 
         if (sample_nuisance == TRUE) {
@@ -518,6 +559,24 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         } else {
           theta_us_vec <-   c(rep(1, n_nuisance))
         }
+
+        if (isTRUE(eps_search_has_n_threads)) {
+
+              par_res <- (fn_find_initial_eps_main_and_us(     theta_main_vec_initial_ref = matrix(c(theta_vec_mean[index_main]), ncol = 1),
+                                                                             theta_us_vec_initial_ref = matrix(c(theta_us_vec), ncol = 1),
+                                                                             partitioned_HMC = partitioned_HMC,
+                                                                             seed = seed,
+                                                                             Model_type = Model_type,
+                                                                             force_autodiff = force_autodiff,
+                                                                             force_PartialLog = force_PartialLog,
+                                                                             multi_attempts = multi_attempts,
+                                                                             y_ref = y,
+                                                                             Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                                             EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                                                                             EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                                             n_threads = eps_search_n_threads))
+
+        } else {
 
         par_res <- (fn_find_initial_eps_main_and_us(     theta_main_vec_initial_ref = matrix(c(theta_vec_mean[index_main]), ncol = 1),
                                                                        theta_us_vec_initial_ref = matrix(c(theta_us_vec), ncol = 1),
@@ -531,6 +590,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                        Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
                                                                        EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
                                                                        EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List))
+
+        }
 
 
         message(paste("Initial step_sizes = "))
@@ -553,6 +614,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         }
 
   })
+  } ## end of "else" (no eps_carry_over: find_initial_eps search) of "if (!is.null(eps_carry_over))"
   
   if (!is.null(eps_init)) {
     EHMC_args_as_Rcpp_List$eps_main <- eps_init
@@ -590,7 +652,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           stop("'eps_initial' must be NULL or a single positive finite number.")
         }
         ##
-        ## respect the user's step-size ceilings - a warm start must not exceed them:
+        ## respect the configured step-size ceilings - a warm start must not exceed them:
         eps_initial_main <- min(eps_initial, max_eps_main)
         eps_initial_us   <- min(eps_initial, max_eps_us)
         ##
@@ -832,6 +894,72 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   EHMC_args_as_Rcpp_List$share_tau_ii_across_chains <- isTRUE(share_tau_ii_across_chains_in_burnin)
   EHMC_args_as_Rcpp_List$randomize_tau <- randomize_tau_burnin
   ##
+  ## ---- resident burn-in interface: the nuisance-sized state and statistics stay inside the worker between iterations,
+  ##      and only main-sized quantities cross to R every iteration. Used only when the compiled code that creates the
+  ##      worker provides it (the functions are looked up in the namespace of fn_create_persistent_burnin_worker, i.e. the
+  ##      package whose compiled code owns the worker); otherwise the original interface, unchanged.
+  ##      options(NicoStan_resident_burnin = FALSE) keeps the original interface; options(NicoStan_resident_burnin_joint_block = FALSE)
+  ##      keeps it for tau_adaptation_block = "joint" only.
+  ##
+  worker_api_env <-  environment(fn_create_persistent_burnin_worker)
+  resident_api_names <-  c("fn_persistent_burnin_resident_api_version",
+                           "fn_persistent_burnin_run_one_iter_main_only",
+                           "fn_persistent_burnin_run_one_iter_main_only_profiled",
+                           "fn_persistent_burnin_update_adaptation_main_only",
+                           "fn_persistent_burnin_init_resident_statistics",
+                           "fn_persistent_burnin_get_resident_statistic",
+                           "fn_persistent_burnin_set_resident_statistic",
+                           "fn_persistent_burnin_get_state",
+                           "fn_persistent_burnin_state_row_means_resident",
+                           "fn_persistent_burnin_pooled_welford_nuisance_resident",
+                           "fn_persistent_burnin_update_snaper_m_and_s_resident",
+                           "fn_persistent_burnin_update_snaper_m_prop_resident",
+                           "fn_persistent_burnin_set_nuisance_centre_resident")
+  ## ---- the joint (main + nuisance) trajectory block (tau_adaptation_block = "joint"):
+  resident_joint_api_names <-  c("fn_persistent_burnin_resident_joint_api_version",
+                                 "fn_persistent_burnin_joint_direction_set",
+                                 "fn_persistent_burnin_joint_direction_get",
+                                 "fn_persistent_burnin_joint_direction_transport_resident",
+                                 "fn_persistent_burnin_joint_direction_update_snaper_resident",
+                                 "fn_persistent_burnin_joint_position_reductions_resident",
+                                 "fn_persistent_burnin_joint_kinetic_energy_sums_us_resident")
+  ##
+  fn_worker_api_has_functions <-  function(function_names) {
+        all(vapply(X = function_names,
+                   FUN = function(name) exists(x = name, envir = worker_api_env, mode = "function", inherits = FALSE),
+                   FUN.VALUE = logical(1)))
+  }
+  resident_api_available <-  fn_worker_api_has_functions(resident_api_names)
+  if (resident_api_available) {
+        resident_api <-  mget(x = resident_api_names, envir = worker_api_env, inherits = FALSE)
+        resident_api_available <-  isTRUE(tryCatch(resident_api$fn_persistent_burnin_resident_api_version() >= 1,
+                                                   error = function(e) FALSE))
+  }
+  resident_joint_api_available <-  resident_api_available && fn_worker_api_has_functions(resident_joint_api_names)
+  if (resident_joint_api_available) {
+        resident_api <-  c(resident_api, mget(x = resident_joint_api_names, envir = worker_api_env, inherits = FALSE))
+        resident_joint_api_available <-  isTRUE(tryCatch(resident_api$fn_persistent_burnin_resident_joint_api_version() >= 1,
+                                                         error = function(e) FALSE))
+  }
+  ##
+  use_resident_burnin <-  resident_api_available &&
+                          isTRUE(getOption("NicoStan_resident_burnin", TRUE)) &&
+                          isTRUE(sample_nuisance) && (n_nuisance > 0) &&
+                          (identical(tau_adaptation_block_effective, "main") ||
+                           (identical(tau_adaptation_block_effective, "joint") && resident_joint_api_available &&
+                            isTRUE(getOption("NicoStan_resident_burnin_joint_block", TRUE)))) &&
+                          identical(getOption("matprod", "default"), "default")
+  ## the joint trajectory block on the resident interface (every nuisance-sized quantity of its criterion is computed in the worker):
+  use_resident_joint_block <-  use_resident_burnin && identical(tau_adaptation_block_effective, "joint")
+  ##
+  if (use_resident_burnin) {
+        run_burnin_iteration <-  if (debug_burnin_timing) resident_api$fn_persistent_burnin_run_one_iter_main_only_profiled else
+                                                          resident_api$fn_persistent_burnin_run_one_iter_main_only
+  }
+  message(colourise(paste0("burn-in state transfer: ",
+                            if (use_resident_burnin) "resident (main-sized quantities per iteration)" else "original (full state per iteration)"),
+                     "cyan"))
+  ##
   worker_ptr <- fn_create_persistent_burnin_worker(
                 n_threads_R = n_chains_burnin,
                 partitioned_HMC_R = partitioned_HMC,
@@ -878,6 +1006,31 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   var_draws_all      <- rep(1, n_params)
   ##
   metric_ready <- (metric_estimator %in% c("chain_mean", "chain_mean_scaled"))   # pooled: wait for draws; chain_mean(_scaled): behave exactly as before
+  ##
+  if (use_resident_burnin) {
+        ##
+        ## ---- the nuisance-sized statistics move into the worker, with exactly the initial values set above:
+        resident_api$fn_persistent_burnin_init_resident_statistics( worker_ptr,
+                                                                    snaper_m_vec_us = EHMC_burnin_as_Rcpp_List$snaper_m_vec_us,
+                                                                    snaper_s_vec_us_empirical = EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical,
+                                                                    snaper_m_prop_vec_us = snaper_m_prop_vec_all[index_nuisance],
+                                                                    var_draws_us = var_draws_all[index_nuisance])
+        ##
+        ## ---- R keeps only the main rows of the pooled estimator (every operation of it is row-local):
+        wf_m  <-  wf_m[index_main]
+        wf_M2 <-  wf_M2[index_main]
+        ##
+        ## ---- the joint SNAPER direction (tau_adaptation_block = "joint") moves into the worker too:
+        if (use_resident_joint_block) {
+              resident_api$fn_persistent_burnin_joint_direction_set(worker_ptr, trajectory_direction$joint)
+        }
+        ##
+        ## ---- the nuisance state is resident: any use of these would now be stale, so a missed use raises an error instead
+        ##      (inside the loop's try() blocks that error is printed and the burn-in continues, so check the console of an A/B run):
+        theta_us_vectors_all_chains_input_from_R <-  NULL
+        velocity_us_vectors_all_chains_input_from_R <-  NULL
+        ##
+  }
   
   ## ---- HOLD THE ADAM LEARNING RATE HIGH TO START (learning_rate_initial) ----------------
   ##
@@ -918,21 +1071,47 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         ##
         if (learning_rate_initial <= learning_rate_main_after_hold) {
 
-              warning( sprintf( fmt = paste0(
-                          "learning_rate_initial (%.4g) is NOT above the run's learning_rate (%.4g), so the ",
-                          "learning-rate hold %s. Either raise learning_rate_initial, or lower learning_rate ",
-                          "so there is something to hand back down to."),
-                          learning_rate_initial,
-                          learning_rate_main_after_hold,
+              warning(paste0(
+                          "learning_rate_initial (", trimws(formatC(x = learning_rate_initial, format = "g", digits = 4, width = 0)),
+                          ") is NOT above the run's learning_rate (",
+                          trimws(formatC(x = learning_rate_main_after_hold, format = "g", digits = 4, width = 0)),
+                          "), so the learning-rate hold ",
                           if (isTRUE(all.equal(learning_rate_initial, learning_rate_main_after_hold)))
-                            "changes NOTHING - the rate is the same before and after" else
-                            "RAISES the rate after the hold rather than lowering it"),
+                            "changes NOTHING - the rate is the same before and after. Either raise learning_rate_initial, or lower learning_rate so there is something to hand back down to."
+                          else
+                            "RAISES the rate after the hold rather than lowering it. Either raise learning_rate_initial, or lower learning_rate so there is something to hand back down to."),
                        call. = FALSE,
                        immediate. = TRUE)
 
         }
 
   }
+  ##
+  ## ---- Per-iteration constants, built once here before the loop (the same values at every iteration; R copies an
+  ##      object before any in-place change, so the list elements that share them cannot alter them):
+  ##        - the unit nuisance metric (metric_type_nuisance = "unit"), one vector per list element;
+  ##        - the zero centre theta_hat_us_vec (theta_hat_us_rule = "zero", and every iteration up to clip_iter).
+  ##
+  unit_M_inv_us_vec     <- rep(1, n_nuisance)
+  unit_M_us_vec         <- rep(1, n_nuisance)
+  unit_sqrt_M_us_vec    <- rep(1, n_nuisance)
+  theta_hat_us_vec_zero <- matrix(rep(0.0, n_nuisance))
+  ##
+  ## ---- Proposal-weighted centre (snaper_m_prop_vec_all): with tau_adaptation_block = "main" the trajectory criterion reads
+  ##      only its MAIN rows, so from iteration 2 on only those rows are updated (see the proposal-centre update in the loop).
+  ##      proposal_entry_limit is half the largest double: two entries below it in absolute value cannot overflow when added.
+  ##      The main rows of the matrix-vector product are the same with or without the nuisance rows for R's reference BLAS
+  ##      (libRblas: each row is accumulated on its own over the columns, in the same order whatever the number of rows).
+  ##      Optimised BLAS kernels (OpenBLAS, MKL, Accelerate/vecLib) may treat rows differently by position, so with any
+  ##      other BLAS, or one R does not name, the full update is kept (normalizePath() follows a libRblas link to another BLAS).
+  ##
+  blas_library_file <- tryCatch(basename(normalizePath(extSoftVersion()[["BLAS"]], mustWork = FALSE)),
+                                error = function(e) "")
+  blas_is_reference_Rblas <- isTRUE(grepl("^libRblas(\\.0)?\\.(so|dylib)$", blas_library_file))
+  ##
+  proposal_centre_main_rows_only <- isTRUE(sample_nuisance) && (n_nuisance > 0) && identical(tau_adaptation_block_effective, "main") &&
+                                    blas_is_reference_Rblas
+  proposal_entry_limit <- 0.5 * .Machine$double.xmax
   ##
  ####  Start burnin   ------------------------------------------------------------------------------------------------------------------------------------------------
  for (ii in iter_seq_burnin) {
@@ -963,9 +1142,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
               if (metric_type_nuisance == "unit") { 
                
                    #### ---- for unit metric --------------------------------------
-                   EHMC_Metric_as_Rcpp_List$M_inv_us_vec  <- rep(1, n_nuisance)
-                   EHMC_Metric_as_Rcpp_List$M_us_vec      <- rep(1, n_nuisance)
-                   EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec <- rep(1, n_nuisance)
+                   ## (the unit vectors are built once, before the loop)
+                   EHMC_Metric_as_Rcpp_List$M_inv_us_vec  <- unit_M_inv_us_vec
+                   EHMC_Metric_as_Rcpp_List$M_us_vec      <- unit_M_us_vec
+                   EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec <- unit_sqrt_M_us_vec
                
               }
                         
@@ -1141,7 +1321,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                      ## phase ended so the ramp only ever lengthens; the fixed targets
                                      ## take over again as soon as they exceed that floor.
                                      ## (Restored: this floor was active in every earlier run;
-                                     ## removing it changed the burn-in relative to those runs.)
+                                     ## 09-18 10:21; removing it changed the burn-in relative to those runs.)
                                      ##
                                      tau_ramp_floor <- max(tau_ramp_leapfrog_steps) * EHMC_args_as_Rcpp_List$eps_main
                                      ##
@@ -1219,15 +1399,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
    
                #### ---------------------------------------------------------------------------------------------------------------------------------------------------------------
                #### current mean theta across all K chains:
+               if (use_resident_burnin) {
+                        ## the nuisance part (and theta_vec_current_mean / theta_vec_current_us) is formed in the worker, where it is used;
+                        ## rowMeans() of the main block is exactly theta_vec_current_mean[index_main] of the full mean:
+                        theta_vec_current_main <-  rowMeans(theta_main_vectors_all_chains_input_from_R)
+               } else {
                if (sample_nuisance == TRUE) { 
                         ## same values as rowMeans(rbind(us, main)), without copying the (n_nuisance + n_main) x K matrix every iteration:
                         theta_vec_current_mean <- c(rowMeans(theta_us_vectors_all_chains_input_from_R), rowMeans(theta_main_vectors_all_chains_input_from_R))
-                        theta_vec_current_us <-   theta_vec_current_mean[index_nuisance]
+                        ## only the partitioned sampler's nuisance update reads this nuisance-length copy:
+                        if (partitioned_HMC == TRUE) theta_vec_current_us <-   theta_vec_current_mean[index_nuisance]
                         theta_vec_current_main <- theta_vec_current_mean[index_main]
                } else { 
                         theta_vec_current_mean <- rowMeans(rbind(theta_main_vectors_all_chains_input_from_R))
                         theta_vec_current_main <- theta_vec_current_mean
                }
+               }  ## end of: if (use_resident_burnin)
                # ##
                # if (ii >= metric_start_iter) {
                #     
@@ -1255,7 +1442,45 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                #          }
                #      
                # }
-               if ((metric_estimator == "pooled") && (ii >= metric_start_iter)) {
+               ## The pooled moments (var_draws_all, empicical_cov_main, metric_ready) are read only by the metric updates,
+               ## all at or before metric_adaptation_end_iter, so they are not accumulated after it:
+               if (use_resident_burnin) {
+                    if ((metric_estimator == "pooled") && (ii >= metric_start_iter) && (ii <= metric_adaptation_end_iter)) {
+                         ##
+                         ## ---- the same update: the main rows here (the same code on the main rows only; every operation of it is row-local),
+                         ##      the nuisance rows of wf_m, wf_M2 and var_draws_all in the worker:
+                         window_reset_now <-  ii %in% (metric_window_resets + 1)
+                         if (window_reset_now) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
+                         wf_n_before_update <-  wf_n
+                         ##
+                         X_main <- theta_main_vectors_all_chains_input_from_R
+                         K     <- ncol(X_main)
+                         m_b   <- rowMeans(X_main)
+                         D_b   <- X_main - m_b
+                         delta <- m_b - wf_m
+                         n_new <- wf_n + K
+                         wf_M2 <- wf_M2 + rowSums(D_b^2) + delta^2 * (wf_n * K / n_new)
+                         wf_C2 <- wf_C2 + tcrossprod(D_b) +
+                                          tcrossprod(delta) * (wf_n * K / n_new)
+                         wf_m  <- wf_m + delta * (K / n_new)
+                         wf_n  <- n_new
+                         ##
+                         n_new_resident <-  resident_api$fn_persistent_burnin_pooled_welford_nuisance_resident( worker_ptr,
+                                                                                                               wf_n_R = wf_n_before_update,
+                                                                                                               reset_R = window_reset_now,
+                                                                                                               wf_min_draws_R = wf_min_draws)
+                         if (!identical(n_new_resident, wf_n)) stop("BUG: the resident pooled-estimator count differs from wf_n.")
+                         ##
+                         if (wf_n >= wf_min_draws) {
+                             cov_draws     <- wf_C2 / (wf_n - 1)
+                             w <- wf_n / (wf_n + 5)
+                             empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
+                             empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
+                             metric_ready <- TRUE
+                         }
+                    }
+               } else {
+               if ((metric_estimator == "pooled") && (ii >= metric_start_iter) && (ii <= metric_adaptation_end_iter)) {
                     if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
                     ##
                     X_all <- if (sample_nuisance) rbind(theta_us_vectors_all_chains_input_from_R,
@@ -1281,6 +1506,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         metric_ready <- TRUE
                     }
                }
+               }  ## end of: if (use_resident_burnin)
                ##
                if (ii < 0.333333 * n_burnin)  {
                         shrinkage_factor <- 0.75
@@ -1307,6 +1533,17 @@ init_and_run_burnin_ChESSR   <- function(  debug,
             #### ////  updates for NUISANCE: ----------------------------------------------------------------------------------------------------------------
             if (sample_nuisance == TRUE) {
 
+                   if ((partitioned_HMC == TRUE) && use_resident_burnin) {
+                              ## update snaper_m and snaper_s_empirical (for NUISANCE), in the worker (the same compiled update on the resident values):
+                              try({
+                                resident_api$fn_persistent_burnin_update_snaper_m_and_s_resident( worker_ptr,
+                                                                                                  snaper_m_vec_main = EHMC_burnin_as_Rcpp_List$snaper_m_vec_main,
+                                                                                                  snaper_s_vec_main_empirical = EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical,
+                                                                                                  theta_vec_current_mean_main = theta_vec_current_main,
+                                                                                                  ii_R = ii,
+                                                                                                  joint_layout_R = FALSE)
+                              })
+                   } else {
                    if (partitioned_HMC == TRUE) { 
                     
                               ## update snaper_m and snaper_s_empirical (for NUISANCE):
@@ -1320,13 +1557,40 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                     
                               })
                    }
+                   }  ## end of: if ((partitioned_HMC == TRUE) && use_resident_burnin)
             }
             #### ////  updates for ALL: --------------------------------------------------------------------------------------------------------------------
             if (partitioned_HMC == FALSE) {
               
+                   if (use_resident_burnin) {
+                        ##
+                        ## ---- the same update in the worker: fn_update_snaper_m_and_s on c(nuisance, main), with the is.finite() fallback.
+                        ##      The nuisance parts stay there; the main parts come back:
+                        try({
+                           resident_snaper_update <-  resident_api$fn_persistent_burnin_update_snaper_m_and_s_resident( worker_ptr,
+                                                                                                                        snaper_m_vec_main = EHMC_burnin_as_Rcpp_List$snaper_m_vec_main,
+                                                                                                                        snaper_s_vec_main_empirical = EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical,
+                                                                                                                        theta_vec_current_mean_main = theta_vec_current_main,
+                                                                                                                        ii_R = ii,
+                                                                                                                        joint_layout_R = TRUE)
+                           if (isTRUE(resident_snaper_update$non_finite_fallback)) {
+                             cat("Warning: NaN in initial snaper_m_vec_all, using theta_vec_current_mean\n")
+                           }
+                           ## the main centre before the update (theta_vec_current_main when the fallback was taken):
+                           snaper_m_vec_main_before_update <-  if (isTRUE(resident_snaper_update$non_finite_fallback)) theta_vec_current_main else
+                                                                                                                         EHMC_burnin_as_Rcpp_List$snaper_m_vec_main
+                           delta_old_main <- c(c(theta_vec_current_main) - snaper_m_vec_main_before_update)
+                           EHMC_burnin_as_Rcpp_List$snaper_m_vec_main           <- resident_snaper_update$snaper_m_vec_main
+                           EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical <- resident_snaper_update$snaper_s_vec_main_empirical
+                           delta_new_main <- c(c(theta_vec_current_main) - c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main))
+                        })
+                   } else {
                    snaper_m_vec_all <- c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_us, EHMC_burnin_as_Rcpp_List$snaper_m_vec_main)
                    # Check for NaN in initial values
-                   if (any(!is.finite(snaper_m_vec_all))) {
+                   ## (min() and max() reach any NA, NaN or +/-Inf, so this is the same test as any(!is.finite(snaper_m_vec_all))
+                   ##  without two nuisance-length logical copies of the vector)
+                   if ((length(snaper_m_vec_all) > 0) &&
+                       !(is.finite(min(snaper_m_vec_all)) && is.finite(max(snaper_m_vec_all)))) {
                      cat("Warning: NaN in initial snaper_m_vec_all, using theta_vec_current_mean\n")
                      snaper_m_vec_all <- theta_vec_current_mean
                    }
@@ -1340,21 +1604,95 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                                              snaper_s_empirical = snaper_s_vec_all_empirical,
                                                                                              theta_vec_mean = theta_vec_current_mean,
                                                                                              ii = ii)
-                      snaper_m_vec_all           <- outs_update_snaper_m_and_s[,1]
-                      snaper_s_vec_all_empirical <- outs_update_snaper_m_and_s[,2]
-                      delta_new_main <- c(c(theta_vec_current_main) - c(snaper_m_vec_all[index_main]))
+                      ## Each block is read straight from the returned (n_params x 2) matrix: the same values as extracting the
+                      ## two full-length columns first and then subsetting them, without the two full-length copies.
+                      snaper_m_vec_main_updated <- outs_update_snaper_m_and_s[index_main, 1]
+                      delta_new_main <- c(c(theta_vec_current_main) - c(snaper_m_vec_main_updated))
                       ##
-                      EHMC_burnin_as_Rcpp_List$snaper_m_vec_main           <- snaper_m_vec_all[index_main]
-                      EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical <- snaper_s_vec_all_empirical[index_main]
-                      EHMC_burnin_as_Rcpp_List$snaper_m_vec_us             <- snaper_m_vec_all[index_nuisance]
-                      EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical   <- snaper_s_vec_all_empirical[index_nuisance]
+                      EHMC_burnin_as_Rcpp_List$snaper_m_vec_main           <- snaper_m_vec_main_updated
+                      EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical <- outs_update_snaper_m_and_s[index_main, 2]
+                      EHMC_burnin_as_Rcpp_List$snaper_m_vec_us             <- outs_update_snaper_m_and_s[index_nuisance, 1]
+                      EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical   <- outs_update_snaper_m_and_s[index_nuisance, 2]
                    })
+                   }  ## end of: if (use_resident_burnin)
                    ##
                    ## Appendix C keeps a proposal centre for z' based on the
                    ## acceptance-probability weighted proposal minibatch.
                    ## With realised accept/reject endpoints, the current mean
                    ## is the corresponding lower-variance-free fallback.
                    if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) {
+                     if (use_resident_burnin) {
+                         ##
+                         ## ---- the full update below (every row, as in its last branch), in the worker on the resident proposals of the
+                         ##      previous iteration: the nuisance rows of the centre stay there, its main rows come back into
+                         ##      snaper_m_prop_vec_all[index_main], the only rows of it that R reads in this mode:
+                         use_weighted_proposal_mean <-  (ii > 1) && isTRUE(tau_weight_by_p_jump) && (length(p_jump_per_chain) == n_chains_burnin)
+                         resident_proposal_update <-  resident_api$fn_persistent_burnin_update_snaper_m_prop_resident( worker_ptr,
+                                                                                                                      snaper_m_prop_vec_main = snaper_m_prop_vec_all[index_main],
+                                                                                                                      theta_vec_current_mean_main = theta_vec_current_main,
+                                                                                                                      ii_R = ii,
+                                                                                                                      use_weighted_proposal_mean_R = use_weighted_proposal_mean,
+                                                                                                                      acceptance_probabilities = as.numeric(p_jump_per_chain),
+                                                                                                                      divergences = as.numeric(div_main))
+                         if (isTRUE(resident_proposal_update$weighted_mean_status == 2)) {
+                             ## R's %*% would not use the BLAS for these proposals (two adjacent entries overflow): the original R code on the
+                             ## resident values, and the result goes back to the worker:
+                             snaper_m_prop_vec_all_R <-  c(resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_prop_vec_us"),
+                                                          snaper_m_prop_vec_all[index_main])
+                             proposal_weighted_mean <- fn_weighted_proposal_mean(
+                                 proposals = rbind(resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_prop_burnin_tau_adapt_all_chains_input_from_R"),
+                                                   theta_main_prop_burnin_tau_adapt_all_chains_input_from_R),
+                                 acceptance_probabilities = p_jump_per_chain,
+                                 divergences = div_main,
+                                 previous_mean = snaper_m_prop_vec_all_R)
+                             snaper_m_prop_vec_all_R <- fn_update_snaper_mean(
+                                 snaper_mean = snaper_m_prop_vec_all_R,
+                                 theta_mean = proposal_weighted_mean,
+                                 ii = ii)
+                             resident_api$fn_persistent_burnin_set_resident_statistic(worker_ptr, "snaper_m_prop_vec_us", snaper_m_prop_vec_all_R[index_nuisance])
+                             snaper_m_prop_vec_all[index_main] <-  snaper_m_prop_vec_all_R[index_main]
+                         } else {
+                             snaper_m_prop_vec_all[index_main] <-  resident_proposal_update$snaper_m_prop_vec_main
+                         }
+                     } else {
+                     ##
+                     ## ---- tau_adaptation_block = "main": from iteration 2 on only the MAIN rows of the centre are updated, the
+                     ##      only rows the trajectory criterion reads (each row is its own weighted mean and moving average, so
+                     ##      these rows are unchanged). The nuisance proposals still decide which chains are valid: when every
+                     ##      proposal entry is finite and below proposal_entry_limit in absolute value, no chain is dropped for a
+                     ##      nuisance entry and the weighted mean takes R's BLAS matrix-vector path with or without the nuisance
+                     ##      rows; otherwise the stacked (nuisance, main) proposals are used, exactly as below.
+                     ##      Iteration 1, "joint", models without a nuisance block and any BLAS other than R's reference BLAS keep the
+                     ##      full update below. This relies on fn_weighted_proposal_mean() dropping a chain for any non-finite entry.
+                     ##
+                     if (proposal_centre_main_rows_only && ii > 1) {
+                       if (isTRUE(tau_weight_by_p_jump) && length(p_jump_per_chain) == n_chains_burnin) {
+                           proposal_entries_bounded <- isTRUE(min(theta_us_prop_burnin_tau_adapt_all_chains_input_from_R)   > -proposal_entry_limit) &&
+                                                       isTRUE(max(theta_us_prop_burnin_tau_adapt_all_chains_input_from_R)   <  proposal_entry_limit) &&
+                                                       isTRUE(min(theta_main_prop_burnin_tau_adapt_all_chains_input_from_R) > -proposal_entry_limit) &&
+                                                       isTRUE(max(theta_main_prop_burnin_tau_adapt_all_chains_input_from_R) <  proposal_entry_limit)
+                           if (proposal_entries_bounded) {
+                               proposal_weighted_mean_main <- fn_weighted_proposal_mean(
+                                   proposals = theta_main_prop_burnin_tau_adapt_all_chains_input_from_R,
+                                   acceptance_probabilities = p_jump_per_chain,
+                                   divergences = div_main,
+                                   previous_mean = snaper_m_prop_vec_all[index_main])
+                           } else {
+                               proposal_weighted_mean_main <- fn_weighted_proposal_mean(
+                                   proposals = rbind(theta_us_prop_burnin_tau_adapt_all_chains_input_from_R,
+                                                     theta_main_prop_burnin_tau_adapt_all_chains_input_from_R),
+                                   acceptance_probabilities = p_jump_per_chain,
+                                   divergences = div_main,
+                                   previous_mean = snaper_m_prop_vec_all)[index_main]
+                           }
+                       } else {
+                           proposal_weighted_mean_main <- theta_vec_current_main
+                       }
+                       snaper_m_prop_vec_all[index_main] <- fn_update_snaper_mean(
+                           snaper_mean = snaper_m_prop_vec_all[index_main],
+                           theta_mean = proposal_weighted_mean_main,
+                           ii = ii)
+                     } else {
                        if (ii > 1 && isTRUE(tau_weight_by_p_jump) && length(p_jump_per_chain) == n_chains_burnin) {
                            proposal_weighted_mean <- fn_weighted_proposal_mean(
                                proposals = if (sample_nuisance) {
@@ -1373,6 +1711,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                            snaper_mean = snaper_m_prop_vec_all,
                            theta_mean = proposal_weighted_mean,
                            ii = ii)
+                     }
+                     }  ## end of: if (use_resident_burnin)
                    }
                    ##
                    # try({
@@ -1404,7 +1744,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                    # })
                    ##
                    # Before computing sqrt_M_all_vec
-                   if (any(EHMC_Metric_as_Rcpp_List$M_us_vec <= 0, na.rm = TRUE)) {
+                   ## (min(x, Inf, na.rm = TRUE) <= 0 is the same test as any(x <= 0, na.rm = TRUE), without a nuisance-length
+                   ##  logical vector; the Inf keeps an empty or all-NA x at FALSE without a warning)
+                   if (min(EHMC_Metric_as_Rcpp_List$M_us_vec, Inf, na.rm = TRUE) <= 0) {
                      EHMC_Metric_as_Rcpp_List$M_us_vec[EHMC_Metric_as_Rcpp_List$M_us_vec <= 0] <- 1.0
                    }
                    if (any(EHMC_Metric_as_Rcpp_List$M_main_vec <= 0, na.rm = TRUE)) {
@@ -1422,14 +1764,26 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                   ## theta_hat_us = centre of the exact Gaussian rotation for the nuisance (see theta_hat_us_rule).
                   ## Sampling uses whatever centre burn-in ends with, FROZEN - so eps must finish adapting against a
                   ## frozen centre too, or the burn-in acceptance is inflated and eps comes out too big.
+                  if (use_resident_burnin) {
+                    ## the same rule, applied to every chain's centre in the worker (R's copy is refreshed where R reads it, and at the end):
+                    if (identical(theta_hat_us_rule, "zero") || (ii <= clip_iter)) {
+                      resident_api$fn_persistent_burnin_set_nuisance_centre_resident(worker_ptr, "zero")
+                    } else if (identical(theta_hat_us_rule, "running_mean") || (ii < theta_hat_us_freeze_iter)) {
+                      resident_api$fn_persistent_burnin_set_nuisance_centre_resident(worker_ptr, "running_mean")
+                    } else if (ii == theta_hat_us_freeze_iter) {
+                      resident_api$fn_persistent_burnin_set_nuisance_centre_resident(worker_ptr, "running_mean")
+                      cat("nuisance centre (theta_hat_us) FROZEN from iteration", ii, "(theta_hat_us_rule = running_mean_frozen)\n")
+                    } ## else: running_mean_frozen past the freeze iteration - the centre stays exactly as it is
+                  } else {
                   if (identical(theta_hat_us_rule, "zero") || (ii <= clip_iter)) {
-                    EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <- matrix(rep(0.0, n_nuisance))
+                    EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <- theta_hat_us_vec_zero   ## = matrix(rep(0.0, n_nuisance)), built once before the loop
                   } else if (identical(theta_hat_us_rule, "running_mean") || (ii < theta_hat_us_freeze_iter)) {
                     EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <- matrix(EHMC_burnin_as_Rcpp_List$snaper_m_vec_us)
                   } else if (ii == theta_hat_us_freeze_iter) {
                     EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <- matrix(EHMC_burnin_as_Rcpp_List$snaper_m_vec_us)
                     cat("nuisance centre (theta_hat_us) FROZEN from iteration", ii, "(theta_hat_us_rule = running_mean_frozen)\n")
                   } ## else: running_mean_frozen past the freeze iteration - keep the centre exactly as it is
+                  }  ## end of: if (use_resident_burnin)
            }
            ##
            # if ( (metric_type_main == "Empirical") && (metric_shape_main == "dense") ) {
@@ -1508,6 +1862,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                    
                                      # if (ii < win_first_start) {
                                        
+                                             if (use_resident_burnin) {
+                                                 ## update_M_Hessian_main() reads the nuisance centre snaper_m_vec_us, which is kept in the worker:
+                                                 EHMC_burnin_as_Rcpp_List$snaper_m_vec_us <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_vec_us")
+                                             }
                                              outs <- update_M_Hessian_main(
                                                      metric_shape_main = metric_shape_main,
                                                      ##
@@ -1575,7 +1933,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                          # } else if (metric_type_main == "Empirical") {
                          #       
                          #       if (metric_shape_main == "dense" && is.null(cov_crosschain_ema)) {
-                         #         message("ii = ", ii, ": cross-chain cov not ready yet — skipping metric update this interval")
+                         #         message("ii = ", ii, ": cross-chain cov not ready yet - skipping metric update this interval")
                          #       } else {
                          #         outs <- update_M_Empirical_main(  debug = debug,
                          #                                           metric_shape_main = metric_shape_main,
@@ -1597,7 +1955,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                            } else if (metric_type_main == "Empirical") {
                              
                              if (metric_shape_main == "dense") {
-                               ##### dense metric handled by the windowed scheme (EDIT B) — do nothing here
+                               ##### dense metric handled by the windowed scheme (EDIT B) - do nothing here
                                outs <- update_M_Empirical_main(  debug = debug,
                                                                  metric_shape_main = metric_shape_main,
                                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
@@ -1646,12 +2004,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                
                                      try({
                                        
+                                       if (use_resident_burnin && (metric_type_nuisance %in% c("Empirical", "uniform_diag"))) {
+                                               ## the nuisance statistic read below comes from the worker (R's copy of it is not updated during a
+                                               ## resident burn-in); the nuisance metric computed from it reaches the worker with the next push:
+                                               if (metric_estimator == "pooled") {
+                                                    var_draws_all[index_nuisance] <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "var_draws_us")
+                                               } else {
+                                                    EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_s_vec_us_empirical")
+                                               }
+                                       }
                                        if (metric_type_nuisance == "unit") { 
                                          
                                                #### ---- for unit metric --------------------------------------
-                                               EHMC_Metric_as_Rcpp_List$M_inv_us_vec  <- rep(1, n_nuisance)
-                                               EHMC_Metric_as_Rcpp_List$M_us_vec      <- rep(1, n_nuisance)
-                                               EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec <- rep(1, n_nuisance)
+                                               ## (the unit vectors are built once, before the loop)
+                                               EHMC_Metric_as_Rcpp_List$M_inv_us_vec  <- unit_M_inv_us_vec
+                                               EHMC_Metric_as_Rcpp_List$M_us_vec      <- unit_M_us_vec
+                                               EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec <- unit_sqrt_M_us_vec
                                          
                                        } else if (metric_type_nuisance == "Empirical") {
                                          
@@ -1738,9 +2106,31 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           }
           if ((ii == gap) && isTRUE(eps_reinit_at_ChEES_handover)) {
             try({
+              if (use_resident_burnin) {
+                  ## the search below reads the nuisance centre from the metric list; the centre is kept in the worker:
+                  EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <-  matrix(resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "theta_hat_us_vec"))
+              }
+              if (isTRUE(eps_search_has_n_threads)) {   ## threads for the search: see the initial step-size block above
+                par_res <- fn_find_initial_eps_main_and_us(
+                    theta_main_vec_initial_ref = matrix(rowMeans(theta_main_vectors_all_chains_input_from_R), ncol = 1),
+                    theta_us_vec_initial_ref   = matrix(if (use_resident_burnin) resident_api$fn_persistent_burnin_state_row_means_resident(worker_ptr, "theta_us") else
+                                                                             rowMeans(theta_us_vectors_all_chains_input_from_R),   ncol = 1),
+                    partitioned_HMC = partitioned_HMC,
+                    seed = seed + ii,
+                    Model_type = Model_type,
+                    force_autodiff = force_autodiff,
+                    force_PartialLog = force_PartialLog,
+                    multi_attempts = multi_attempts,
+                    y_ref = y,
+                    Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                    EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                    EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                    n_threads = eps_search_n_threads)
+              } else {
               par_res <- fn_find_initial_eps_main_and_us(
                   theta_main_vec_initial_ref = matrix(rowMeans(theta_main_vectors_all_chains_input_from_R), ncol = 1),
-                  theta_us_vec_initial_ref   = matrix(rowMeans(theta_us_vectors_all_chains_input_from_R),   ncol = 1),
+                  theta_us_vec_initial_ref   = matrix(if (use_resident_burnin) resident_api$fn_persistent_burnin_state_row_means_resident(worker_ptr, "theta_us") else
+                                                                           rowMeans(theta_us_vectors_all_chains_input_from_R),   ncol = 1),
                   partitioned_HMC = partitioned_HMC,
                   seed = seed + ii,
                   Model_type = Model_type,
@@ -1751,6 +2141,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                   Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
                   EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
                   EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List)
+              }
               eps_new <- min(max_eps_main, par_res[[1]])
               EHMC_args_as_Rcpp_List$eps_main <- eps_new
               EHMC_args_as_Rcpp_List$eps_us   <- eps_new
@@ -1769,12 +2160,18 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           if (!isTRUE(manual_tau) && burnin_algorithm != "KE") {
               adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" = main + nuisance (EXPERIMENTAL)
               for (adapted_block in adapted_blocks) {
+                  if (use_resident_joint_block) {
+                  ## the joint states, centre and direction stay in the worker (their nuisance rows are read there, below):
+                  states <-  NULL
+                  centre <-  NULL
+                  } else {
                   states <- if (adapted_block == "main") theta_main_vectors_all_chains_input_from_R else
                             if (adapted_block == "joint") rbind(theta_main_vectors_all_chains_input_from_R, theta_us_vectors_all_chains_input_from_R) else
                             theta_us_vectors_all_chains_input_from_R
                   centre <- if (adapted_block == "main") EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
                             if (adapted_block == "joint") c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
                             EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
+                  }  ## end of: if (use_resident_joint_block)
                   mass_main_block <- if (metric_shape_main == "diag") {
                       1 / c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
                   } else EHMC_Metric_as_Rcpp_List$M_dense_main
@@ -1784,15 +2181,54 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       new_factor <- if (adapted_block == "joint") {
                           fn_trajectory_joint_metric_factor(mass_main = mass$main, mass_us_vec = mass$us, n_main = n_params_main, n_us = n_nuisance)
                       } else fn_trajectory_metric_factor(mass, nrow(states))
+                      if (use_resident_joint_block) {
+                      ## ---- fn_transport_snaper_direction() of the resident joint direction: the main-block part here, with the same R
+                      ##      code on the direction's main rows; the nuisance part and the joint normalisation in the worker:
+                      previous_joint_factor <-  trajectory_metric[[adapted_block]]
+                      if (!(is.null(previous_joint_factor) || identical(previous_joint_factor, new_factor))) {
+                          direction_main_rows <-  resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, TRUE)
+                          transported_main_rows <-  fn_transport_snaper_direction(direction_main_rows, previous_joint_factor$main, new_factor$main) *
+                                                        sqrt(sum(direction_main_rows^2))
+                          resident_api$fn_persistent_burnin_joint_direction_transport_resident( worker_ptr,
+                                                                                               transported_main = transported_main_rows,
+                                                                                               previous_factor_us = previous_joint_factor$us,
+                                                                                               new_factor_us = new_factor$us,
+                                                                                               us_factor_unchanged_R = identical(previous_joint_factor$us, new_factor$us))
+                      }
+                      } else {
                       trajectory_direction[[adapted_block]] <- fn_transport_snaper_direction(
                           trajectory_direction[[adapted_block]], trajectory_metric[[adapted_block]], new_factor)
+                      }  ## end of: if (use_resident_joint_block)
                       trajectory_metric[[adapted_block]] <- new_factor
                       trajectory_mass[[adapted_block]] <- mass
                   }
                   if (ii < n_adapt && burnin_algorithm == "SNAPER") {
+                      if (use_resident_joint_block) {
+                      ## ---- fn_update_snaper_w_minibatch() of the resident joint direction: the main rows of the states in metric
+                      ##      coordinates here (the same R code on the main rows), the nuisance rows and the update in the worker:
+                      X_main_metric <-  fn_apply_trajectory_metric(trajectory_metric[[adapted_block]]$main,
+                                                                    theta_main_vectors_all_chains_input_from_R - c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main))
+                      snaper_direction_status <-  resident_api$fn_persistent_burnin_joint_direction_update_snaper_resident( worker_ptr,
+                                                                                                                          X_main_metric = X_main_metric,
+                                                                                                                          factor_us = trajectory_metric[[adapted_block]]$us,
+                                                                                                                          eta_w_R = 8 / max(1, ii))
+                      if (snaper_direction_status == 2) {
+                          ## one of R's two matrix products would not use the BLAS for these numbers: the R code on the joint values
+                          ## from the worker, and the result goes back to the worker:
+                          snaper_direction_joint <-  fn_update_snaper_w_minibatch(
+                              X = rbind(theta_main_vectors_all_chains_input_from_R,
+                                        resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_vectors_all_chains_output_to_R")),
+                              snaper_m_vec = c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main,
+                                               resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_vec_us")),
+                              snaper_w_vec = resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, FALSE),
+                              eta_w = 8 / max(1, ii), metric_factor = trajectory_metric[[adapted_block]])
+                          resident_api$fn_persistent_burnin_joint_direction_set(worker_ptr, snaper_direction_joint)
+                      }
+                      } else {
                       trajectory_direction[[adapted_block]] <- fn_update_snaper_w_minibatch(
                           X = states, snaper_m_vec = c(centre), snaper_w_vec = trajectory_direction[[adapted_block]],
                           eta_w = 8 / max(1, ii), metric_factor = trajectory_metric[[adapted_block]])
+                      }  ## end of: if (use_resident_joint_block)
                   }
               }
           }
@@ -1864,9 +2300,19 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         # t0 <- proc.time()[3]
                                         ##
                                         t0 <- proc.time()[3]
+                                        if (use_resident_burnin) {
+                                            ## eps / tau and the main metric every iteration; the nuisance metric is copied whenever it differs from the
+                                            ## worker's copy (so R need not flag its changes); the nuisance centre is set by the centre rule above:
+                                            resident_api$fn_persistent_burnin_update_adaptation_main_only( worker_ptr,
+                                                                                                           EHMC_args_as_Rcpp_List,
+                                                                                                           EHMC_Metric_as_Rcpp_List,
+                                                                                                           push_nuisance_metric_R = FALSE,
+                                                                                                           push_nuisance_centre_R = FALSE)
+                                        } else {
                                         fn_persistent_burnin_update_adaptation( worker_ptr,
                                                                                               EHMC_args_as_Rcpp_List,
                                                                                               EHMC_Metric_as_Rcpp_List)
+                                        }  ## end of: if (use_resident_burnin)
                                         ##
                                         push_elapsed_seconds <- proc.time()[3] - t0
                                         t_push_total <- t_push_total + push_elapsed_seconds
@@ -1983,7 +2429,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         #     ##
                                         #     BayesMVP:::set_debug_cutpoint_grads(FALSE)  # debug off
                                         #     ##
-                                        #     # ## Your main params are ordered: correlations, coefficients, prev
+                                        #     # ## The main params are ordered: correlations, coefficients, prev
                                         #     # ## With n_corrs=30, what are params 46 and 52?
                                         #     # n_corrs <- 30
                                         #     # n_covariates_total <- sum(model_args_list$n_covariates_per_outcome_mat)
@@ -2029,6 +2475,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                             
                          # if (sample_nuisance == TRUE) { 
                            
+                                if (!use_resident_burnin) {   ## (resident interface: the nuisance-sized state stays in the worker)
                                 theta_us_vectors_all_chains_input_from_R <-                  result$theta_us_vectors_all_chains_output_to_R
                                 theta_us_0_burnin_tau_adapt_all_chains_input_from_R <-       result$theta_us_0_burnin_tau_adapt_all_chains_input_from_R
                                 theta_us_prop_burnin_tau_adapt_all_chains_input_from_R <-    result$theta_us_prop_burnin_tau_adapt_all_chains_input_from_R
@@ -2037,13 +2484,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 velocity_us_0_burnin_tau_adapt_all_chains_input_from_R <-    result$velocity_us_0_burnin_tau_adapt_all_chains_input_from_R
                                 velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R <- result$velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R
                                 ##
+                                }  ## end of: if (!use_resident_burnin)
                                 tau_us_ii_vec <-   result[[6]][6,]
+                                if (!use_resident_burnin) {
                                 if (debug) {
                                   if (ii %% 25 == 0) {
                                       cat("velocity_us_0 range:", range(velocity_us_0_burnin_tau_adapt_all_chains_input_from_R), "\n")
                                       cat("velocity_us_prop range:", range(velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R), "\n")
                                   }
                                 }
+                                }  ## end of: if (!use_resident_burnin)
                          # }
  
           })
@@ -2286,7 +2736,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                        # }
    
                         if (!isTRUE(manual_tau) && ii > clip_iter && ii < n_adapt && sum(div_main) > 1) {
-                             warning(sprintf("Too many divergences at iter %d, reducing tau", ii))
+                             warning(paste0("Too many divergences at iter ", ii, ", reducing tau"))
                              ##
                              EHMC_args_as_Rcpp_List$tau_main <- 0.95 * EHMC_args_as_Rcpp_List$tau_main
                              EHMC_args_as_Rcpp_List$tau_us   <- 0.95 * EHMC_args_as_Rcpp_List$tau_us
@@ -2396,12 +2846,18 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 is_main <- adapted_block == "main"
                                 is_joint <- adapted_block == "joint"   ## main + nuisance concatenated (main rows first); updates tau_main
                                 block_name <- if (is_main || is_joint) "main" else "us"
+                                if (use_resident_joint_block) {
+                                ## the joint endpoints stay in the worker; their main rows are read below, their nuisance rows in the worker:
+                                theta_initial <- theta_proposed <- theta_accepted <- NULL
+                                velocity_initial <- velocity_proposed <- velocity_accepted <- NULL
+                                } else {
                                 theta_initial <- if (is_main) theta_main_0_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(theta_main_0_burnin_tau_adapt_all_chains_input_from_R, theta_us_0_burnin_tau_adapt_all_chains_input_from_R) else theta_us_0_burnin_tau_adapt_all_chains_input_from_R
                                 theta_proposed <- if (is_main) theta_main_prop_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(theta_main_prop_burnin_tau_adapt_all_chains_input_from_R, theta_us_prop_burnin_tau_adapt_all_chains_input_from_R) else theta_us_prop_burnin_tau_adapt_all_chains_input_from_R
                                 theta_accepted <- if (is_main) theta_main_vectors_all_chains_input_from_R else if (is_joint) rbind(theta_main_vectors_all_chains_input_from_R, theta_us_vectors_all_chains_input_from_R) else theta_us_vectors_all_chains_input_from_R
                                 velocity_initial <- if (is_main) velocity_main_0_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(velocity_main_0_burnin_tau_adapt_all_chains_input_from_R, velocity_us_0_burnin_tau_adapt_all_chains_input_from_R) else velocity_us_0_burnin_tau_adapt_all_chains_input_from_R
                                 velocity_proposed <- if (is_main) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R else if (is_joint) rbind(velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R, velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R) else velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R
                                 velocity_accepted <- if (is_main) velocity_main_vectors_all_chains_input_from_R else if (is_joint) rbind(velocity_main_vectors_all_chains_input_from_R, velocity_us_vectors_all_chains_input_from_R) else velocity_us_vectors_all_chains_input_from_R
+                                }  ## end of: if (use_resident_joint_block)
                                 probabilities <- if (is_main || is_joint) p_jump_per_chain else p_jump_us_per_chain
                                 divergences <- if (is_main) div_main else if (is_joint) pmax(div_main, div_us) else div_us
                                 tau_values <- if (is_main || is_joint) tau_main_ii_vec else tau_us_ii_vec
@@ -2420,8 +2876,29 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                              if (is_joint) result$kinetic_energy_rate_main_proposed + result$kinetic_energy_rate_us_proposed else
                                              result$kinetic_energy_rate_us_proposed
                                     main_rows_of_joint <- seq_len(n_params_main)
+                                    if (use_resident_joint_block) {
+                                        ## the nuisance kinetic-energy sums of every chain, from the velocities inside the worker:
+                                        kinetic_energy_sums_us <-  resident_api$fn_persistent_burnin_joint_kinetic_energy_sums_us_resident( worker_ptr,
+                                                                                                                                           use_proposed_velocity_R = isTRUE(tau_weight_by_p_jump),
+                                                                                                                                           mass_us_vec = EHMC_Metric_as_Rcpp_List$M_us_vec)
+                                    }
                                     for (kk in seq_len(n_chains_burnin)) {
                                         if (is.finite(divergences[kk]) && divergences[kk] == 0) {
+                                            if (use_resident_joint_block) {
+                                            ## the main rows of the joint velocities are the main velocities; the nuisance change comes from the worker:
+                                            velocity_end_main_kk <- if (tau_weight_by_p_jump) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R[, kk] else
+                                                                                              velocity_main_vectors_all_chains_input_from_R[, kk]
+                                            gradients[kk] <- R_fn_compute_gradients_for_tau_using_KE_joint(
+                                                    velocity_initial_main = velocity_main_0_burnin_tau_adapt_all_chains_input_from_R[, kk],
+                                                    velocity_proposed_main = velocity_end_main_kk,
+                                                    metric_shape_main = metric_shape_main,
+                                                    mass_main = mass,
+                                                    velocity_initial_us = NULL,
+                                                    velocity_proposed_us = NULL,
+                                                    mass_us_vec = NULL,
+                                                    kinetic_energy_rate_proposed_joint = rates[kk], tau_ii = tau_values[kk],
+                                                    kinetic_energy_change_us = 0.5 * kinetic_energy_sums_us$sum_end[kk] - 0.5 * kinetic_energy_sums_us$sum_initial[kk])
+                                            } else {
                                             velocity_end_kk <- if (tau_weight_by_p_jump) velocity_proposed[, kk] else velocity_accepted[, kk]
                                             gradients[kk] <- if (is_joint) {
                                                 R_fn_compute_gradients_for_tau_using_KE_joint(
@@ -2438,6 +2915,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                 velocity_proposed = velocity_end_kk,
                                                 metric_shape = if (is_main) metric_shape_main else "diag",
                                                 mass_matrix = mass, kinetic_energy_rate_proposed = rates[kk], tau_ii = tau_values[kk])
+                                            }  ## end of: if (use_resident_joint_block)
                                         }
                                     }
                                     updated <- R_fn_update_tau_using_ADAM(
@@ -2453,6 +2931,72 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         aggregation = "weighted_mean")
                                     tau_adam_update_performed <- isTRUE(attr(updated, "adam_update_performed"))
                                 } else {
+                                    if (use_resident_joint_block) {
+                                    ##
+                                    ## ---- the joint criterion: the main rows of the endpoints in metric coordinates here (the same R code on the main
+                                    ##      rows: fn_apply_trajectory_metric() of the main block of trajectory_metric$joint), their nuisance rows and the
+                                    ##      per-chain sums / projections over all the joint rows in the worker:
+                                    use_proposals_joint <-  isTRUE(tau_weight_by_p_jump)
+                                    joint_metric_factor <-  trajectory_metric[[adapted_block]]
+                                    initial_main_metric <-  fn_apply_trajectory_metric(joint_metric_factor$main,
+                                                                                       theta_main_0_burnin_tau_adapt_all_chains_input_from_R - c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main))
+                                    proposed_main_metric <-  fn_apply_trajectory_metric(joint_metric_factor$main,
+                                                                                        if (use_proposals_joint) theta_main_prop_burnin_tau_adapt_all_chains_input_from_R - c(snaper_m_prop_vec_all[index_main]) else
+                                                                                                                 theta_main_vectors_all_chains_input_from_R - c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main))
+                                    velocity_main_metric <-  fn_apply_trajectory_metric(joint_metric_factor$main,
+                                                                                        if (use_proposals_joint) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R else
+                                                                                                                 velocity_main_vectors_all_chains_input_from_R)
+                                    joint_reductions <-  resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
+                                                                                                                              projection_R = identical(burnin_algorithm, "SNAPER"),
+                                                                                                                              use_proposals_R = use_proposals_joint,
+                                                                                                                              initial_main = initial_main_metric,
+                                                                                                                              proposed_main = proposed_main_metric,
+                                                                                                                              velocity_main = velocity_main_metric,
+                                                                                                                              factor_us = joint_metric_factor$us)
+                                    if (joint_reductions$status == 3) stop("Invalid SNAPER direction.")
+                                    joint_position_criterion <-  NULL
+                                    joint_mean_initial <-  joint_mean_proposed <-  joint_direction <-  NULL
+                                    if (joint_reductions$status == 2) {
+                                        ## R's crossprod() would not use the BLAS for these numbers: the joint endpoints come from the worker and the
+                                        ## criterion is computed by the R code itself for this iteration:
+                                        theta_initial <-  rbind(theta_main_0_burnin_tau_adapt_all_chains_input_from_R,
+                                                                resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_0_burnin_tau_adapt_all_chains_input_from_R"))
+                                        theta_proposed <-  rbind(theta_main_prop_burnin_tau_adapt_all_chains_input_from_R,
+                                                                 resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_prop_burnin_tau_adapt_all_chains_input_from_R"))
+                                        theta_accepted <-  rbind(theta_main_vectors_all_chains_input_from_R,
+                                                                 resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_vectors_all_chains_output_to_R"))
+                                        velocity_proposed <-  rbind(velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R,
+                                                                    resident_api$fn_persistent_burnin_get_state(worker_ptr, "velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R"))
+                                        velocity_accepted <-  rbind(velocity_main_vectors_all_chains_input_from_R,
+                                                                    resident_api$fn_persistent_burnin_get_state(worker_ptr, "velocity_us_vectors_all_chains_output_to_R"))
+                                        joint_mean_initial <-  c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main,
+                                                                 resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_vec_us"))
+                                        joint_mean_proposed <-  c(snaper_m_prop_vec_all[index_main],
+                                                                  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_prop_vec_us"))
+                                        joint_direction <-  resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, FALSE)
+                                    } else {
+                                        joint_position_criterion <-  fn_metric_position_criterion_from_reductions(algorithm = burnin_algorithm,
+                                                                                                                  reductions = joint_reductions,
+                                                                                                                  tau_values = tau_values)
+                                        ## (with the criterion given, only the number of columns (chains) of theta_initial is read)
+                                        theta_initial <-  theta_main_0_burnin_tau_adapt_all_chains_input_from_R
+                                    }
+                                    update <- fn_metric_tau_block_update(
+                                        algorithm = burnin_algorithm, theta_initial = theta_initial, theta_proposed = theta_proposed,
+                                        theta_accepted = theta_accepted, velocity_proposed = velocity_proposed, velocity_accepted = velocity_accepted,
+                                        mean_initial = joint_mean_initial, mean_proposed = joint_mean_proposed,
+                                        metric_factor = joint_metric_factor, direction = joint_direction,
+                                        tau_values = tau_values, probabilities = probabilities, divergences = divergences,
+                                        weight_by_probability = tau_weight_by_p_jump, tau = EHMC_args_as_Rcpp_List[[tau_name]],
+                                        learning_rate = EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
+                                        iteration = tau_adaptation_iteration, adaptation_iterations = n_tau_adaptation_iterations,
+                                        adam_mean = EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
+                                        adam_variance = EHMC_burnin_as_Rcpp_List[[adam_variance_name]],
+                                        beta1 = beta1_adam, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        criterion_ema = ChEES_criterion_ema,
+                                        bias_correction_step = tau_adam_bias_correction_step,
+                                        position_criterion = joint_position_criterion)
+                                    } else {
                                     initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
                                                     if (is_joint) c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
                                                     EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
@@ -2471,6 +3015,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         beta1 = beta1_adam, beta2 = beta2_adam, adam_epsilon = eps_adam,
                                         criterion_ema = ChEES_criterion_ema,
                                         bias_correction_step = tau_adam_bias_correction_step)
+                                    }  ## end of: if (use_resident_joint_block)
                                     updated <- update$updated
                                     tau_adam_update_performed <- isTRUE(update$adam_update_performed)
                                     if (is_main || is_joint) {
@@ -2526,6 +3071,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                             if (ii %% n_refresh_steps == 0) {
                               
                                 if (n_nuisance > 0) {
+                                  if (use_resident_burnin) {
+                                      ## the nuisance centre is kept in the worker:
+                                      EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <-  matrix(resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "theta_hat_us_vec"))
+                                  }
                                   cat("max |theta_hat|:", max(abs(EHMC_Metric_as_Rcpp_List$theta_hat_us_vec)), "\n")
                                   cat("max M_i:", max(EHMC_Metric_as_Rcpp_List$M_us_vec), "\n")
                                   cat("min M_i:", min(EHMC_Metric_as_Rcpp_List$M_us_vec), "\n")
@@ -2646,7 +3195,21 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     # Rprof(NULL)
     # summaryRprof("burnin_prof.out")$by.self[1:15, ]
     ##
-    rm(worker_ptr); gc()
+    if (use_resident_burnin) {
+          ##
+          ## ---- the resident nuisance-sized results come back: the same objects the original loop leaves in R
+          theta_us_vectors_all_chains_input_from_R <-  resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_vectors_all_chains_output_to_R")
+          EHMC_burnin_as_Rcpp_List$snaper_m_vec_us <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_vec_us")
+          EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_s_vec_us_empirical")
+          EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <-  matrix(resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "theta_hat_us_vec"))
+          if (use_resident_joint_block) {
+                trajectory_direction$joint <-  resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, FALSE)
+          }
+          ##
+    }
+    ##
+    rm(worker_ptr); 
+    # gc()
     ##
     ## ---- debugging hook, INERT unless the environment variable is set: save the end-of-burn-in state and everything
     ##      needed to rebuild the persistent burn-in worker, so the C++ kernel can be replayed offline on it.
@@ -2731,3 +3294,20 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
               
    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

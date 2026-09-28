@@ -17,7 +17,7 @@ cmdstanr_path <- function() {
                 }
             }, silent = TRUE)
 
-            # Get the user's home directory
+            # Get the home directory
             home_dir <- Sys.getenv(if (.Platform$OS.type == "windows") "USERPROFILE" else "HOME")
 
             # Check for .cmdstan directory
@@ -38,9 +38,27 @@ cmdstanr_path <- function() {
             }
 
             # If no valid path is found
-            stop("CmdStan directory not found. Please install CmdStan or set the CMDSTAN environment variable.")
+            stop("CmdStan directory not found. Install CmdStan or set the CMDSTAN environment variable.")
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -7,7 +7,7 @@ Author: Enzo Cerullo
 Maintainer: Enzo Cerullo <enzo.cerullo@bath.edu>
 Description: General Stan-compatible Hamiltonian Monte Carlo, adaptation and diagnostics with a shared native sampler core.
 License: GPL-3
-Imports: Rcpp (>= 1.0.10), RcppEigen, RcppParallel, dqrng, cmdstanr, bridgestan, bayesplot, posterior, dplyr, ggplot2, tibble, tictoc, R6, digest, jsonlite, stringr, pracma
+Imports: callr (>= 3.7.0), Rcpp (>= 1.0.10), RcppEigen, RcppParallel, dqrng, cmdstanr, bridgestan, bayesplot, posterior, dplyr, ggplot2, tibble, tictoc, R6, digest, jsonlite, stringr, pracma
 LinkingTo: Rcpp, RcppEigen, RcppParallel, dqrng
 Suggests: roxygen2
 Roxygen: list(markdown = TRUE, roclets = c("namespace", "rd"))

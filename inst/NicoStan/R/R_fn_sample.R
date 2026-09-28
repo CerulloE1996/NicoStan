@@ -177,6 +177,8 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   is frozen for the fit and returned as autodiff_fallback. For separate R worker
 #'   processes, set the option in the process which calls this function.
 #' @param debug_burnin_timing Collect per-iteration native timings and per-chain elapsed times and integrator step counts during burn-in.
+#' @param run_in_fresh_R_process TRUE (default) runs the complete burn-in/sampling fit in a fresh R process, releasing its
+#'   native worker memory when it exits. Draws and diagnostics are returned normally. FALSE runs in the calling session.
 #' @param diffusion_HMC_integrator Joint diffusion integrator: "kick_flow_kick" (default) or "flow_kick_flow".
 #' @param reorder_cols_MVP Run a short pre-burnin and then re-fit with the test/outcome
 #'   columns permuted into the Dissmann (2013) pair-first order of the estimated
@@ -187,7 +189,7 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   For Model_type = "Stan" only \code{y} is permuted - BayesMVP cannot know which of
 #'   an external model's other data objects are test-indexed - so the option is REFUSED
 #'   (with a large warning banner, after which sampling continues in the original column
-#'   order) unless all of the following hold: the outcome matrix in your Stan data is
+#'   order) unless all of the following hold: the outcome matrix in the Stan data is
 #'   called \code{y} and is N x n_tests with one column per test; the model exposes a
 #'   correlation matrix called \code{Omega} whose dimension matches; and NO other entry
 #'   of the Stan data is shaped like n_tests. That last condition is the strict one, and
@@ -204,8 +206,11 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #' @param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number. Multiplies the
 #'   adapted tau once at the switch from burn-in to sampling, only when tau was adapted with a fixed length
 #'   (randomize_tau_burnin = FALSE) and sampling is randomised; eps is not re-initialised. "gaussian_matched" uses the
-#'   criterion-specific unit-Gaussian factor (a heuristic, not a published method; see
+#'   criterion-specific unit-Gaussian factor (an experimental heuristic, not a published method; see
 #'   docs/adaptation-notes.md). The requested value, effective value, factor and tau before/after are returned.
+#' @param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in.
+#'   FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in
+#'   and skips that search; it has no effect when no pre-burnin runs.
 #' @param vect_type,Phi_type,inv_Phi_type NULL (default) = not supplied, which changes nothing. These settings are NOT
 #'   chosen here: for Model_type = "Stan" they are not used at all (the .stan file defines its own maths), so a non-NULL
 #'   value stops; for the built-in models they are set at model initialisation via model_args_list$vect_type /
@@ -271,10 +276,15 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## it with find_initial_eps; FALSE keeps the eps adapted up to gap. See init_and_run_burnin_ChESSR.
                                         eps_reinit_at_ChEES_handover = NULL,
                                         ##
+                                        ## eps at the START of the MAIN burn-in, after the test-order pre-burnin (reorder_cols_MVP = TRUE): TRUE (default)
+                                        ## re-initialises it with find_initial_eps; FALSE carries the pre-burnin's final eps (main and nuisance) into the
+                                        ## main burn-in and skips that search. Inert when no pre-burnin runs. See init_and_run_burnin_ChESSR (eps_carry_over).
+                                        eps_reinit_after_pre_burnin = NULL,
+                                        ##
                                         ## Centre of the nuisance Gaussian rotation in the MAIN burn-in: "running_mean_frozen" (default;
                                         ## running mean, frozen from theta_hat_us_freeze_iter so eps is tuned against the kernel sampling
                                         ## uses), "running_mean" (never frozen - the earlier behaviour, which tunes eps too big)
-                                        ## or "zero" (the earlier code). See init_and_run_burnin_ChESSR.
+                                        ## or "zero" (the Feb 2026 code). See init_and_run_burnin_ChESSR.
                                         theta_hat_us_rule = NULL,
                                         theta_hat_us_freeze_iter = NULL,
                                         burnin_schedule = "automatic",
@@ -301,7 +311,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          the behaviour before this option existed; "gaussian_matched" = the
                                         ##                                          criterion-specific unit-Gaussian factor (KE/ChEES 0.7151, CHESSR/SNAPER
                                         ##                                          0.7678, CHESSR_log 0.6738); or one positive number. eps is NOT
-                                        ##                                          re-initialised. Heuristic derived from the Gaussian
+                                        ##                                          re-initialised. Experimental heuristic derived from the Gaussian
                                         ##                                          analysis of Hoffman, Radul and Sountsov (2021) - NOT a published method.
                                         ##                                          See docs/adaptation-notes.md.
                                         tau_sampling_scale = "none",
@@ -400,8 +410,28 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         num_chunks_burnin = NULL,
                                         num_chunks_sampling = NULL,
                                         diffusion_HMC_integrator = "kick_flow_kick",
-                                        debug_burnin_timing = FALSE
+                                        debug_burnin_timing = FALSE,
+                                        run_in_fresh_R_process = TRUE
 ) {
+                if (!is.logical(run_in_fresh_R_process) || length(run_in_fresh_R_process) != 1L || is.na(run_in_fresh_R_process)) {
+                    stop("run_in_fresh_R_process must be TRUE or FALSE.")
+                }
+                ## Pass only supplied arguments, preserving defaults and missing-argument handling in the sampler.
+                if (isTRUE(x = run_in_fresh_R_process)) {
+                    argument_names <-  names(as.list(match.call())[-1L])
+                    argument_names <-  setdiff(argument_names, "run_in_fresh_R_process")
+                    ## A NULL eps_reinit_after_pre_burnin is the default: it is not forwarded, so a child process whose installed
+                    ## build has no such argument still runs.
+                    if (is.null(eps_reinit_after_pre_burnin)) {
+                        argument_names <-  setdiff(argument_names, "eps_reinit_after_pre_burnin")
+                    }
+                    fit_frame <-  environment()
+                    fit_arguments <-  setNames(lapply(argument_names, function(argument_name) {
+                        get(argument_name, envir = fit_frame, inherits = FALSE)
+                    }), argument_names)
+                    return(fn_sample_model_in_fresh_R_process(arguments = fit_arguments))
+                }
+                ##
                 ## Built-in likelihoods use OpenMP WCP teams; external Stan likelihoods share the outer TBB arena.
                 if (identical(x = init_object$Model_type, y = "Stan")) {
                     if (isTRUE(x = burnin_TBB_pool_equals_n_chains)) {
@@ -499,7 +529,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 }
                 ##
                 if (is.null(seed)) {
-                  stop("Please specify a seed for MCMC sampling")
+                  stop("Specify a seed for MCMC sampling")
                 }
                 if (!is.null(adapt_delta) && (adapt_delta <= 0 || adapt_delta >= 1)) {
                   stop("adapt_delta must be between 0 and 1")
@@ -509,7 +539,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 # ## bookmark : For the latent_trait model, the MANUAL-LOG-SCALE lp_grad function isn't yet working fully, so don't use it and print error
                 # if (Model_type == "latent_trait") {
                 #   if (force_PartialLog == TRUE) {
-                #      stop("Error: the * MANUAL * LOG-SCALE lp_grad function isn't yet working fully, please set force_PartialLog = FALSE\n
+                #      stop("Error: the * MANUAL * LOG-SCALE lp_grad function isn't yet working fully, set force_PartialLog = FALSE\n
                 #           However, note that the autodiff (AD) version is working. ")
                 #   }
                 # }
@@ -518,7 +548,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 #   if (diffusion_HMC == TRUE) {
                 #     stop("Diffusion-pathspace HMC is only allowed if partitioned_HMC is set to TRUE - \n
                 #                      since we can only sample the nuisance parameters using diffusion-pathspace HMC; \n
-                #                      also, ensure that your model has latent variables/ nuisasnce parameters wich \n
+                #                      also, ensure that the model has latent variables/ nuisasnce parameters wich \n
                 #                      are (approximately) normaly distributed on the raw (unconstrained) scale")
                 #   }
                 # }
@@ -714,6 +744,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 tau_weight_by_p_jump <- if_null_then_set_to(tau_weight_by_p_jump, burnin_algorithm != "KE")
                 tau_ramp <- if_null_then_set_to(tau_ramp, "original")
                 eps_reinit_at_ChEES_handover <- if_null_then_set_to(eps_reinit_at_ChEES_handover, TRUE)
+                eps_reinit_after_pre_burnin <- if_null_then_set_to(eps_reinit_after_pre_burnin, TRUE)
                 share_tau_ii_across_chains_in_burnin <- isTRUE(if_null_then_set_to(share_tau_ii_across_chains_in_burnin, FALSE))
                 for (flag in c("randomize_tau_burnin", "randomize_tau_sampling")) {
                     value <-  get(flag)
@@ -754,6 +785,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 }
                 if (!is.logical(eps_reinit_at_ChEES_handover) || length(eps_reinit_at_ChEES_handover) != 1 || is.na(eps_reinit_at_ChEES_handover)) {
                     stop("eps_reinit_at_ChEES_handover must be TRUE or FALSE; got: ", paste(as.character(eps_reinit_at_ChEES_handover), collapse = ", "))
+                }
+                if (!is.logical(eps_reinit_after_pre_burnin) || length(eps_reinit_after_pre_burnin) != 1 || is.na(eps_reinit_after_pre_burnin)) {
+                    stop("eps_reinit_after_pre_burnin must be TRUE or FALSE; got: ", paste(as.character(eps_reinit_after_pre_burnin), collapse = ", "))
                 }
                 metric_estimator <- as.character(metric_estimator)
                 if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled"))) {
@@ -955,6 +989,91 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 ## model_args_list$num_chunks <- 4
                 ##
+                ## ---- Reuse of the supplied initialisation object:
+                ##
+                ##      The init_object passed in is normally built by initialise_model() for the same model and data, and
+                ##      rebuilding it here repeats the BridgeStan set-up (JSON data file, compile check, dyn.load and model
+                ##      construction) for the same result. The supplied object is kept, and initialise_model() skipped, ONLY
+                ##      when a rebuild could not give a different object:
+                ##        - it holds a usable BridgeStan model: a StanModel whose shared library is loaded in this R session
+                ##          and whose unconstrained dimension equals the stored n_params (Stan models) or n_params_main
+                ##          (built-in models, whose .stan skeleton holds only the main parameters); the fresh-process path
+                ##          passes an init_object without a bs_model, so it always rebuilds;
+                ##        - the same stream (it names the JSON data file; stream = NULL makes initialise_model() draw a new
+                ##          one, so it always rebuilds), the same sample_nuisance and the same n_nuisance_override;
+                ##        - built-in models: init_hard_coded_model() applied to model_args_list (after the num_chunks patch
+                ##          above) gives exactly the stored model_args_list and Model_args_as_Rcpp_List, and the stored
+                ##          Stan_data_list is the one derived from it, so a different num_chunks, prior, bound or threshold
+                ##          rebuilds;
+                ##        - Stan models: identical model_args_list and Stan_data_list (after the chunk_size patch above).
+                ##      Any error in these checks means a rebuild. The re-initialisation on column-permuted data after the
+                ##      pre-burn-in test reordering (further below) always rebuilds.
+                ##
+                init_reuse_supplied_object <-  FALSE
+                ##
+                init_reuse_bs_model <-  if (is.list(init_object)) init_object$bs_model else NULL
+                ##
+                if (inherits(x = init_reuse_bs_model, what = "StanModel")) {
+                      ##
+                      init_reuse_supplied_object <-  tryCatch({
+                            ##
+                            init_reuse_bs_lib_name <-  init_reuse_bs_model$.__enclos_env__$private$lib_name
+                            ##
+                            init_reuse_bs_model_usable <-  is.character(init_reuse_bs_lib_name) &&
+                                                           (length(init_reuse_bs_lib_name) == 1) &&
+                                                           is.loaded("bs_model_construct_R", PACKAGE = init_reuse_bs_lib_name) &&
+                                                           identical(as.numeric(init_reuse_bs_model$param_unc_num()),
+                                                                     as.numeric(if (Model_type == "Stan") init_object$n_params else init_object$n_params_main)) &&
+                                                           ## (the C++ sampler re-opens the JSON data file and the model .so by path, and a
+                                                           ##  rebuild would re-write a JSON file removed since the caller's initialisation):
+                                                           is.character(init_object$json_file_path) && (length(init_object$json_file_path) == 1) &&
+                                                           is.character(init_object$model_so_file) && (length(init_object$model_so_file) == 1) &&
+                                                           file.exists(init_object$json_file_path) &&
+                                                           file.exists(init_object$model_so_file)
+                            ##
+                            init_reuse_same_settings <-  identical(stream, init_object$stream) &&
+                                                         identical(sample_nuisance, init_object$sample_nuisance) &&
+                                                         identical(n_nuisance_override, init_object$n_nuisance_override)
+                            ##
+                            if (!(isTRUE(init_reuse_bs_model_usable) && isTRUE(init_reuse_same_settings))) {
+
+                                  FALSE
+
+                            } else if (Model_type == "Stan") {
+
+                                  identical(model_args_list, init_object$model_args_list) &&
+                                  identical(Stan_data_list, init_object$Stan_data_list)
+
+                            } else {
+
+                                  ## (the same derivation as in initialise_model(), without the BridgeStan step):
+                                  init_reuse_outs <-  init_hard_coded_model( Model_type = Model_type,
+                                                                             model_args_list = model_args_list)
+                                  ##
+                                  init_reuse_Model_args_as_Rcpp_List <-  init_reuse_outs$Model_args_as_Rcpp_List
+                                  init_reuse_Model_args_as_Rcpp_List$json_file_path <-  init_object$json_file_path
+                                  init_reuse_Model_args_as_Rcpp_List$model_so_file <-  init_object$model_so_file
+                                  ##
+                                  identical(init_reuse_outs$model_args_list, init_object$model_args_list) &&
+                                  identical(init_reuse_Model_args_as_Rcpp_List, init_object$Model_args_as_Rcpp_List) &&
+                                  identical(make_Stan_data_list_for_internal_models( Model_type = Model_type,
+                                                                                     model_args_list = init_reuse_outs$model_args_list),
+                                            init_object$Stan_data_list)
+
+                            }
+                            ##
+                      }, error = function(e) FALSE)
+                      ##
+                      init_reuse_supplied_object <-  isTRUE(init_reuse_supplied_object)
+                }
+                ##
+                if (init_reuse_supplied_object) {
+                      ##
+                      message(colourise(paste0("Reusing the supplied initialisation object (same model, data, model_args_list, ",
+                                               "stream and nuisance settings); initialise_model() skipped."), "cyan"))
+                      ##
+                } else {
+                ##
                 init_object <- initialise_model( Model_type =  Model_type,
                                                  ##
                                                  stream = stream,
@@ -976,6 +1095,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                  Stan_cpp_flags = Stan_cpp_flags,
                                                  stanc_args = stanc_args,
                                                  make_args = make_args)
+                } ## end of "else" (rebuild) of the "if (init_reuse_supplied_object)"
                 ##
                 ##
                 ## ---- Built-in models: any vect_type / Phi_type / inv_Phi_type supplied to $sample() must equal the value the
@@ -1142,25 +1262,25 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       ##
                       if (Omega_dims$n_found == 0) {
                             big_warning_banner(
-                                  title = "reorder_cols_MVP: no 'Omega' parameter found in your Stan model",
+                                  title = "reorder_cols_MVP: no 'Omega' parameter found in the Stan model",
                                   body = c("The column ordering is chosen from the estimated correlation matrix, which is",
                                            "located by NAME: BayesMVP looks for a parameter / transformed parameter /",
                                            "generated quantity called 'Omega' (e.g. 'Omega[i,j]' or 'Omega[c,i,j]').",
-                                           "Your model declares no such quantity.",
+                                           "The model declares no such quantity.",
                                            "",
                                            "==> reorder_cols_MVP has been DISABLED for this run; sampling continues with",
-                                           "    your data in its original column order."))
+                                           "    the data in its original column order."))
                             reorder_cols_MVP <- FALSE
                       } else if (!identical(as.integer(Omega_dims$n_tests), as.integer(n_tests_y))) {
                             big_warning_banner(
                                   title = "reorder_cols_MVP: 'Omega' does not match the number of columns of 'y'",
-                                  body = c(paste0("Omega in your Stan model is ", Omega_dims$n_tests, " x ", Omega_dims$n_tests,
+                                  body = c(paste0("Omega in the Stan model is ", Omega_dims$n_tests, " x ", Omega_dims$n_tests,
                                                   ", but 'y' has ", n_tests_y, " columns."),
                                            "Reordering permutes the columns of 'y' using the ordering of Omega, so the two",
                                            "must refer to the same set of tests/outcomes, in the same order.",
                                            "",
                                            "==> reorder_cols_MVP has been DISABLED for this run; sampling continues with",
-                                           "    your data in its original column order."))
+                                           "    the data in its original column order."))
                             reorder_cols_MVP <- FALSE
                       }
 
@@ -1453,14 +1573,14 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       if (Model_type == "Stan") {
                         ##
                         ## ---- USER-SUPPLIED Stan model: the ONLY object permuted is the outcome
-                        ##      matrix 'y' of the user's Stan data - BayesMVP cannot know which of
-                        ##      the user's other data objects (priors, covariates, ...) are
+                        ##      matrix 'y' of the supplied Stan data - BayesMVP cannot know which of
+                        ##      the supplied other data objects (priors, covariates, ...) are
                         ##      test-indexed, so it touches none of them, and it does not permute
                         ##      user-supplied initial values either:
                         ##
                         Stan_data_list$y <- Stan_data_list$y[, test_perm, drop = FALSE]
                         ##
-                        ## ---- If the user's own Stan model declares a 'test_perm' data variable
+                        ## ---- If the external Stan model declares a 'test_perm' data variable
                         ##      (the convention used by the built-in skeletons, which un-permute
                         ##      test-indexed quantities in generated quantities), keep it in sync so
                         ##      that the model can un-permute its own outputs:
@@ -1471,7 +1591,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ##
                         message("reorder_cols_MVP (Stan): permuted the columns of 'y' to order [",
                                 paste(test_perm, collapse = ", "), "]; ",
-                                "fitted slot j holds your ORIGINAL test test_perm[j]. ",
+                                "fitted slot j holds the ORIGINAL test test_perm[j]. ",
                                 "Only 'y'", if (!is.null(Stan_data_list$test_perm)) " (and 'test_perm')" else "",
                                 " in the Stan data was changed.")
                         ##
@@ -1516,7 +1636,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         }
                         ##
                         ## ================================================================
-                        ## vvvvvvvvvvvv  NEW BLOCK — PASTE ALL OF THIS HERE  vvvvvvvvvvvv
+                        ## vvvvvvvvvvvv  NEW BLOCK - PASTE ALL OF THIS HERE  vvvvvvvvvvvv
                         ## ================================================================
                         ##
                         model_args_list$n_covariates_per_outcome_mat <- model_args_list$n_covariates_per_outcome_mat[, test_perm, drop = FALSE]
@@ -1876,6 +1996,20 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 #     clip_iter_tau <- 15
                 # }
                 ##
+                ## ---- eps_reinit_after_pre_burnin = FALSE: the main burn-in starts from the pre-burnin's final eps (main and
+                ##      nuisance) and skips its find_initial_eps search. NULL = the main burn-in runs that search itself:
+                ##
+                eps_carry_over <- NULL
+                if (!isTRUE(eps_reinit_after_pre_burnin)) {
+                      if (is.null(pre_burnin_object)) {
+                            message(colourise("eps_reinit_after_pre_burnin = FALSE has no effect: no test-order pre-burnin ran (it runs only with reorder_cols_MVP = TRUE), so the main burn-in runs its own eps search.",
+                                              "cyan"))
+                      } else {
+                            eps_carry_over <- list(eps_main = pre_burnin_object$eps_main,
+                                                   eps_us   = pre_burnin_object$eps_us)
+                      }
+                }
+                ##
                 burnin_object <-                 fn_burnin(  init_object = init_object,
                                                              debug_burnin_timing = debug_burnin_timing,
                                                              ##
@@ -1980,6 +2114,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              ##
                                                              eps_init = NULL,
                                                              ##
+                                                             ## NULL unless eps_reinit_after_pre_burnin = FALSE (see above):
+                                                             eps_carry_over = eps_carry_over,
+                                                             ##
                                                              learning_rate_initial = learning_rate_initial,
                                                              learning_rate_initial_iter = learning_rate_initial_iter,
                                                              ##
@@ -2007,7 +2144,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           ##      the longest chain), but sampling draws tau_ii ~ U(0, 2 * tau_bar), whose optimal mean differs
                           ##      from the fixed-length optimum. Only applied when tau was adapted (manual_tau = FALSE) with a
                           ##      fixed length and sampling is randomised; otherwise the factor is 1. eps is NOT re-initialised.
-                          ##      Heuristic (Gaussian analysis, Hoffman et al. 2021); see docs/adaptation-notes.md.
+                          ##      Experimental heuristic (Gaussian analysis, Hoffman et al. 2021); see docs/adaptation-notes.md.
                           ##
                           {
                                 tau_sampling_scale_applicable <- !isTRUE(manual_tau) &&
@@ -2134,7 +2271,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 
                 {
 
-                          gc()
+                          # gc()
                           ##
                           ## External Stan models use the chunk_size in their JSON data, not this built-in argument matrix.
                           ## Writing [4] into their absent Model_args_ints creates a vector and the native converter rejects it.
@@ -2314,7 +2451,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
         
                           print(paste("time_sampling = ",  time_sampling))
                           
-                          gc()
+                          # gc()
                           
                 }
                 
@@ -2402,3 +2539,25 @@ R_fn_sample_model  <-    function(      debug = FALSE,
   return(out_list)
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

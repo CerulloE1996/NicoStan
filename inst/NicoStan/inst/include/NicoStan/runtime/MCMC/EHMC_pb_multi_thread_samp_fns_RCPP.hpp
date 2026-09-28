@@ -428,7 +428,7 @@ public:
                                             ////////////////////////////// end of iteration(s)
                                             
                                             //// destroy Stan model object:
-                                            fn_bs_destroy_Stan_model(Stan_model_as_cpp_struct);
+                                            fn_bs_destroy_Stan_model_after_sampling(Stan_model_as_cpp_struct);
                         
                               } else { 
                                 
@@ -558,3 +558,12 @@ public:
 
 
   
+
+
+
+
+
+
+
+
+

@@ -115,8 +115,8 @@ plot_multiple_params_batched <- function(draws_array,
                     cat("Found matching params:", paste(matching_params, collapse=", "), "\n")
                     
                     if(length(matching_params) == 0) {
-                      stop(sprintf("No parameters found starting with %s\nAvailable parameters: %s", 
-                                   prefix, paste(param_names, collapse=", ")))
+                      stop(paste0("No parameters found starting with ", prefix,
+                                  "\nAvailable parameters: ", paste(param_names, collapse=", ")))
                     }
                     
                     

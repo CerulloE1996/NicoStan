@@ -8,3 +8,25 @@ source(file.path(PKG_R_DIR, "R_fn_find_cmdstan_path.R"))
 
 USER_CMDSTAN_DIR <- cmdstanr_path()
 cat(USER_CMDSTAN_DIR)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

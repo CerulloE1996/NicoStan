@@ -56,3 +56,25 @@ if (engine == "cmdstanr") {
     )
 }
 print(result[c("math_backend", "simd_lanes", "n_nuisance", "n_params_main", "automatic_nuisance_detection")])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

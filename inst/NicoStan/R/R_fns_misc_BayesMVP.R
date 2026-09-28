@@ -473,14 +473,13 @@ check_stan_data <- function(stan_model,
               dim_str <- paste0(var_dims, "D array/matrix")
             }
             
-            missing_details[i] <- sprintf("  - %s (type: %s, dimensions: %s)", 
-                                          var_name, var_type, dim_str)
+            missing_details[i] <- paste0("  - ", var_name, " (type: ", var_type, ", dimensions: ", dim_str, ")")
           }
           
           error_msg <- paste0(
             "Missing required Stan data variables:\n",
             paste(missing_details, collapse = "\n"),
-            "\n\nPlease add these variables to your Stan_data_list."
+            "\n\nAdd these variables to Stan_data_list."
           )
           
           stop(error_msg, call. = FALSE)
@@ -488,9 +487,9 @@ check_stan_data <- function(stan_model,
         
         # Optional: warn about extra variables
         if (length(extra_vars) > 0) {
-          warning(sprintf(
-            "The following variables in Stan_data_list are not in the model's data block:\n  %s\n",
-            paste(extra_vars, collapse = ", ")
+          warning(paste0(
+            "The following variables in Stan_data_list are not in the model's data block:\n  ",
+            paste(extra_vars, collapse = ", "), "\n"
           ), call. = FALSE)
         }
         
@@ -627,13 +626,13 @@ get_model_info <- function(  Model_type,
 #                 Stan_data_list$baseline_case_d <- baseline_case_d
 #                 ##
 #                 # library(cmdstanr)
-#                 # mod <- cmdstan_model(system.file("stan_models/LC_MVP_cpp_skeleton.stan", package = "BayesMVP"))
-#                 # mod <- cmdstan_model(system.file("stan_models/LC_MVOP_cpp_skeleton.stan", package = "BayesMVP"))
-#                 # mod <- cmdstan_model(system.file("stan_models/LC_MVP_bin_cpp_skeleton.stan", package = "BayesMVP"))
-#                 mod <- cmdstan_model(system.file("stan_models/LC_MVP_bin_cpp_skeleton.stan", package = "BayesMVP"))
+#                 # mod <- cmdstan_model("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_models/LC_MVP_cpp_skeleton.stan")
+#                 # mod <- cmdstan_model("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_models/LC_MVOP_cpp_skeleton.stan")
+#                 # mod <- cmdstan_model("/home/enzocerullo/Documents/Work/PhD_work/R_packages/BayesMVP/inst/BayesMVP/inst/stan_models/LC_MVOP_cpp_skeleton.stan")
+#                 mod <- cmdstan_model("/home/enzocerullo/Documents/Work/PhD_work/R_packages/BayesMVP/inst/BayesMVP/inst/stan_models/LC_MVP_bin_cpp_skeleton.stan")
 #                 ##
 #                 fit <- mod$sample(
-#                   data = Stan_data_list,  # your R list before JSON conversion
+#                   data = Stan_data_list,  # the R list before JSON conversion
 #                   chains = 1,
 #                   iter_warmup = 10,
 #                   iter_sampling = 10,
@@ -846,13 +845,15 @@ compute_equivalent_ESS <- function(N,
         }
         
         # Create nice output
-        cat(sprintf("Original: N = %d studies, ESS = %.0f\n", N, ESS_observed))
-        cat(sprintf("New:      N = %d studies\n", N_new))
+        cat(paste0("Original: N = ", formatC(x = N, format = "d"), " studies, ESS = ",
+                   trimws(formatC(x = ESS_observed, format = "f", digits = 0)), "\n"))
+        cat(paste0("New:      N = ", formatC(x = N_new, format = "d"), " studies\n"))
         cat("\nEquivalent ESS for same MC error:\n")
-        cat(sprintf("  Conservative (SD ∝ 1/N^0.33): ESS ≈ %.0f\n", equivalent_ESS[1]))
-        cat(sprintf("  Typical      (SD ∝ 1/N^0.50): ESS ≈ %.0f\n", equivalent_ESS[2]))
-        cat(sprintf("  Optimistic   (SD ∝ 1/N^1.00): ESS ≈ %.0f\n", equivalent_ESS[3]))
-        cat(sprintf("\nRange: %.0f - %.0f\n", min(equivalent_ESS), max(equivalent_ESS)))
+        cat(paste0("  Conservative (SD ∝ 1/N^0.33): ESS ≈ ", trimws(formatC(x = equivalent_ESS[1], format = "f", digits = 0)), "\n"))
+        cat(paste0("  Typical      (SD ∝ 1/N^0.50): ESS ≈ ", trimws(formatC(x = equivalent_ESS[2], format = "f", digits = 0)), "\n"))
+        cat(paste0("  Optimistic   (SD ∝ 1/N^1.00): ESS ≈ ", trimws(formatC(x = equivalent_ESS[3], format = "f", digits = 0)), "\n"))
+        cat(paste0("\nRange: ", trimws(formatC(x = min(equivalent_ESS), format = "f", digits = 0)), " - ",
+                   trimws(formatC(x = max(equivalent_ESS), format = "f", digits = 0)), "\n"))
         
         # Return invisibly for programmatic use
         invisible(list(
@@ -881,11 +882,12 @@ validate_and_extrapolate_ESS <- function(N1,
         # Extrapolate
         ESS_target <- ESS1 * (N1/N_target)^(2*p)
         
-        cat(sprintf("Observed scaling: SD ∝ 1/N^%.2f\n", p))
-        cat(sprintf("Target ESS for N=%d: %.0f\n", N_target, ESS_target))
+        cat(paste0("Observed scaling: SD ∝ 1/N^", trimws(formatC(x = p, format = "f", digits = 2)), "\n"))
+        cat(paste0("Target ESS for N=", formatC(x = N_target, format = "d"), ": ",
+                   trimws(formatC(x = ESS_target, format = "f", digits = 0)), "\n"))
         
         # Add safety margin
-        cat(sprintf("With 20%% safety margin: %.0f\n", ESS_target * 0.8))
+        cat(paste0("With 20% safety margin: ", trimws(formatC(x = ESS_target * 0.8, format = "f", digits = 0)), "\n"))
         
         return(list(p = p,
                     ESS_target = ESS_target))
@@ -895,7 +897,7 @@ validate_and_extrapolate_ESS <- function(N1,
 # If SD ∝ 1/N^p, then from N=500 to N=2500:
 # ESS should scale by (500/2500)^(2p) = (1/5)^(2p)
 ##
-# So if you observe ESS_500 = X and ESS_2500 = Y:
+# So if ESS_500 = X and ESS_2500 = Y:
 # p = log(Y/X) / (2*log(5))
 ##
 # Then for N=10,000:
@@ -983,6 +985,18 @@ permute_3d_draws_array <- function(array,
         return(new_array)
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

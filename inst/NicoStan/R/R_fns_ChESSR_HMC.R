@@ -90,7 +90,7 @@ R_fn_compute_gradients_for_tau_using_ChEES <- function( debug = FALSE,
         # sigma_sq <- sum(M_inv_diag)  # This is σ²
         # 
         # # Trace of covariance
-        # Centered positions (assuming you have mean estimate)
+        # Centered positions (assuming a mean estimate is available)
         # z_0 <- theta_vec_initial - snaper_m_vec  # or some mean estimate
         # z_prop <- theta_vec_prop - snaper_m_vec
         ##
@@ -299,8 +299,22 @@ R_fn_compute_gradients_for_tau_using_KE_joint <- function( velocity_initial_main
                                                            velocity_proposed_us,
                                                            mass_us_vec,
                                                            kinetic_energy_rate_proposed_joint,
-                                                           tau_ii) {
+                                                           tau_ii,
+                                                           ##
+                                                           ## ---- the nuisance kinetic-energy change, 0.5 * sum(velocity_proposed_us^2 * mass_us_vec) -
+                                                           ##      0.5 * sum(velocity_initial_us^2 * mass_us_vec), when it is computed elsewhere (the resident burn-in
+                                                           ##      interface computes it from the velocities inside the worker); NULL = computed here from
+                                                           ##      velocity_initial_us, velocity_proposed_us and mass_us_vec.
+                                                           ##
+                                                           kinetic_energy_change_us = NULL) {
 
+        if (!is.null(kinetic_energy_change_us)) {
+        kinetic_energy_change_joint <- R_fn_kinetic_energy_change(velocity_initial = velocity_initial_main,
+                                                                  velocity_proposed = velocity_proposed_main,
+                                                                  metric_shape = metric_shape_main,
+                                                                  mass_matrix = mass_main) +
+                                       kinetic_energy_change_us
+        } else {
         kinetic_energy_change_joint <- R_fn_kinetic_energy_change(velocity_initial = velocity_initial_main,
                                                                   velocity_proposed = velocity_proposed_main,
                                                                   metric_shape = metric_shape_main,
@@ -309,6 +323,7 @@ R_fn_compute_gradients_for_tau_using_KE_joint <- function( velocity_initial_main
                                                                   velocity_proposed = velocity_proposed_us,
                                                                   metric_shape = "diag",
                                                                   mass_matrix = mass_us_vec)
+        }  ## end of: if (!is.null(kinetic_energy_change_us))
         gradient <- tau_ii * kinetic_energy_change_joint * kinetic_energy_rate_proposed_joint
         if (length(gradient) != 1 || !is.finite(gradient)) gradient <- NA_real_
         return(gradient)
@@ -512,6 +527,21 @@ fn_normalise_ChEES_per_tau <- function( gradients,
                   informative = TRUE))
     
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -10,3 +10,25 @@ source(file.path(PKG_R_DIR, "R_fn_find_bridgestan_path.R"))
 
 USER_BRIDGESTAN_DIR <- bridgestan_path()
 cat(USER_BRIDGESTAN_DIR)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

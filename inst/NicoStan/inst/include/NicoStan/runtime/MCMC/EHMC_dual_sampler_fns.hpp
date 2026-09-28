@@ -1305,3 +1305,25 @@ ALWAYS_INLINE void fn_diffusion_HMC_dual_single_iter_InPlace_process(    HMCResu
   }
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

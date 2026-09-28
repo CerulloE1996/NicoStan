@@ -10,3 +10,25 @@ result <-  run_NicoStan_example(model = arguments[1L], engine = arguments[2L], m
                                 output_dir = arguments[4L], profile = if (length(arguments) >= 5L) arguments[5L] else "smoke")
 message(paste0("PASS: ", result$example$model, " / ", result$engine, " / ", result$math_backend,
                "; diagnostic target met: ", result$diagnostic_target_met))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

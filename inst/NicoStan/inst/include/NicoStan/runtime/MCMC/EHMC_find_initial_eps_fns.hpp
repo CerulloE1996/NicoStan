@@ -4,6 +4,7 @@
  
 
 #include <Eigen/Dense>
+#include <optional>
  
 
  
@@ -17,6 +18,26 @@ using namespace Eigen;
  
  
  
+//// ---- Thread count of the serial-order parallel lp/grad evaluation (g_n_threads_serial_order_lp_grad, declared in
+////      native_api.cpp.in), set for the duration of one step-size search on the thread running it and restored when the
+////      search returns or throws. 1 = the serial evaluation.
+struct serial_order_lp_grad_threads_scope {
+
+      const int n_threads_previous;
+
+      explicit serial_order_lp_grad_threads_scope(const int n_threads_search) : n_threads_previous(g_n_threads_serial_order_lp_grad) {
+            g_n_threads_serial_order_lp_grad = n_threads_search;
+      }
+
+      ~serial_order_lp_grad_threads_scope() {
+            g_n_threads_serial_order_lp_grad = n_threads_previous;
+      }
+
+};
+
+
+
+
 std::vector<double>                                   fn_find_initial_eps_main_and_us(      HMCResult &result_input,
                                                                                             const bool partitioned_HMC,
                                                                                             const int seed,
@@ -28,7 +49,8 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                                                                                             const Eigen::Ref<const Eigen::Matrix<int, -1, -1>> y_ref,
                                                                                             const Model_fn_args_struct &Model_args_as_cpp_struct,
                                                                                             EHMC_fn_args_struct  &EHMC_args_as_cpp_struct,
-                                                                                            const EHMC_Metric_struct   &EHMC_Metric_struct_as_cpp_struct
+                                                                                            const EHMC_Metric_struct   &EHMC_Metric_struct_as_cpp_struct,
+                                                                                            const int n_threads = 1
 ) {
    
    stan::math::ChainableStack ad_tape;
@@ -144,6 +166,20 @@ std::vector<double>                                   fn_find_initial_eps_main_a
    LC_MVP_ws_structs.resize(1);
    LC_MVP_ws_structs[0] = LC_MVP_ws_struct;
    
+   //// ---- n_threads > 1: every NoLog and partial-log lp/grad evaluation of this search (built-in LC_MVP / MVP models) spreads
+   ////      its chunks over up to n_threads threads (at most one per chunk; NoLog: one workspace each) and adds the chunk
+   ////      contributions in the order of the serial evaluation, so each evaluation, and therefore eps, is bitwise the same as
+   ////      with n_threads = 1. The autodiff fallback evaluations and all other model types stay serial.
+   int n_threads_serial_order = 1;
+   if ((n_threads > 1) && ((Model_type == "LC_MVP") || (Model_type == "MVP")) && (multi_attempts || !force_autodiff)) {
+         const std::string &vect_type_search = Model_args_as_cpp_struct.Model_args_strings(0);
+         const int vec_size_search = (vect_type_search == "AVX512") ? 8 : ((vect_type_search == "AVX2") ? 4 : ((vect_type_search == "AVX") ? 2 : 1));
+         const ChunkSizeInfo chunk_info_search = calculate_chunk_sizes(N, vec_size_search, Model_args_as_cpp_struct.Model_args_ints(3));
+         n_threads_serial_order = std::min(n_threads, chunk_info_search.n_total_chunks);
+   }
+   if (n_threads_serial_order > 1) LC_MVP_ws_structs.resize(n_threads_serial_order, LC_MVP_ws_struct);
+   serial_order_lp_grad_threads_scope serial_order_threads_scope(n_threads_serial_order);
+
    if (g_debug_cutpoint_grads) std::cerr << "Point C" << std::endl << std::flush;
    
    fn_lp_grad_InPlace(   result_input.lp_and_grad_outs(), 
@@ -190,7 +226,8 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                    if (g_debug_cutpoint_grads) std::cerr << "LOOP iter " << i << " before nuisance HMC" << std::endl << std::flush;
          
                    ////  sample nuisance
-                   stan::math::start_nested();
+                   {
+                   std::optional<stan::math::nested_rev_autodiff> nested_guard(std::in_place);
                    fn_Diffusion_HMC_nuisance_only_single_iter_InPlace_process(     result_input,  
                                                                                    rng_nuisance_i,
                                                                                    Model_type,  
@@ -202,12 +239,13 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                                                                                    Stan_model_as_cpp_struct, 
                                                                                    LC_MVP_ws_structs,
                                                                                    1); 
-                   stan::math::recover_memory_nested(); 
+                   }
                    
                    if (g_debug_cutpoint_grads) std::cerr << "LOOP iter " << i << " before main HMC" << std::endl << std::flush;
                    
                    ////  sample main (cond. on nuisance)
-                   stan::math::start_nested();
+                   {
+                   std::optional<stan::math::nested_rev_autodiff> nested_guard(std::in_place);
                    fn_standard_HMC_main_only_single_iter_InPlace_process(          result_input,  
                                                                                    rng_main_i,
                                                                                    Model_type,  
@@ -219,14 +257,15 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                                                                                    Stan_model_as_cpp_struct, 
                                                                                    LC_MVP_ws_structs,
                                                                                    1); 
-                   stan::math::recover_memory_nested(); 
+                   }
        
        } else { 
          
                    if (g_debug_cutpoint_grads) std::cerr << "LOOP iter " << i << " before dual HMC" << std::endl << std::flush;
              
                    //// Sample all params (standard HMC)
-                   stan::math::start_nested();
+                   {
+                   std::optional<stan::math::nested_rev_autodiff> nested_guard(std::in_place);
                     fn_diffusion_HMC_dual_single_iter_InPlace_process( result_input,
                                                                      rng_main_i,
                                                                      rng_nuisance_i,
@@ -240,7 +279,7 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                                                                      LC_MVP_ws_structs,
                                                                       1,
                                                                       &current_lp_grad_valid);
-                   stan::math::recover_memory_nested();
+                   }
                    
                    if (g_debug_cutpoint_grads) std::cerr << "LOOP iter " << i << " after dual HMC" << std::endl << std::flush;
              
@@ -570,3 +609,19 @@ std::vector<double>                                   fn_find_initial_eps_main_a
  
  
  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

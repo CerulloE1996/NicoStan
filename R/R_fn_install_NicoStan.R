@@ -299,3 +299,25 @@ install_NicoStan <- function(CUSTOM_FLAGS = NULL,
 
     invisible(lib)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -359,3 +359,15 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
 
 
   
+
+
+
+
+
+
+
+
+
+
+
+

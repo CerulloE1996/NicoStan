@@ -10,3 +10,25 @@ if (!length(.example_sources)) stop("Source this file or run it with Rscript.")
 source(file.path(.example_directory, "BayesMVP_native_examples.R"))
 native_benchmark <-  benchmark_BayesMVP_native_example(Model_type = "MVOP", N_values = N_values, burnin_algorithm = "CHESSR")
 native_benchmark$summary
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

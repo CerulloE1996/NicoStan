@@ -371,9 +371,11 @@ update_M_diag_Empirical_nuisance <- function( EHMC_Metric_as_Rcpp_List,
 ) { 
 
           proposed_variance_vec <- c(proposed_variance_vec)
+          ## min() and max() reach any NA, NaN or +/-Inf, so these are the same tests as any(!is.finite(.)) and then
+          ## any(. <= 0), without nuisance-length logical copies of the proposal:
           if (length(proposed_variance_vec) == 0L ||
-              any(!is.finite(proposed_variance_vec)) ||
-              any(proposed_variance_vec <= 0)) {
+              !is.finite(min(proposed_variance_vec)) || !is.finite(max(proposed_variance_vec)) ||
+              min(proposed_variance_vec) <= 0) {
             ## An early or degenerate moment estimate cannot define a metric.
             ## Keep the last valid metric until a finite positive proposal exists.
             return(list(EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
@@ -391,9 +393,11 @@ update_M_diag_Empirical_nuisance <- function( EHMC_Metric_as_Rcpp_List,
           ##
           # M_inv_as_snaper_s_vec_us_empirical_scaled <- EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical
           ## now update M_inv_nuisance:
-          EHMC_Metric_as_Rcpp_List$M_inv_us_vec <- c(ratio_M_nuisance_effective * c(proposed_variance_vec) + 
-                                                     (1.0 - ratio_M_nuisance_effective) * c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec))
-          EHMC_Metric_as_Rcpp_List$M_us_vec <- recip(c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec))
+          ## (proposed_variance_vec is already a plain vector, from c() above, and so is the blend, so neither needs a c() copy;
+          ##  c() on the current M_inv_us_vec drops the dimensions of a one-column starting metric)
+          EHMC_Metric_as_Rcpp_List$M_inv_us_vec <- ratio_M_nuisance_effective * proposed_variance_vec + 
+                                                   (1.0 - ratio_M_nuisance_effective) * c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec)
+          EHMC_Metric_as_Rcpp_List$M_us_vec <- recip(EHMC_Metric_as_Rcpp_List$M_inv_us_vec)
           ##
           EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec  <- sqrt(EHMC_Metric_as_Rcpp_List$M_us_vec)
           ##
@@ -778,6 +782,20 @@ update_M_Hessian_main <- function( metric_shape_main,
                       EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -99,3 +99,24 @@ R_fn_detect_vectorisation_support <- function() {
   
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

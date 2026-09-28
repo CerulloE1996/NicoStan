@@ -559,7 +559,7 @@ struct WarmUp : public RcppParallel::Worker {
   }
 };
 
-// Call this before starting your main function
+// Call this before starting the main function
 void warmUpThreads(std::size_t nThreads) {
   WarmUp warmUpTask;
   RcppParallel::parallelFor(0, nThreads, warmUpTask);
@@ -597,6 +597,51 @@ public:
   std::vector<EHMC_fn_args_struct>  EHMC_args_copies;    //// overwritten by update_adaptation()
   std::vector<EHMC_Metric_struct>   EHMC_Metric_copies;  //// overwritten by update_adaptation() -- MUTABLE now (was const& in old worker)
   
+  //// ---- resident nuisance-sized burn-in statistics (used only by the resident interface in native_api.cpp.in,
+  ////      the fn_persistent_burnin_*_resident / *_main_only functions). They stay empty until
+  ////      fn_persistent_burnin_init_resident_statistics() is called, so the original per-iteration
+  ////      interface allocates nothing extra. Each one mirrors one nuisance-sized R object of the burn-in loop:
+  bool resident_statistics_initialised = false;
+  Eigen::Matrix<double, -1, 1> resident_snaper_m_vec_us;            //// EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
+  Eigen::Matrix<double, -1, 1> resident_snaper_s_vec_us_empirical;  //// EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical
+  Eigen::Matrix<double, -1, 1> resident_snaper_m_prop_vec_us;       //// snaper_m_prop_vec_all[index_nuisance]
+  Eigen::Matrix<double, -1, 1> resident_wf_m_us;                    //// wf_m[index_nuisance]  (pooled metric estimator)
+  Eigen::Matrix<double, -1, 1> resident_wf_M2_us;                   //// wf_M2[index_nuisance] (pooled metric estimator)
+  Eigen::Matrix<double, -1, 1> resident_var_draws_us;               //// var_draws_all[index_nuisance]
+  ////
+  //// ---- staging reused across iterations (C++ side only, never visible to R):
+  std::vector<double> resident_proposal_staging_matrix;             //// proposals[, valid] for the weighted proposal mean
+  std::vector<double> resident_proposal_staging_weights;
+  ////
+  //// ---- resident joint trajectory block (tau_adaptation_block = "joint"; the fn_persistent_burnin_joint_* functions):
+  ////      the unit direction trajectory_direction$joint of the R burn-in loop (main rows first, then the nuisance rows),
+  ////      empty until fn_persistent_burnin_joint_direction_set() is called, and staging for the joint (main + nuisance)
+  ////      matrices in metric coordinates:
+  Eigen::Matrix<double, -1, 1> resident_snaper_direction_joint;
+  std::vector<double> resident_joint_staging_initial;
+  std::vector<double> resident_joint_staging_proposed;
+  std::vector<double> resident_joint_staging_velocity;
+  std::vector<double> resident_joint_work_direction;
+  std::vector<double> resident_joint_work_candidate;
+
+  //// ---- column pointers of one resident state vector, one per chain (resident interface). The kernels read
+  ////      expected_rows entries from every column, so a state vector of any other length is refused here:
+  std::vector<const double *> state_columns(Eigen::Matrix<double, -1, 1> & (HMCResult::*accessor)(),
+                                            const Eigen::Index expected_rows) {
+
+        std::vector<const double *> columns(static_cast<std::size_t>(n_threads));
+        for (int i = 0; i < n_threads; ++i) {
+              const Eigen::Matrix<double, -1, 1> &column = (HMC_inputs[i].*accessor)();
+              if (column.size() != expected_rows) {
+                    Rcpp::stop("PersistentBurninState::state_columns: a resident state vector has length " + std::to_string(column.size()) +
+                               ", expected " + std::to_string(expected_rows) + ".");
+              }
+              columns[i] = column.data();
+        }
+        return columns;
+
+  }
+
   //// ---------------------------------------------------------------- Constructor: pays ALL the setup cost, once.
   PersistentBurninState(  const int n_threads_R,
                           const bool partitioned_HMC_R,
