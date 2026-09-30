@@ -18,9 +18,7 @@ setup_env_post_install <- function() {
           library(RcppParallel)
           
           # R installs the inner package's inst files into its package root.
-          package_root <- system.file(package = "NicoStan") else { 
-            package_root <- file.path(Sys.getenv("HOME"), "NicoStan")
-          }
+          package_root <- system.file(package = "NicoStan")
           
           
           if (.Platform$OS.type == "windows") {
