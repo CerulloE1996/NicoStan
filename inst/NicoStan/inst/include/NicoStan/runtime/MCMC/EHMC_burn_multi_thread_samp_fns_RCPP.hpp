@@ -597,6 +597,16 @@ public:
   std::vector<EHMC_fn_args_struct>  EHMC_args_copies;    //// overwritten by update_adaptation()
   std::vector<EHMC_Metric_struct>   EHMC_Metric_copies;  //// overwritten by update_adaptation() -- MUTABLE now (was const& in old worker)
   
+  //// ---- Stan models (Model_type == "Stan" only): ONE BridgeStan model + data per chain, constructed ONCE in the constructor,
+  ////      reused by every burn-in iteration and destroyed in the destructor. model_so_file and json_file_path come from
+  ////      Model_args_copies, which are read-only after construction, so the model and its data cannot change between iterations.
+  ////      (Previously run_chain() loaded the .so, parsed the JSON data and destroyed the model in EVERY iteration, for every chain.)
+  std::vector<Stan_model_struct> Stan_models_per_chain;
+  
+  //// Owns raw library/model handles: never copy.
+  PersistentBurninState(const PersistentBurninState &) = delete;
+  PersistentBurninState &operator=(const PersistentBurninState &) = delete;
+  
   //// ---- resident nuisance-sized burn-in statistics (used only by the resident interface in native_api.cpp.in,
   ////      the fn_persistent_burnin_*_resident / *_main_only functions). They stay empty until
   ////      fn_persistent_burnin_init_resident_statistics() is called, so the original per-iteration
@@ -623,6 +633,19 @@ public:
   std::vector<double> resident_joint_staging_velocity;
   std::vector<double> resident_joint_work_direction;
   std::vector<double> resident_joint_work_candidate;
+  ////
+  //// ---- tau_initial = "adaptive" (the fn_persistent_burnin_tau_initial_nuisance_moments_* functions): the (individual x test)
+  ////      layout of the nuisance vector (0-based position of test t of individual i at index t * n_rows + i), the running
+  ////      n_tests x n_tests sum of y_i y_i^T over individuals, chains and iterations (upper triangle: entry (t, s), t <= s, at
+  ////      s * n_tests + t), its number of terms and of iterations, and one per-chain sum of the same shape (staging). Empty until
+  ////      fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident() is called:
+  std::vector<int>    resident_tau_initial_position_index;
+  int                 resident_tau_initial_n_rows  = 0;
+  int                 resident_tau_initial_n_tests = 0;
+  std::vector<double> resident_tau_initial_sum_upper;
+  double              resident_tau_initial_count     = 0.0;
+  double              resident_tau_initial_n_updates = 0.0;
+  std::vector<double> resident_tau_initial_chain_sums_upper;
 
   //// ---- column pointers of one resident state vector, one per chain (resident interface). The kernels read
   ////      expected_rows entries from every column, so a state vector of any other length is refused here:
@@ -749,9 +772,66 @@ public:
               
         } //// else: dummy (is_allocated stays false)
         
+        //// ---- Stan models: construct ONE model + data per chain, ONCE (chains in parallel, as the per-iteration loads were).
+        ////      The seed passed to bs_model_construct is used only by _rng calls in the model's transformed data block; it does not
+        ////      enter the log density or its gradient. The per-iteration loads used seed + (1 + i), i.e. a different transformed-data
+        ////      seed in every iteration; one construction per chain uses (1 + i).
+        if (Model_type == "Stan") {
+              Stan_models_per_chain.resize(n_threads);
+              std::vector<std::string> Stan_model_load_errors(n_threads);
+              struct StanModelLoadWorker : public RcppParallel::Worker {
+                    std::vector<Stan_model_struct> &models;
+                    const std::vector<Model_fn_args_struct> &model_args;
+                    std::vector<std::string> &errors;
+                    StanModelLoadWorker(std::vector<Stan_model_struct> &models_,
+                                        const std::vector<Model_fn_args_struct> &model_args_,
+                                        std::vector<std::string> &errors_)
+                      : models(models_), model_args(model_args_), errors(errors_) {}
+                    void operator()(std::size_t begin, std::size_t end) {
+                          for (std::size_t i = begin; i < end; ++i) {
+                                try {
+                                      models[i] = fn_load_Stan_model_and_data( model_args[i].model_so_file,
+                                                                               model_args[i].json_file_path,
+                                                                               static_cast<unsigned int>(1 + i));
+                                } catch (const std::exception &e) {
+                                      errors[i] = e.what();
+                                } catch (...) {
+                                      errors[i] = "unknown error";
+                                }
+                          }
+                    }
+              };
+              StanModelLoadWorker load_worker(Stan_models_per_chain, Model_args_copies, Stan_model_load_errors);
+              RcppParallel::parallelFor(0, n_threads, load_worker);
+              for (int i = 0; i < n_threads; ++i) {
+                    if (!Stan_model_load_errors[i].empty()) {
+                          const std::string message = "PersistentBurninState: Stan model load failed for chain " + std::to_string(i) +
+                                                      ": " + Stan_model_load_errors[i];
+                          destroy_Stan_models();
+                          Rcpp::stop(message);
+                    }
+              }
+        }
+        
         //// ---- warm up TBB pool once:
         warmUpThreads(n_threads);
     
+  }
+  
+  //// ---------------------------------------------------------------- Destroy the per-chain Stan models (destructor; failed construction):
+  void destroy_Stan_models() {
+        for (auto &Stan_model_i : Stan_models_per_chain) {
+              try {
+                    fn_bs_destroy_Stan_model(Stan_model_i);
+              } catch (...) {
+                    //// a destructor must not throw; the handle is released as far as possible
+              }
+        }
+        Stan_models_per_chain.clear();
+  }
+  
+  ~PersistentBurninState() {
+        destroy_Stan_models();
   }
   
   //// ---------------------------------------------------------------- Load initial theta from R (call ONCE before the loop):
@@ -841,9 +921,10 @@ public:
         
         if (Model_type == "Stan") {
           
-              Stan_model_struct Stan_model_as_cpp_struct = fn_load_Stan_model_and_data(  Model_args_copies[i].model_so_file,
-                                                                                         Model_args_copies[i].json_file_path,
-                                                                                         seed_main_int_i);
+              // Stan_model_struct Stan_model_as_cpp_struct = fn_load_Stan_model_and_data(  Model_args_copies[i].model_so_file,
+              //                                                                            Model_args_copies[i].json_file_path,
+              //                                                                            seed_main_int_i);
+              const Stan_model_struct &Stan_model_as_cpp_struct = Stan_models_per_chain[i];   //// loaded once, in the constructor
               fn_sample_HMC_multi_iter_single_thread(   HMC_outputs[i],
                                                         HMC_inputs[i],
                                                         burnin_indicator,
@@ -866,7 +947,7 @@ public:
                                                         Stan_model_as_cpp_struct,
                                                         LC_MVP_ws_structs_double_vec[i],
                                                         n_threads_WCP);
-              fn_bs_destroy_Stan_model(Stan_model_as_cpp_struct);
+              // fn_bs_destroy_Stan_model(Stan_model_as_cpp_struct);   //// now destroyed once, in the destructor
           
         } else {
           

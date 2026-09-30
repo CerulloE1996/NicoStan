@@ -4041,6 +4041,269 @@ Rcpp::List fn_persistent_burnin_joint_kinetic_energy_sums_us_resident(   SEXP wo
 
 
 
+//// ---------------------------------------------------------------------------------------------------
+//// RESIDENT tau_initial = "adaptive" NUISANCE MOMENTS (additions)
+////
+//// For tau_initial = "adaptive", init_and_run_burnin_ChESSR accumulates, at every burn-in iteration of
+//// [clip_iter, gap], the pooled within-individual second moment of the standardised nuisance coordinates:
+////
+////     y(i, t) = (u(p, k) - centre(p)) / scale(p),   p = position of test t of individual i in the nuisance vector,
+////     sum    += sum over individuals i and chains k of y_i y_i^T   (n_tests x n_tests),
+////     count  += N x n_chains,
+////
+//// with u = the resident nuisance state of chain k (theta_us), centre = snaper_m_vec_us and scale = sqrt(M_inv_us_vec).
+//// The separate accumulator (inst/src_extra/tau_initial_nuisance_moments.cpp) needs the n_nuisance x n_chains state
+//// copied to R at each of these iterations; the functions below compute the same sum on the resident state, keep the
+//// running sum and count in the worker, and return only n_tests x n_tests matrices:
+////
+////   - fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident: sets the (individual x test) layout and zeroes
+////     the running sum and count;
+////   - fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident: adds one iteration (chains in parallel);
+////   - fn_persistent_burnin_tau_initial_nuisance_moments_get_resident: the running sum and count (at the handover).
+////
+//// Each chain's sum over individuals is formed in the order of the separate accumulator (individuals in order, upper
+//// triangle, y_t y_s added to entry (t, s)); the chains are then added in chain order, so the result does not depend on
+//// the number of threads, and it equals the separate accumulator's sum up to the order of the chain additions (rounding
+//// only). None of these functions changes the chains or any adaptation value.
+//// ---------------------------------------------------------------------------------------------------
+
+
+//// Version of the resident tau_initial = "adaptive" interface (R feature detection).
+// [[Rcpp::export]]
+int fn_persistent_burnin_tau_initial_api_version() {
+
+        return 1;
+
+}
+
+
+static void fn_persistent_burnin_require_tau_initial_layout(const PersistentBurninState &st) {
+
+        if (st.resident_tau_initial_n_tests < 1) {
+              Rcpp::stop("The resident tau_initial moments have no layout: call fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident() first.");
+        }
+
+}
+
+
+//// One chain's n_tests x n_tests sum of y_i y_i^T over the individuals, per chain in parallel: chain k writes only its
+//// own block of chain_sums_upper. Raw memory only (no R API calls), so it is safe inside parallelFor.
+struct TauInitialNuisanceMomentsWorker : public RcppParallel::Worker {
+
+      const std::vector<const double *> &u_columns;
+      const double *centre;
+      const double *scale;
+      const int *position_index;
+      const int n_rows;
+      const int n_tests;
+      double *chain_sums_upper;
+
+      TauInitialNuisanceMomentsWorker( const std::vector<const double *> &u_columns_,
+                                       const double *centre_,
+                                       const double *scale_,
+                                       const int *position_index_,
+                                       const int n_rows_,
+                                       const int n_tests_,
+                                       double *chain_sums_upper_)
+        : u_columns(u_columns_), centre(centre_), scale(scale_), position_index(position_index_),
+          n_rows(n_rows_), n_tests(n_tests_), chain_sums_upper(chain_sums_upper_) {}
+
+      void operator()(std::size_t begin, std::size_t end) {
+
+            const std::size_t n_entries = static_cast<std::size_t>(n_tests) * static_cast<std::size_t>(n_tests);
+            std::vector<double> y(static_cast<std::size_t>(n_tests));
+
+            for (std::size_t k = begin; k < end; ++k) {
+
+                  double *sum_upper = chain_sums_upper + k * n_entries;
+                  std::fill_n(sum_upper, n_entries, 0.0);
+                  const double *u_k = u_columns[k];
+
+                  for (int i = 0; i < n_rows; ++i) {
+
+                        for (int t = 0; t < n_tests; ++t) {
+                              const int p = position_index[static_cast<std::size_t>(t) * n_rows + i];
+                              y[t] = (u_k[p] - centre[p]) * (1.0 / scale[p]);
+                        }
+
+                        for (int s = 0; s < n_tests; ++s) {
+                              const double y_s = y[s];
+                              double *sum_col_s = &sum_upper[static_cast<std::size_t>(s) * n_tests];
+                              for (int t = 0; t <= s; ++t) sum_col_s[t] += y[t] * y_s;
+                        }
+
+                  }
+
+            }
+
+      }
+
+};
+
+
+//// The symmetric n_tests x n_tests matrix of an upper triangle stored as above:
+static Rcpp::NumericMatrix fn_persistent_burnin_tau_initial_symmetric_matrix(   const double *sum_upper,
+                                                                                 const int n_tests) {
+
+        Rcpp::NumericMatrix out(n_tests, n_tests);
+        for (int s = 0; s < n_tests; ++s) {
+              for (int t = 0; t <= s; ++t) {
+                    const double value = sum_upper[static_cast<std::size_t>(s) * n_tests + t];
+                    out(t, s) = value;
+                    out(s, t) = value;
+              }
+        }
+        return out;
+
+}
+
+
+//// ---------------------------------------------------------------- layout and reset:
+////
+//// positions: N x n_tests matrix of 1-based positions in the nuisance vector (row i = individual i, column t = test t), as
+//// fn_nuisance_chunk_layout_positions() gives them for the built-in models (chunk-major storage), or an n_nuisance x 1
+//// matrix when every nuisance coordinate is its own 1 x 1 block. N x n_tests must equal n_nuisance, and every position
+//// must lie in 1..n_nuisance. The running sum, count and number of iterations are set to zero.
+////
+// [[Rcpp::export]]
+void fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident(   SEXP worker_ptr,
+                                                                         const Rcpp::IntegerMatrix positions) {
+
+        Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
+        PersistentBurninState &st = *ptr;
+        const int n_rows  = positions.nrow();
+        const int n_tests = positions.ncol();
+
+        if (n_rows < 1 || n_tests < 1) {
+              Rcpp::stop("fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident: positions must have at least one row and one column.");
+        }
+        if (static_cast<long long>(n_rows) * static_cast<long long>(n_tests) != static_cast<long long>(st.n_nuisance)) {
+              Rcpp::stop("fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident: positions must hold N x n_tests = n_nuisance (" +
+                         std::to_string(st.n_nuisance) + ") entries.");
+        }
+
+        std::vector<int> position_index(static_cast<std::size_t>(n_rows) * static_cast<std::size_t>(n_tests));
+        for (int t = 0; t < n_tests; ++t) {
+              for (int i = 0; i < n_rows; ++i) {
+                    const int position = positions(i, t);
+                    if (position == NA_INTEGER || position < 1 || position > st.n_nuisance) {
+                          Rcpp::stop("fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident: position out of range.");
+                    }
+                    position_index[static_cast<std::size_t>(t) * n_rows + i] = position - 1;
+              }
+        }
+
+        const std::size_t n_entries = static_cast<std::size_t>(n_tests) * static_cast<std::size_t>(n_tests);
+        st.resident_tau_initial_position_index   = std::move(position_index);
+        st.resident_tau_initial_n_rows           = n_rows;
+        st.resident_tau_initial_n_tests          = n_tests;
+        st.resident_tau_initial_sum_upper.assign(n_entries, 0.0);
+        st.resident_tau_initial_count            = 0.0;
+        st.resident_tau_initial_n_updates        = 0.0;
+        st.resident_tau_initial_chain_sums_upper.assign(n_entries * static_cast<std::size_t>(st.n_threads), 0.0);
+
+}
+
+
+//// ---------------------------------------------------------------- one iteration:
+////
+//// centre_R: the name of a resident vector ("snaper_m_vec_us", or any other name fn_persistent_burnin_get_resident_statistic
+////           accepts), read in place, or a double vector of length n_nuisance;
+//// scale_R:  a double vector of length n_nuisance (R: sqrt(M_inv_us_vec)).
+//// The nuisance state is the resident theta_us of every chain (R: fn_persistent_burnin_get_state(worker_ptr,
+//// "theta_us_vectors_all_chains_output_to_R")). Adds this iteration's sum to the running sum, N x n_chains to the count and
+//// 1 to the number of iterations, and returns this iteration's n_tests x n_tests sum. Non-finite inputs give a non-finite
+//// sum (R then treats the block as having no estimate).
+////
+// [[Rcpp::export]]
+Rcpp::NumericMatrix fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident(   SEXP worker_ptr,
+                                                                                            SEXP centre_R,
+                                                                                            SEXP scale_R) {
+
+        Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
+        PersistentBurninState &st = *ptr;
+        fn_persistent_burnin_require_tau_initial_layout(st);
+        const Eigen::Index n_us = st.n_nuisance;
+        const int n_tests = st.resident_tau_initial_n_tests;
+        const std::size_t n_entries = static_cast<std::size_t>(n_tests) * static_cast<std::size_t>(n_tests);
+
+        //// centre: a resident vector by name, or R's vector:
+        const double *centre = nullptr;
+        if ((TYPEOF(centre_R) == STRSXP) && (Rf_xlength(centre_R) == 1)) {
+              const std::string centre_name = Rcpp::as<std::string>(centre_R);
+              const Eigen::Matrix<double, -1, 1> &centre_vector = fn_persistent_burnin_resident_statistic(st, centre_name, 0);
+              if (centre_vector.size() != n_us) {
+                    Rcpp::stop("fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident: the resident vector '" + centre_name +
+                               "' has length " + std::to_string(centre_vector.size()) + ", expected " + std::to_string(n_us) + ".");
+              }
+              centre = centre_vector.data();
+        } else if ((TYPEOF(centre_R) == REALSXP) && (static_cast<Eigen::Index>(Rf_xlength(centre_R)) == n_us)) {
+              centre = REAL_RO(centre_R);
+        } else {
+              Rcpp::stop("fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident: centre_R must be the name of a resident vector or a double vector of length n_nuisance (" +
+                         std::to_string(n_us) + ").");
+        }
+        ////
+        if ((TYPEOF(scale_R) != REALSXP) || (static_cast<Eigen::Index>(Rf_xlength(scale_R)) != n_us)) {
+              Rcpp::stop("fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident: scale_R must be a double vector of length n_nuisance (" +
+                         std::to_string(n_us) + ").");
+        }
+        const double *scale = REAL_RO(scale_R);
+
+        //// per-chain sums, chains in parallel:
+        const std::vector<const double *> u_columns = st.state_columns(&HMCResult::us_theta_vec, n_us);
+        st.resident_tau_initial_chain_sums_upper.assign(n_entries * static_cast<std::size_t>(st.n_threads), 0.0);
+        {
+              TauInitialNuisanceMomentsWorker moments_worker( u_columns,
+                                                              centre,
+                                                              scale,
+                                                              st.resident_tau_initial_position_index.data(),
+                                                              st.resident_tau_initial_n_rows,
+                                                              n_tests,
+                                                              st.resident_tau_initial_chain_sums_upper.data());
+              RcppParallel::parallelFor(0, st.n_threads, moments_worker);
+        }
+
+        //// this iteration's sum (chains added in chain order), then the running sum:
+        std::vector<double> iteration_sum_upper(n_entries, 0.0);
+        for (int k = 0; k < st.n_threads; ++k) {
+              const double *chain_sum_upper = st.resident_tau_initial_chain_sums_upper.data() + static_cast<std::size_t>(k) * n_entries;
+              for (std::size_t j = 0; j < n_entries; ++j) iteration_sum_upper[j] += chain_sum_upper[j];
+        }
+        for (std::size_t j = 0; j < n_entries; ++j) st.resident_tau_initial_sum_upper[j] += iteration_sum_upper[j];
+        st.resident_tau_initial_count     += static_cast<double>(st.resident_tau_initial_n_rows) * static_cast<double>(st.n_threads);
+        st.resident_tau_initial_n_updates += 1.0;
+
+        return fn_persistent_burnin_tau_initial_symmetric_matrix(iteration_sum_upper.data(), n_tests);
+
+}
+
+
+//// ---------------------------------------------------------------- running sum and count:
+////
+//// Returns list(sum = the running n_tests x n_tests sum (a 0 x 0 matrix before the first reset), count = the number of
+//// (individual, chain, iteration) terms, n_updates = the number of iterations added, n_rows = N, n_tests).
+////
+// [[Rcpp::export]]
+Rcpp::List fn_persistent_burnin_tau_initial_nuisance_moments_get_resident(SEXP worker_ptr) {
+
+        Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
+        const PersistentBurninState &st = *ptr;
+        const int n_tests = st.resident_tau_initial_n_tests;
+
+        return Rcpp::List::create(
+          Rcpp::Named("sum") = (n_tests < 1) ? Rcpp::NumericMatrix(0, 0) :
+                                               fn_persistent_burnin_tau_initial_symmetric_matrix(st.resident_tau_initial_sum_upper.data(), n_tests),
+          Rcpp::Named("count") = st.resident_tau_initial_count,
+          Rcpp::Named("n_updates") = st.resident_tau_initial_n_updates,
+          Rcpp::Named("n_rows") = st.resident_tau_initial_n_rows,
+          Rcpp::Named("n_tests") = n_tests);
+
+}
+
+
+
+
 
 
 

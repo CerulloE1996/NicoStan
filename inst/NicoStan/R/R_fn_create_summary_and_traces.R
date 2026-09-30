@@ -1267,12 +1267,55 @@ create_summary_and_traces <- function(    model_results,
          }, silent = TRUE)
          try({ 
             L_main_during_sampling <- (EHMC_args_as_Rcpp_List$tau_main / EHMC_args_as_Rcpp_List$eps_main)
-            n_grad_evals_sampling_main <- L_main_during_sampling * n_iter * n_chains_sampling
+            ## n_grad_evals_sampling_main <- L_main_during_sampling * n_iter * n_chains_sampling
+            ## executed gradients: the sampler takes L_ii = max(1, ceiling(tau_ii / eps)) steps with tau_ii ~ U(0, 2 * tau) when the
+            ## sampling trajectory length is randomised, so the expected count per iteration is
+            ## ( f * (f + 1) / 2 + (a - f) * (f + 1) ) / a with a = 2 * tau / eps and f = floor(a) (max(1, ceiling(tau / eps)) without jitter):
+            ## L_main_expected_steps_sampling <- if (is.null(EHMC_args_as_Rcpp_List$randomize_tau) || isTRUE(EHMC_args_as_Rcpp_List$randomize_tau)) {
+            ##       upper_bound_in_steps <- 2 * L_main_during_sampling
+            ##       whole_steps_below_upper_bound <- floor(upper_bound_in_steps)
+            ##       ( whole_steps_below_upper_bound * (whole_steps_below_upper_bound + 1) / 2 +
+            ##         (upper_bound_in_steps - whole_steps_below_upper_bound) * (whole_steps_below_upper_bound + 1) ) / upper_bound_in_steps
+            ## } else max(1, ceiling(L_main_during_sampling))
+            ## n_grad_evals_sampling_main <- L_main_expected_steps_sampling * n_iter * n_chains_sampling
+            ##
+            ## gradient EVALUATIONS per chain for the native sampling path (runtime/MCMC; one sampling call per chain covers all
+            ## n_iter iterations and the endpoint-reuse flag lives for that call):
+            ##     main-only (no nuisance) or standard joint HMC (diffusion off, not partitioned):  (E[L] + 1) * n_iter
+            ##     joint diffusion, kick_flow_kick (endpoint gradient reused):                       E[L] * n_iter + 1
+            ##     joint diffusion, flow_kick_flow:                                                  (E[L] + 1) * n_iter + 1
+            ##     partitioned:  (E[L_main] + 1) * n_iter main, and (E[L_us] + 1) * n_iter nuisance (below)
+            ## with E[L] = E[max(1, ceiling(tau_ii / eps))], tau_ii ~ U(0, 2 * max(tau, eps)) (the sampler raises tau to eps first):
+            fn_expected_leapfrog_steps_sampling <- function(tau, eps, randomize_tau_sampling) {
+                  steps_nominal <- max(tau, eps) / eps
+                  if (!isTRUE(randomize_tau_sampling)) return(max(1, ceiling(steps_nominal)))
+                  upper_bound_in_steps <- 2 * steps_nominal
+                  whole_steps_below_upper_bound <- floor(upper_bound_in_steps)
+                  return(( whole_steps_below_upper_bound * (whole_steps_below_upper_bound + 1) / 2 +
+                           (upper_bound_in_steps - whole_steps_below_upper_bound) * (whole_steps_below_upper_bound + 1) ) / upper_bound_in_steps)
+            }
+            randomize_tau_sampling_used <- if (!is.null(model_results$randomize_tau_sampling)) {
+                  isTRUE(model_results$randomize_tau_sampling)
+            } else (is.null(EHMC_args_as_Rcpp_List$randomize_tau) || isTRUE(EHMC_args_as_Rcpp_List$randomize_tau))
+            diffusion_HMC_integrator_used <- if (is.null(EHMC_args_as_Rcpp_List$diffusion_HMC_integrator)) "kick_flow_kick" else EHMC_args_as_Rcpp_List$diffusion_HMC_integrator
+            has_nuisance_parameters <- isTRUE(sample_nuisance) && isTRUE(n_nuisance > 0)
+            is_joint_diffusion_path <- has_nuisance_parameters && isTRUE(diffusion_HMC) && !isTRUE(partitioned_HMC)
+            endpoint_evaluations_per_iteration <- if (is_joint_diffusion_path && identical(diffusion_HMC_integrator_used, "kick_flow_kick")) 0 else 1
+            start_of_call_evaluations_per_chain <- if (is_joint_diffusion_path) 1 else 0
+            L_main_expected_steps_sampling <- fn_expected_leapfrog_steps_sampling( tau = EHMC_args_as_Rcpp_List$tau_main,
+                                                                                   eps = EHMC_args_as_Rcpp_List$eps_main,
+                                                                                   randomize_tau_sampling = randomize_tau_sampling_used)
+            n_grad_evals_sampling_main <- ((L_main_expected_steps_sampling + endpoint_evaluations_per_iteration) * n_iter + start_of_call_evaluations_per_chain) * n_chains_sampling
             Min_ess_per_grad_main_samp <-  Min_ESS_main / n_grad_evals_sampling_main
          }, silent = TRUE)
          try({
             L_us_during_sampling <- (EHMC_args_as_Rcpp_List$tau_us / EHMC_args_as_Rcpp_List$eps_us)
-            n_grad_evals_sampling_us <-  L_us_during_sampling  * n_iter * n_chains_sampling
+            ## n_grad_evals_sampling_us <-  L_us_during_sampling  * n_iter * n_chains_sampling
+            ## nuisance gradient evaluations (partitioned path): expected executed steps at tau_us / eps_us + 1 per iteration:
+            L_us_expected_steps_sampling <- fn_expected_leapfrog_steps_sampling( tau = EHMC_args_as_Rcpp_List$tau_us,
+                                                                                 eps = EHMC_args_as_Rcpp_List$eps_us,
+                                                                                 randomize_tau_sampling = randomize_tau_sampling_used)
+            n_grad_evals_sampling_us <-  (L_us_expected_steps_sampling + 1) * n_iter * n_chains_sampling
             Min_ess_per_grad_us_samp <-  Min_ESS_main / n_grad_evals_sampling_us
          }, silent = TRUE)
          try({ 
@@ -1378,6 +1421,11 @@ create_summary_and_traces <- function(    model_results,
                             n_superchains = n_superchains,
                             nested_rhat_grouping = nested_rhat_grouping,
                             burnin_schedule = model_results$burnin_schedule,
+                            ## pooled metric estimator settings as the sampler reported them (NULL for a run made before they existed):
+                            metric_estimator = model_results$metric_estimator,
+                            metric_pooled_window_resets = model_results$metric_pooled_window_resets,
+                            metric_pooled_window_reset_iterations = model_results$metric_pooled_window_reset_iterations,
+                            metric_pooled_offdiagonal_shrinkage = model_results$metric_pooled_offdiagonal_shrinkage,
                             interval_width_main = interval_width_main,
                             interval_width_nuisance = interval_width_nuisance,
                             force_autodiff = force_autodiff,

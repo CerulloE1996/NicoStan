@@ -202,8 +202,8 @@ init_EHMC_burnin_as_Rcpp_List   <- function(n_params_main,
         ### for main params
         adapt_delta_main <- adapt_delta
         LR_main <- LR_main
-        eps_m_adam_main <-  1.0
-        eps_v_adam_main <-  1.0
+        eps_m_adam_main <-  0
+        eps_v_adam_main <-  0
         tau_m_adam_main <-  1.0
         tau_v_adam_main <-  1.0
         index_main <- index_main
@@ -215,8 +215,8 @@ init_EHMC_burnin_as_Rcpp_List   <- function(n_params_main,
         ### for NUISANCE params
         adapt_delta_us <- adapt_delta
         LR_us <- LR_us
-        eps_m_adam_us <-  1.0
-        eps_v_adam_us <-  1.0
+        eps_m_adam_us <-  0
+        eps_v_adam_us <-  0
         tau_m_adam_us <-  1.0
         tau_v_adam_us <-  1.0
         index_nuisance <- index_nuisance
@@ -510,6 +510,11 @@ update_M_Empirical_main <- function( debug,
                                      ## 1 = unchanged. metric_estimator = "chain_mean_scaled" passes n_chains_burnin, since
                                      ## the chain-mean estimate is ~ Sigma / n_chains_burnin for independent chains.
                                      variance_scale = 1,
+                                     ##
+                                     ## metric_estimator = "per_iteration", diagonal shape: the proposed variances of the main parameters (the
+                                     ## cross-chain variances of the current iteration's draws), used instead of
+                                     ## variance_scale * snaper_s_vec_main_empirical. NULL (default) = unchanged. Not read by the dense shape.
+                                     per_iteration_variance_vec_main = NULL,
                                     ## the symmetric square root M_dense_sqrt is only read by the SNAPER functions; the ChESSR
                                     ## burn-in never uses it, so it passes FALSE and skips a pracma::sqrtm() per metric update:
                                     compute_M_dense_sqrt = TRUE
@@ -521,6 +526,14 @@ update_M_Empirical_main <- function( debug,
         if (metric_shape_main == "diag") {
           proposed_variance_vec_check <- variance_scale *
                                          c(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical)
+          if (!is.null(per_iteration_variance_vec_main)) {
+            ## a proposal of the wrong LENGTH is a bug, as for the dense size check below:
+            if (length(per_iteration_variance_vec_main) != length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)) {
+              stop(paste0("update_M_Empirical_main: per_iteration_variance_vec_main has length ", length(per_iteration_variance_vec_main),
+                          " but there are ", length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), " main parameters."))
+            }
+            proposed_variance_vec_check <- c(per_iteration_variance_vec_main)
+          }
           if (length(proposed_variance_vec_check) == 0L ||
               any(!is.finite(proposed_variance_vec_check)) ||
               any(proposed_variance_vec_check <= 0)) {
@@ -566,6 +579,7 @@ update_M_Empirical_main <- function( debug,
                 ## Inverse diag-metric:
                 ##
                 proposed_variance_vec  <- variance_scale * c(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical)
+                if (!is.null(per_iteration_variance_vec_main)) proposed_variance_vec <- c(per_iteration_variance_vec_main)
                 M_inv_main_vec_current <- c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
                 M_inv_main_diag        <- c(ratio_M_effective * c(proposed_variance_vec) + (1.0 - ratio_M_effective) * c(M_inv_main_vec_current))
                 M_inv_main_diag_sqrt   <- c(sqrt(M_inv_main_diag))
@@ -590,7 +604,7 @@ update_M_Empirical_main <- function( debug,
                 EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag(c(EHMC_Metric_as_Rcpp_List$M_main_vec),     nrow = n_params_main_diag_shape)
                 EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(c(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec), nrow = n_params_main_diag_shape)
                 EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), nrow = n_params_main_diag_shape)
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(c(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec), nrow = n_params_main_diag_shape)
+                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(c(M_inv_main_diag_sqrt), nrow = n_params_main_diag_shape)
  
           
                 # outs <- update_M_diag_Empirical_main(     

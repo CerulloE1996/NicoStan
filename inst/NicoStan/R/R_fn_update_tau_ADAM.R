@@ -48,7 +48,18 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
                                           ## aggregation: "median" is the historical behaviour - robust, but it discards the
                                           ## acceptance weighting and is NOT the ChEES estimator. "weighted_mean" uses the
                                           ## weights above (falling back to an unweighted mean if none are supplied).
-                                          aggregation = c("median", "weighted_mean")
+                                          ## aggregation = c("median", "weighted_mean")
+                                          aggregation = c("median", "weighted_mean"),
+                                          ##
+                                          ## ---- Position in the learning-rate schedule (both OPTIONAL).
+                                          ##
+                                          ## The learning rate falls linearly from LR at schedule iteration 1 to LR^2 at schedule
+                                          ## iteration learning_rate_schedule_length. NULL keeps the historical schedule (ii and
+                                          ## n_burnin). A schedule restarted part-way through the tau adaptation (e.g. at the metric
+                                          ## freeze) passes its own iteration and length; ii, the ADAM moments and the bias
+                                          ## correction are not affected by them.
+                                          learning_rate_schedule_iteration = NULL,
+                                          learning_rate_schedule_length = NULL
 ) {
 
         aggregation <- match.arg(aggregation)
@@ -59,6 +70,18 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         if (length(bias_correction_step) != 1 || !is.finite(bias_correction_step) || bias_correction_step < 1) {
             stop(paste0("R_fn_update_tau_using_ADAM: bias_correction_step must be a single finite number >= 1; got: ",
                         paste(bias_correction_step, collapse = ", ")))
+        }
+        ##
+        ## ---- learning-rate schedule position (both or neither; NULL = ii / n_burnin, the historical schedule):
+        ##
+        if (!is.null(learning_rate_schedule_iteration) || !is.null(learning_rate_schedule_length)) {
+            if (length(learning_rate_schedule_iteration) != 1 || !is.finite(learning_rate_schedule_iteration) || learning_rate_schedule_iteration < 1 ||
+                length(learning_rate_schedule_length) != 1 || !is.finite(learning_rate_schedule_length) || learning_rate_schedule_length < 1) {
+                stop(paste0("R_fn_update_tau_using_ADAM: learning_rate_schedule_iteration and learning_rate_schedule_length must both be ",
+                            "single finite numbers >= 1 (or both NULL); got: ",
+                            paste(learning_rate_schedule_iteration, collapse = ", "), " and ",
+                            paste(learning_rate_schedule_length, collapse = ", ")))
+            }
         }
         ##
         ## ---- every return carries attr "adam_update_performed" so the caller can count real updates:
@@ -180,7 +203,13 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         ##
         ## ii and n_burnin here count TAU-adaptation iterations, excluding the preceding ramp.
         ## Start at the full requested LR, then decay over this optimiser's own active window.
-        adaptation_progress <- if (n_burnin <= 1) 0 else min(1, max(0, (ii - 1) / (n_burnin - 1)))
+        ## A restarted schedule replaces them by learning_rate_schedule_iteration / learning_rate_schedule_length
+        ## (NULL = ii / n_burnin, the historical schedule):
+        learning_rate_schedule_iteration <- if_null_then_set_to(learning_rate_schedule_iteration, ii)
+        learning_rate_schedule_length <- if_null_then_set_to(learning_rate_schedule_length, n_burnin)
+        # adaptation_progress <- if (n_burnin <= 1) 0 else min(1, max(0, (ii - 1) / (n_burnin - 1)))
+        adaptation_progress <- if (learning_rate_schedule_length <= 1) 0 else
+                                   min(1, max(0, (learning_rate_schedule_iteration - 1) / (learning_rate_schedule_length - 1)))
         current_alpha = LR * (1.0 - (1.0 - LR) * adaptation_progress);
         
         # CRITICAL FIX: Work in log space more carefully
@@ -239,6 +268,8 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
           adam_update_performed <- FALSE
         }
         ##
+        ## the aggregated gradient of this update (read by the probe of NicoStan_tau_adaptation_scheme = "probe_then_average"):
+        attr(out_vec, "aggregated_gradient") <- tau_noisy_grad_mean
         return(fn_mark_adam_update_performed(returned_vector       = out_vec,
                                              adam_update_performed = adam_update_performed))
   

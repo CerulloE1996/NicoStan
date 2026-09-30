@@ -984,6 +984,51 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// fn_persistent_burnin_tau_initial_api_version
+int fn_persistent_burnin_tau_initial_api_version();
+RcppExport SEXP _NicoStan_fn_persistent_burnin_tau_initial_api_version() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(fn_persistent_burnin_tau_initial_api_version());
+    return rcpp_result_gen;
+END_RCPP
+}
+// fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident
+void fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident(SEXP worker_ptr, const Rcpp::IntegerMatrix positions);
+RcppExport SEXP _NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident(SEXP worker_ptrSEXP, SEXP positionsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type worker_ptr(worker_ptrSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerMatrix >::type positions(positionsSEXP);
+    fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident(worker_ptr, positions);
+    return R_NilValue;
+END_RCPP
+}
+// fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident
+Rcpp::NumericMatrix fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident(SEXP worker_ptr, SEXP centre_R, SEXP scale_R);
+RcppExport SEXP _NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident(SEXP worker_ptrSEXP, SEXP centre_RSEXP, SEXP scale_RSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type worker_ptr(worker_ptrSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type centre_R(centre_RSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type scale_R(scale_RSEXP);
+    rcpp_result_gen = Rcpp::wrap(fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident(worker_ptr, centre_R, scale_R));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fn_persistent_burnin_tau_initial_nuisance_moments_get_resident
+Rcpp::List fn_persistent_burnin_tau_initial_nuisance_moments_get_resident(SEXP worker_ptr);
+RcppExport SEXP _NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_get_resident(SEXP worker_ptrSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type worker_ptr(worker_ptrSEXP);
+    rcpp_result_gen = Rcpp::wrap(fn_persistent_burnin_tau_initial_nuisance_moments_get_resident(worker_ptr));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Rcpp_fn_OpenMP_EHMC_sampling
 Rcpp::List Rcpp_fn_OpenMP_EHMC_sampling(const int n_threads_R, const int seed_R, const int n_iter_R, const bool iter_one_by_one, const bool partitioned_HMC_R, const bool diffusion_HMC_R, const std::string Model_type_R, const bool sample_nuisance_R, const bool force_autodiff_R, const bool force_PartialLog_R, const bool multi_attempts_R, const int n_nuisance_to_track, const Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, const Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, const Rcpp::List EHMC_args_as_Rcpp_List, const Rcpp::List EHMC_Metric_as_Rcpp_List, const int n_threads_WCP);
 RcppExport SEXP _NicoStan_Rcpp_fn_OpenMP_EHMC_sampling(SEXP n_threads_RSEXP, SEXP seed_RSEXP, SEXP n_iter_RSEXP, SEXP iter_one_by_oneSEXP, SEXP partitioned_HMC_RSEXP, SEXP diffusion_HMC_RSEXP, SEXP Model_type_RSEXP, SEXP sample_nuisance_RSEXP, SEXP force_autodiff_RSEXP, SEXP force_PartialLog_RSEXP, SEXP multi_attempts_RSEXP, SEXP n_nuisance_to_trackSEXP, SEXP theta_main_vectors_all_chains_input_from_RSEXP, SEXP theta_us_vectors_all_chains_input_from_RSEXP, SEXP y_Eigen_RSEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP EHMC_args_as_Rcpp_ListSEXP, SEXP EHMC_Metric_as_Rcpp_ListSEXP, SEXP n_threads_WCPSEXP) {
@@ -1078,6 +1123,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_NicoStan_fn_persistent_burnin_joint_direction_update_snaper_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_joint_direction_update_snaper_resident, 4},
     {"_NicoStan_fn_persistent_burnin_joint_position_reductions_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_joint_position_reductions_resident, 7},
     {"_NicoStan_fn_persistent_burnin_joint_kinetic_energy_sums_us_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_joint_kinetic_energy_sums_us_resident, 3},
+    {"_NicoStan_fn_persistent_burnin_tau_initial_api_version", (DL_FUNC) &_NicoStan_fn_persistent_burnin_tau_initial_api_version, 0},
+    {"_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident, 2},
+    {"_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident, 3},
+    {"_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_get_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_get_resident, 1},
     {"_NicoStan_Rcpp_fn_OpenMP_EHMC_sampling", (DL_FUNC) &_NicoStan_Rcpp_fn_OpenMP_EHMC_sampling, 19},
     {NULL, NULL, 0}
 };

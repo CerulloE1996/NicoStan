@@ -80,10 +80,12 @@ fn_transport_snaper_direction <-  function( direction,
         if (is.list(metric_factor)) {
                 ## joint factor: transport each block with its own factors, then renormalise the whole direction once.
                 main_rows <-  seq_len(metric_factor$n_main)
-                transported <-  c(fn_transport_snaper_direction(direction[main_rows], previous_factor$main, metric_factor$main) *
-                                      sqrt(sum(direction[main_rows]^2)),
-                                  fn_transport_snaper_direction(direction[-main_rows], previous_factor$us, metric_factor$us) *
-                                      sqrt(sum(direction[-main_rows]^2)))
+                theta_space_main <-  if (is.matrix(previous_factor$main)) c(backsolve(previous_factor$main, direction[main_rows])) else
+                                         direction[main_rows] / previous_factor$main
+                transported_main <-  if (is.matrix(metric_factor$main)) c(metric_factor$main %*% theta_space_main) else
+                                         metric_factor$main * theta_space_main
+                transported <-  c(transported_main,
+                                  metric_factor$us * (direction[-main_rows] / previous_factor$us))
                 magnitude <-  sqrt(sum(transported^2))
                 if (!is.finite(magnitude) || magnitude == 0) return(fn_initialise_snaper_direction(length(direction)))
                 return(transported / magnitude)
@@ -104,7 +106,18 @@ fn_metric_position_criterion <-  function( algorithm,
                                            mean_proposed,
                                            metric_factor,
                                            tau_values,
-                                           direction = NULL) {
+                                           ## direction = NULL) {
+                                           direction = NULL,
+                                           ##
+                                           ## ---- burnin_algorithm = "CHESSR_time" / "SNAPER_time" only (see R_fn_time_criterion.R); the other criteria ignore
+                                           ##      them. With both at 0 the "_time" criteria are CHESSR / SNAPER exactly:
+                                           tau_offset_from_sampling_overhead      = 0,
+                                           ## burnin_to_sampling_leapfrog_time_ratio = 0) {
+                                           burnin_to_sampling_leapfrog_time_ratio = 0,
+                                           ##
+                                           ## ---- "CHESSR_time" / "SNAPER_time" only: MALT's exponent, the penalty times (1 + lag_one_autocorrelation_rho) / 2
+                                           ##      (R_fn_time_criterion.R, "MALT exponent"); 1 (default) leaves the penalty unchanged bit for bit:
+                                           lag_one_autocorrelation_rho            = 1) {
 
         theta_initial <-  as.matrix(theta_initial)
         theta_proposed <-  as.matrix(theta_proposed)
@@ -113,13 +126,15 @@ fn_metric_position_criterion <-  function( algorithm,
             !identical(dim(theta_initial), dim(velocity_proposed)) ||
             length(mean_initial) != nrow(theta_initial) || length(mean_proposed) != nrow(theta_initial) ||
             length(tau_values) != ncol(theta_initial)) stop("Trajectory endpoint dimensions do not agree.")
-        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
+        ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
+        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) stop("Unknown position-based trajectory algorithm.")
         ##
         initial <-  fn_apply_trajectory_metric(metric_factor, theta_initial - mean_initial)
         proposed <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - mean_proposed)
         velocity <-  fn_apply_trajectory_metric(metric_factor, velocity_proposed)
         ## velocity already equals d(theta)/dt. No additional M_inv belongs here.
-        if (algorithm == "SNAPER") {
+        ## if (algorithm == "SNAPER") {
+        if (algorithm %in% c("SNAPER", "SNAPER_time")) {
                 if (length(direction) != nrow(initial) || any(!is.finite(direction))) stop("Invalid SNAPER direction.")
                 projection_initial <-  c(crossprod(direction, initial))
                 projection_proposed <-  c(crossprod(direction, proposed))
@@ -136,6 +151,26 @@ fn_metric_position_criterion <-  function( algorithm,
         if (algorithm == "ChEES") {
                 return(list(gradient = numerator_gradient, criterion = numerator,
                             numerator_gradient = numerator_gradient, numerator = numerator))
+        }
+        ##
+        ## ---- CHESSR_time / SNAPER_time: the rate criteria ascend  ESS_elasticity_wrt_log_tau - 1,  i.e. per chain
+        ##      (numerator_gradient - numerator) / tau_values; these ascend  ESS_elasticity_wrt_log_tau - time_to_target_ESS_tau_penalty,
+        ##      with the penalty (1 + burnin_to_sampling_leapfrog_time_ratio) * tau_values / (tau_values + tau_offset_from_sampling_overhead)
+        ##      at each chain's own trajectory length (R_fn_time_criterion.R). The reported criterion value is the rate criterion's.
+        ##      The penalty is multiplied by (1 + lag_one_autocorrelation_rho) / 2 (MALT's exponent), exactly 1 at the default
+        ##      lag_one_autocorrelation_rho = 1.
+        ##
+        if (algorithm %in% c("CHESSR_time", "SNAPER_time")) {
+                time_to_target_ESS_tau_penalty <-  fn_time_to_target_ESS_tau_penalty( tau_values                             = tau_values,
+                                                                                       tau_offset_from_sampling_overhead      = tau_offset_from_sampling_overhead,
+                                                                                       ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio)
+                                                                                       burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio,
+                                                                                       lag_one_autocorrelation_rho            = lag_one_autocorrelation_rho)
+                return(list(gradient = (numerator_gradient - numerator * time_to_target_ESS_tau_penalty) / tau_values,
+                             criterion = numerator / tau_values,
+                             numerator_gradient = numerator_gradient,
+                             numerator = numerator,
+                             time_to_target_ESS_tau_penalty = time_to_target_ESS_tau_penalty))
         }
         return(list(gradient = (numerator_gradient - numerator) / tau_values,
                      criterion = numerator / tau_values,
@@ -156,10 +191,19 @@ fn_metric_position_criterion <-  function( algorithm,
 ##
 fn_metric_position_criterion_from_reductions <-  function( algorithm,
                                                            reductions,
-                                                           tau_values) {
+                                                           ## tau_values) {
+                                                           tau_values,
+                                                           ##
+                                                           ## ---- CHESSR_time / SNAPER_time only (as in fn_metric_position_criterion):
+                                                           tau_offset_from_sampling_overhead      = 0,
+                                                           ## burnin_to_sampling_leapfrog_time_ratio = 0) {
+                                                           burnin_to_sampling_leapfrog_time_ratio = 0,
+                                                           lag_one_autocorrelation_rho            = 1) {
 
-        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
-        if (algorithm == "SNAPER") {
+        ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
+        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) stop("Unknown position-based trajectory algorithm.")
+        ## if (algorithm == "SNAPER") {
+        if (algorithm %in% c("SNAPER", "SNAPER_time")) {
                 projection_initial <-  c(reductions$projection_initial)
                 projection_proposed <-  c(reductions$projection_proposed)
                 projection_velocity <-  c(reductions$projection_velocity)
@@ -182,6 +226,26 @@ fn_metric_position_criterion_from_reductions <-  function( algorithm,
         if (algorithm == "ChEES") {
                 return(list(gradient = numerator_gradient, criterion = numerator,
                             numerator_gradient = numerator_gradient, numerator = numerator))
+        }
+        ##
+        ## ---- CHESSR_time / SNAPER_time: the rate criteria ascend  ESS_elasticity_wrt_log_tau - 1,  i.e. per chain
+        ##      (numerator_gradient - numerator) / tau_values; these ascend  ESS_elasticity_wrt_log_tau - time_to_target_ESS_tau_penalty,
+        ##      with the penalty (1 + burnin_to_sampling_leapfrog_time_ratio) * tau_values / (tau_values + tau_offset_from_sampling_overhead)
+        ##      at each chain's own trajectory length (R_fn_time_criterion.R). The reported criterion value is the rate criterion's.
+        ##      The penalty is multiplied by (1 + lag_one_autocorrelation_rho) / 2 (MALT's exponent), exactly 1 at the default
+        ##      lag_one_autocorrelation_rho = 1.
+        ##
+        if (algorithm %in% c("CHESSR_time", "SNAPER_time")) {
+                time_to_target_ESS_tau_penalty <-  fn_time_to_target_ESS_tau_penalty( tau_values                             = tau_values,
+                                                                                       tau_offset_from_sampling_overhead      = tau_offset_from_sampling_overhead,
+                                                                                       ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio)
+                                                                                       burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio,
+                                                                                       lag_one_autocorrelation_rho            = lag_one_autocorrelation_rho)
+                return(list(gradient = (numerator_gradient - numerator * time_to_target_ESS_tau_penalty) / tau_values,
+                             criterion = numerator / tau_values,
+                             numerator_gradient = numerator_gradient,
+                             numerator = numerator,
+                             time_to_target_ESS_tau_penalty = time_to_target_ESS_tau_penalty))
         }
         return(list(gradient = (numerator_gradient - numerator) / tau_values,
                      criterion = numerator / tau_values,
@@ -226,7 +290,22 @@ fn_metric_tau_block_update <-  function( algorithm,
                                          ##      from the endpoints. When it is supplied, the endpoint arguments, the means, metric_factor and direction
                                          ##      are not used, except the number of columns (chains) of theta_initial.
                                          ##
-                                         position_criterion = NULL) {
+                                         ## position_criterion = NULL) {
+                                         position_criterion = NULL,
+                                         ##
+                                         ## ---- CHESSR_time / SNAPER_time only: passed on to fn_metric_position_criterion (endpoints). A position_criterion
+                                         ##      supplied from elsewhere already carries them (fn_metric_position_criterion_from_reductions):
+                                         tau_offset_from_sampling_overhead      = 0,
+                                         ## burnin_to_sampling_leapfrog_time_ratio = 0) {
+                                         burnin_to_sampling_leapfrog_time_ratio = 0,
+                                         ## (and MALT's exponent, lag_one_autocorrelation_rho; 1 = the penalty without it)
+                                         ## lag_one_autocorrelation_rho            = 1) {
+                                         lag_one_autocorrelation_rho            = 1,
+                                         ##
+                                         ## ---- position in the tau learning-rate schedule, passed on to R_fn_update_tau_using_ADAM (NULL = iteration and
+                                         ##      adaptation_iterations: one linear decay LR -> LR^2 over the tau adaptation):
+                                         learning_rate_schedule_iteration       = NULL,
+                                         learning_rate_schedule_length          = NULL) {
 
         use_proposals <-  isTRUE(weight_by_probability)
         if (!is.null(position_criterion)) {
@@ -241,7 +320,12 @@ fn_metric_tau_block_update <-  function( algorithm,
             mean_proposed = if (use_proposals) mean_proposed else mean_initial,
             metric_factor = metric_factor,
             tau_values = tau_values,
-            direction = direction)
+            ## direction = direction)
+            direction = direction,
+            tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead,
+            ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio)
+            burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio,
+            lag_one_autocorrelation_rho = lag_one_autocorrelation_rho)
         }  ## end of: if (!is.null(position_criterion))
         ##
         if (length(probabilities) != ncol(as.matrix(theta_initial)) ||
@@ -282,7 +366,34 @@ fn_metric_tau_block_update <-  function( algorithm,
                     tau_m_adam = adam_mean, tau_v_adam = adam_variance,
                     beta1_adam = beta1, beta2_adam = beta2, eps_adam = adam_epsilon,
                     bias_correction_step = bias_correction_step,
-                    aggregation = "weighted_mean")
+                    ## aggregation = "weighted_mean")
+                    aggregation = "weighted_mean",
+                    learning_rate_schedule_iteration = learning_rate_schedule_iteration,
+                    learning_rate_schedule_length = learning_rate_schedule_length)
+        }
+        ##
+        ## ---- CHESSR_time / SNAPER_time: also return the chain-mean estimate of ESS_elasticity_wrt_log_tau that the criterion drives
+        ##      towards time_to_target_ESS_tau_penalty, with the weights and the 1 / tau_values of the ascended quantity:
+        ##        ESS_elasticity_wrt_log_tau = sum(weights * numerator_gradient / tau_values) / sum(weights * numerator / tau_values),
+        ##      the value of the penalty at which the mean ascended quantity is 0 when the chains share tau. Its two chain means are
+        ##      returned as well, so that estimates over several updates can be pooled as a ratio of sums. The other criteria return
+        ##      the list below unchanged:
+        ##
+        if (algorithm %in% c("CHESSR_time", "SNAPER_time")) {
+                ChEES_or_SNAPER_statistic_per_tau_chain_mean <-  sum(ifelse(valid, weights * criterion$numerator / tau_values, 0)) / length(weights)
+                ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean <-  sum(ifelse(valid, weights * criterion$numerator_gradient / tau_values, 0)) /
+                                                                                    length(weights)
+                ESS_elasticity_wrt_log_tau <-  if (is.finite(ChEES_or_SNAPER_statistic_per_tau_chain_mean) && ChEES_or_SNAPER_statistic_per_tau_chain_mean > 0) {
+                        ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean / ChEES_or_SNAPER_statistic_per_tau_chain_mean
+                } else NA_real_
+                return(list(updated = updated,
+                             adam_update_performed = isTRUE(attr(updated, "adam_update_performed")),
+                             gradient = gradient_used,
+                             criterion = sum(weights * values) / length(weights),
+                             criterion_ema = criterion_updated,
+                             ChEES_or_SNAPER_statistic_per_tau_chain_mean = ChEES_or_SNAPER_statistic_per_tau_chain_mean,
+                             ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean = ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean,
+                             ESS_elasticity_wrt_log_tau = ESS_elasticity_wrt_log_tau))
         }
         return(list(updated = updated,
                      adam_update_performed = isTRUE(attr(updated, "adam_update_performed")),

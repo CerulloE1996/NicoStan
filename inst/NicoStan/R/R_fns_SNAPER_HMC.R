@@ -99,7 +99,8 @@ fn_weighted_proposal_mean <-  function( proposals,
 fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
 
         if (length(burnin_algorithm) != 1L || is.na(burnin_algorithm)) {
-            stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'.")
+            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'.")
+            stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'.")
         }
         algorithm_key <- tolower(trimws(as.character(burnin_algorithm)))
         ##
@@ -122,8 +123,19 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            snaper = "SNAPER",
                            `snaper-hmc` = "SNAPER",
                            snaper_hmc = "SNAPER",
+                           ##
+                           ## ---- the time-to-target-ESS variants of CHESSR and SNAPER (R_fn_time_criterion.R):
+                           ##
+                           chessr_time = "CHESSR_time",
+                           cheesr_time = "CHESSR_time",
+                           `chess-r-time` = "CHESSR_time",
+                           `chees-r-time` = "CHESSR_time",
+                           snaper_time = "SNAPER_time",
+                           `snaper-time` = "SNAPER_time",
+                           snaper_hmc_time = "SNAPER_time",
                            ke = "KE",
-                           stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'; got: ", burnin_algorithm))
+                           ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'; got: ", burnin_algorithm))
+                           stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'; got: ", burnin_algorithm))
         return(algorithm)
 
 }

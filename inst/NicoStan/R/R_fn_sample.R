@@ -21,6 +21,13 @@
 ##                jitter: max E[sin^2(t)] / T (ratio of means, as coded) -> T = pi/4 = 0.7854  factor 0.6738
 ##
 ## (KE uses the squared kinetic-energy change, which for the unit Gaussian has the same optimum as ChEES.)
+## CHESSR_time / SNAPER_time (R_fn_time_criterion.R) use the CHESSR / SNAPER factor 0.7678. It is exact when their penalty is 1
+## (sampling_overhead_in_leapfrog_steps = 0 and burnin_to_sampling_leapfrog_time_ratio = 0); with a positive
+## tau_offset_from_sampling_overhead the jittered optimum lies between the ChEES and the rate factors, and that offset is not a
+## unit-Gaussian constant, so 0.7678 is the documented approximation.
+## With MALT's exponent, lag_one_autocorrelation_rho < 1 (the penalty times (1 + lag_one_autocorrelation_rho) / 2; R_fn_time_criterion.R),
+## the fixed-length optimum moves from sin^2(t) / t towards sin^2(t) / t^((1 + lag_one_autocorrelation_rho) / 2), so 0.7678 is a further
+## approximation there.
 ## The factors are computed here from those formulas rather than typed in, so they trace to the derivation.
 ##
 fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
@@ -59,7 +66,8 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
         ##
         if (burnin_algorithm %in% c("KE", "ChEES")) {
                 return(fn_first_maximiser(fn_expected_chees_jittered) / tau_fixed_optimum_chees)
-        } else if (burnin_algorithm %in% c("CHESSR", "SNAPER")) {
+        ## } else if (burnin_algorithm %in% c("CHESSR", "SNAPER")) {
+        } else if (burnin_algorithm %in% c("CHESSR", "SNAPER", "CHESSR_time", "SNAPER_time")) {
                 return(fn_first_maximiser(fn_expected_per_chain_rate_jittered) / tau_fixed_optimum_rate)
         } else if (burnin_algorithm == "CHESSR_log") {
                 return(fn_first_maximiser(fn_ratio_of_means_rate_jittered) / tau_fixed_optimum_rate)
@@ -211,6 +219,45 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #' @param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in.
 #'   FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in
 #'   and skips that search; it has no effect when no pre-burnin runs.
+#' @param eps_acceptance_mean NULL/"harmonic" (default) adapts the burn-in step size (eps) so that the HARMONIC mean over the
+#'   burn-in chains of the per-chain acceptance probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC
+#'   (Hoffman, Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero acceptance (a divergent
+#'   proposal, which includes |log ratio| > 1000 in either direction, or an exp(log ratio) that underflowed to 0) makes this
+#'   mean 0. "arithmetic" uses mean(alpha_k), the rule used before this option existed. "geometric" uses
+#'   exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between the harmonic and the arithmetic
+#'   mean. Applies to the pre-burnin and the main burn-in; the value used is returned.
+#' @param tau_shrink_on_divergence,tau_shrink_factor,tau_shrink_min_divergent_chains Divergence-triggered tau shrink in the
+#'   burn-in. NULL/FALSE (default) = off. TRUE multiplies tau by tau_shrink_factor (NULL = 0.95) at each adaptation iteration in
+#'   which at least tau_shrink_min_divergent_chains (NULL = 2) burn-in chains diverge, which is the rule used in earlier runs.
+#'   The settings and the number of iterations at which the shrink fired are returned.
+#' @param metric_pooled_window_resets Pooled metric estimator (metric_estimator = "pooled") only: iterations r at which its
+#'   Welford accumulators (main covariance and nuisance variances) are reset, at the start of iteration r + 1.
+#'   NULL/"stan_style" (default) = round(c(0.30, 0.60) * n_adapt), the resets used before this option existed; "none" = one
+#'   window from metric_start_iter to metric_adaptation_end_iter; or a numeric vector of whole numbers >= 0. Applies to the
+#'   pre-burnin and the main burn-in; the value used and the reset iterations of the main burn-in are returned.
+#' @param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1] (NULL = 0, as before this option
+#'   existed), applied once to each pooled covariance proposal of the dense main metric as (1 - s) * cov + s * diag(diag(cov)).
+#'   0 keeps all off-diagonals unshrunk. Applies to the pre-burnin and the main burn-in; the value used is returned.
+#' @param time_criterion_settings burnin_algorithm = "CHESSR_time" / "SNAPER_time" only: NULL (default) or a named list of the
+#'   time-to-target-ESS criterion settings (sampling timing probe, previous saved run(s), user-supplied times, ESS target); see
+#'   fn_default_time_criterion_settings() and R_fn_time_criterion.R. The quantities used, their sources, the probe result and
+#'   the burn-in record are returned as time_criterion; the probe's wall time is included in time_burnin.
+#'   sampling_overhead_in_leapfrog_steps: NULL (default; user times > previous run > probe), a number >= 0 (used as it is; no
+#'   probe) or "auto": a value for the sampling configuration (n_chains_sampling chains, n_threads_WCP_sampling threads per chain,
+#'   the sampling chunk count), never from the burn-in's timings or a saved run: the built-in default for the model, that
+#'   configuration and the machine's number of physical cores when one exists (fn_default_sampling_overhead_in_leapfrog_steps),
+#'   otherwise the sampling timing probe in its "lite" mode. With the built-in default, as with a number, no probe runs, and
+#'   burnin_to_sampling_leapfrog_time_ratio uses a user-supplied or previous-run time_per_leapfrog_step_sampling (else 0, with a
+#'   warning). sampling_timing_probe_mode: NULL (default; "lite" with "auto", else "full"), "full" or "lite" (the smallest and the
+#'   largest sampling_timing_probe_L_values only, and the summaries timed once, less their fixed set-up, which is measured once per
+#'   R session and cached). With the default sampling_timing_probe_L_values = c(2, 8) and no cached set-up (the first lite probe
+#'   of a configuration in an R session, and always with run_in_fresh_R_process = TRUE), a lite probe makes exactly the full
+#'   probe's calls. The source used (built_in_default, probe_lite, probe_full, probe_lite_without_summaries,
+#'   probe_full_without_summaries or user_supplied) and the two parts of the value are in
+#'   time_criterion$time_criterion_sampling_quantities.
+#'   lag_one_autocorrelation_rho: MALT's exponent, a number in [0, 1] (default 1 = the criterion without it) or "adaptive"
+#'   (estimated during the tau adaptation); lag_one_autocorrelation_rho_moment_averaging_offset: the offset in MALT's running-moment
+#'   weight (default 8). The values used at each tau update are in time_criterion$burnin.
 #' @param vect_type,Phi_type,inv_Phi_type NULL (default) = not supplied, which changes nothing. These settings are NOT
 #'   chosen here: for Model_type = "Stan" they are not used at all (the .stan file defines its own maths), so a non-NULL
 #'   value stops; for the built-in models they are set at model initialisation via model_args_list$vect_type /
@@ -276,6 +323,37 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## it with find_initial_eps; FALSE keeps the eps adapted up to gap. See init_and_run_burnin_ChESSR.
                                         eps_reinit_at_ChEES_handover = NULL,
                                         ##
+                                        ## Cross-chain mean acceptance targeted by the burn-in eps adaptation: "harmonic" (default; K / sum_k (1 / alpha_k),
+                                        ## as in ChEES-HMC and SNAPER-HMC) or "arithmetic" (the earlier rule). See init_and_run_burnin_ChESSR.
+                                        eps_acceptance_mean = NULL,
+                                        ##
+                                        ## Divergence-triggered tau shrink in the burn-in: NULL/FALSE (default) = off; TRUE = multiply tau by
+                                        ## tau_shrink_factor (NULL = 0.95) at each adaptation iteration in which at least tau_shrink_min_divergent_chains
+                                        ## (NULL = 2) burn-in chains diverge (the rule used in earlier runs). See init_and_run_burnin_ChESSR.
+                                        tau_shrink_on_divergence        = NULL,
+                                        tau_shrink_factor               = NULL,
+                                        tau_shrink_min_divergent_chains = NULL,
+                                        ##
+                                        ## Pooled metric estimator (metric_estimator = "pooled") only, in the pre-burnin and the main burn-in.
+                                        ## NULL for both = the earlier rule ("stan_style", 0), so a call that passes neither runs exactly as before:
+                                        ##   metric_pooled_window_resets          - NULL/"stan_style" (default) = reset the Welford accumulators (main
+                                        ##                                          covariance and nuisance variances) at round(c(0.30, 0.60) * n_adapt);
+                                        ##                                          "none" = one window from metric_start_iter to
+                                        ##                                          metric_adaptation_end_iter; or a numeric vector of reset iterations.
+                                        ##   metric_pooled_offdiagonal_shrinkage  - NULL = 0; each pooled main covariance proposal becomes
+                                        ##                                          (1 - s) * cov + s * diag(diag(cov)).
+                                        ## See init_and_run_burnin_ChESSR and R_fn_metric_pooled_settings.R.
+                                        metric_pooled_window_resets          = NULL,
+                                        metric_pooled_offdiagonal_shrinkage  = NULL,
+                                        ## burnin_algorithm = "CHESSR_time" / "SNAPER_time" only: settings of the time-to-target-ESS criterion (sampling timing
+                                        ## probe, previous saved run(s), user-supplied times, ESS target), as a named list; NULL = the defaults
+                                        ## (fn_default_time_criterion_settings(), R_fn_time_criterion.R). Ignored by the other criteria.
+                                        ## Also: sampling_overhead_in_leapfrog_steps = a number (no probe) or "auto" (the built-in default for the sampling
+                                        ## configuration and machine, else the sampling timing probe in its "lite" mode; never the burn-in's timings or a saved run),
+                                        ## sampling_timing_probe_mode = "full" / "lite", and MALT's exponent lag_one_autocorrelation_rho = a number in [0, 1]
+                                        ## (default 1) or "adaptive".
+                                        time_criterion_settings = NULL,
+                                        ##
                                         ## eps at the START of the MAIN burn-in, after the test-order pre-burnin (reorder_cols_MVP = TRUE): TRUE (default)
                                         ## re-initialises it with find_initial_eps; FALSE carries the pre-burnin's final eps (main and nuisance) into the
                                         ## main burn-in and skips that search. Inert when no pre-burnin runs. See init_and_run_burnin_ChESSR (eps_carry_over).
@@ -303,7 +381,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##   share_tau_ii_across_chains_in_burnin - TRUE = one tau_ii per iteration shared by all MAIN burn-in chains
                                         ##                                          (momenta stay per-chain); NULL/FALSE = per-chain tau_ii (as before).
                                         share_tau_ii_across_chains_in_burnin = NULL,
-                                        randomize_tau_burnin = FALSE,
+                                        # randomize_tau_burnin = FALSE,
+                                        randomize_tau_burnin,                  ## tau adapted under the sampling jitter U(0, 2 tau), as in ChEES and SNAPER
                                         randomize_tau_sampling = TRUE,
                                         ##   tau_sampling_scale                   - multiply the adapted tau ONCE at the burn-in -> sampling switch,
                                         ##                                          only when tau was adapted with a fixed length (randomize_tau_burnin
@@ -424,6 +503,26 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     ## build has no such argument still runs.
                     if (is.null(eps_reinit_after_pre_burnin)) {
                         argument_names <-  setdiff(argument_names, "eps_reinit_after_pre_burnin")
+                    }
+                    ## The same for a NULL eps_acceptance_mean (the default, "harmonic"):
+                    if (is.null(eps_acceptance_mean)) {
+                        argument_names <-  setdiff(argument_names, "eps_acceptance_mean")
+                    }
+                    ## The same for a NULL time_criterion_settings (the default):
+                    if (is.null(time_criterion_settings)) {
+                        argument_names <-  setdiff(argument_names, "time_criterion_settings")
+                    }
+                    ## The same holds for the divergence-triggered tau shrink options:
+                    for (tau_shrink_argument_name in c("tau_shrink_on_divergence", "tau_shrink_factor", "tau_shrink_min_divergent_chains")) {
+                        if (is.null(get(tau_shrink_argument_name, envir = environment(), inherits = FALSE))) {
+                            argument_names <-  setdiff(argument_names, tau_shrink_argument_name)
+                        }
+                    }
+                    ## and for the pooled metric estimator options:
+                    for (metric_pooled_argument_name in c("metric_pooled_window_resets", "metric_pooled_offdiagonal_shrinkage")) {
+                        if (is.null(get(metric_pooled_argument_name, envir = environment(), inherits = FALSE))) {
+                            argument_names <-  setdiff(argument_names, metric_pooled_argument_name)
+                        }
                     }
                     fit_frame <-  environment()
                     fit_arguments <-  setNames(lapply(argument_names, function(argument_name) {
@@ -570,6 +669,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 max_eps_us <- max_eps_nuisance
                 ##
                 burnin_algorithm <- fn_normalise_burnin_algorithm(if_null_then_set_to(burnin_algorithm, "CHESSR"))
+                ##
+                ## ---- CHESSR_time / SNAPER_time: settings of the time-to-target-ESS criterion (defaults filled in; NULL stays NULL for
+                ##      the other criteria, which ignore them):
+                ##
+                if (fn_burnin_algorithm_is_time_criterion(burnin_algorithm) || !is.null(time_criterion_settings)) {
+                    time_criterion_settings <- fn_validate_time_criterion_settings(time_criterion_settings)
+                }
                 ##
                 parallel_method <- if_null_then_set_to(parallel_method, "RcppParallel")
                 ##
@@ -727,10 +833,14 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 LR_main <- LR_us <- learning_rate
                 ##
                 tau_mult <- if_null_then_set_to(tau_mult, 1.60)
-                if (!is.null(x = tau_initial)) {
+                ## tau_initial = "adaptive": the burn-in ramp targets pi and the handover sets tau = (pi/2) * sqrt(lambda_max) from the
+                ## burn-in draws (see init_and_run_burnin_ChESSR); it is passed through unchanged.
+                ## if (!is.null(x = tau_initial)) {
+                if (!is.null(x = tau_initial) && !identical(x = tau_initial, y = "adaptive")) {
                   if (!is.numeric(x = tau_initial) || length(x = tau_initial) != 1L ||
                       !is.finite(x = tau_initial) || tau_initial <= 0) {
-                    stop("'tau_initial' must be NULL or a single positive finite number.")
+                    ## stop("'tau_initial' must be NULL or a single positive finite number.")
+                    stop("'tau_initial' must be NULL, \"adaptive\" or a single positive finite number.")
                   }
                 }
                 ##
@@ -744,7 +854,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 tau_weight_by_p_jump <- if_null_then_set_to(tau_weight_by_p_jump, burnin_algorithm != "KE")
                 tau_ramp <- if_null_then_set_to(tau_ramp, "original")
                 eps_reinit_at_ChEES_handover <- if_null_then_set_to(eps_reinit_at_ChEES_handover, TRUE)
+                eps_acceptance_mean <- if_null_then_set_to(eps_acceptance_mean, "harmonic")
                 eps_reinit_after_pre_burnin <- if_null_then_set_to(eps_reinit_after_pre_burnin, TRUE)
+                tau_shrink_on_divergence        <- if_null_then_set_to(tau_shrink_on_divergence, FALSE)
+                tau_shrink_factor               <- if_null_then_set_to(tau_shrink_factor, 0.95)
+                tau_shrink_min_divergent_chains <- if_null_then_set_to(tau_shrink_min_divergent_chains, 2)
                 share_tau_ii_across_chains_in_burnin <- isTRUE(if_null_then_set_to(share_tau_ii_across_chains_in_burnin, FALSE))
                 for (flag in c("randomize_tau_burnin", "randomize_tau_sampling")) {
                     value <-  get(flag)
@@ -789,13 +903,38 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 if (!is.logical(eps_reinit_after_pre_burnin) || length(eps_reinit_after_pre_burnin) != 1 || is.na(eps_reinit_after_pre_burnin)) {
                     stop("eps_reinit_after_pre_burnin must be TRUE or FALSE; got: ", paste(as.character(eps_reinit_after_pre_burnin), collapse = ", "))
                 }
+                if (!is.logical(tau_shrink_on_divergence) || length(tau_shrink_on_divergence) != 1 || is.na(tau_shrink_on_divergence)) {
+                    stop("tau_shrink_on_divergence must be TRUE or FALSE; got: ", paste(as.character(tau_shrink_on_divergence), collapse = ", "))
+                }
+                if (!is.numeric(tau_shrink_factor) || length(tau_shrink_factor) != 1 || !is.finite(tau_shrink_factor) ||
+                    tau_shrink_factor <= 0 || tau_shrink_factor > 1) {
+                    stop("tau_shrink_factor must be a single number in (0, 1]; got: ", paste(as.character(tau_shrink_factor), collapse = ", "))
+                }
+                if (!is.numeric(tau_shrink_min_divergent_chains) || length(tau_shrink_min_divergent_chains) != 1 ||
+                    !is.finite(tau_shrink_min_divergent_chains) || tau_shrink_min_divergent_chains < 1 ||
+                    tau_shrink_min_divergent_chains != round(tau_shrink_min_divergent_chains)) {
+                    stop("tau_shrink_min_divergent_chains must be a single whole number >= 1; got: ",
+                         paste(as.character(tau_shrink_min_divergent_chains), collapse = ", "))
+                }
                 metric_estimator <- as.character(metric_estimator)
-                if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled"))) {
-                    stop("metric_estimator must be 'pooled', 'chain_mean' or 'chain_mean_scaled'; got: ",
+                ## if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled"))) {
+                if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled", "per_iteration"))) {
+                    ## stop("metric_estimator must be 'pooled', 'chain_mean' or 'chain_mean_scaled'; got: ",
+                    stop("metric_estimator must be 'pooled', 'chain_mean', 'chain_mean_scaled' or 'per_iteration'; got: ",
                          paste(as.character(metric_estimator), collapse = ", "))
                 }
+                ## pooled metric estimator options (NULL = "stan_style" and 0, the earlier rule; read only when metric_estimator = "pooled"):
+                metric_pooled_window_resets         <- fn_validate_metric_pooled_window_resets(metric_pooled_window_resets)
+                metric_pooled_offdiagonal_shrinkage <- fn_validate_metric_pooled_offdiagonal_shrinkage(
+                                                           if_null_then_set_to(metric_pooled_offdiagonal_shrinkage, 0))
                 if (length(tau_ramp) != 1 || !tau_ramp %in% c("original", "staged")) {
                     stop("tau_ramp must be 'original' or 'staged'; got: ", paste(as.character(tau_ramp), collapse = ", "))
+                }
+                # if (!is.character(eps_acceptance_mean) || length(eps_acceptance_mean) != 1 || !eps_acceptance_mean %in% c("harmonic", "arithmetic")) {
+                #     stop(paste0("eps_acceptance_mean must be 'harmonic' or 'arithmetic'; got: ", paste(as.character(eps_acceptance_mean), collapse = ", ")))
+                # }
+                if (!is.character(eps_acceptance_mean) || length(eps_acceptance_mean) != 1 || !eps_acceptance_mean %in% c("harmonic", "arithmetic", "geometric")) {
+                    stop(paste0("eps_acceptance_mean must be 'harmonic', 'arithmetic' or 'geometric'; got: ", paste(as.character(eps_acceptance_mean), collapse = ", ")))
                 }
                 ##
                 if (!is.logical(tau_weight_by_p_jump) || length(tau_weight_by_p_jump) != 1 || is.na(tau_weight_by_p_jump)) {
@@ -1408,6 +1547,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                                  gap = pre_burnin_params$gap,
                                                                  ##
                                                                  adapt_delta = adapt_delta,
+                                                                 eps_acceptance_mean = eps_acceptance_mean,
                                                                  tau_weight_by_p_jump = tau_weight_by_p_jump,
                                                                  LR_main = pre_burnin_params$LR_main,
                                                                  LR_us = pre_burnin_params$LR_us,
@@ -1421,6 +1561,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                                  tau_adaptation_block = tau_adaptation_block,
                                                                  tau_if_manual = pre_burnin_params$tau_if_manual,
                                                                  tau_if_manual_in_L_units = pre_burnin_params$tau_if_manual_in_L_units,
+                                                                 ## (inert here: the pre-burnin uses manual_tau = TRUE)
+                                                                 tau_shrink_on_divergence        = tau_shrink_on_divergence,
+                                                                 tau_shrink_factor               = tau_shrink_factor,
+                                                                 tau_shrink_min_divergent_chains = tau_shrink_min_divergent_chains,
                                                                  ##
                                                                  burnin_algorithm = burnin_algorithm,
                                                                  diffusion_HMC = diffusion_HMC,
@@ -1483,6 +1627,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                                  ##
                                                                  eps_initial = eps_initial,
                                                                  eps_initial_iter = NULL,
+                                                                 ##
+                                                                 metric_pooled_window_resets         = metric_pooled_window_resets,
+                                                                 metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
                                                                  ##
                                                                  metric_estimator = metric_estimator)
                       # ##
@@ -2010,8 +2157,186 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       }
                 }
                 ##
+                ## ---- CHESSR_time / SNAPER_time: the sampling-side quantities of the time-to-target-ESS criterion, resolved BEFORE the
+                ##      main burn-in (R_fn_time_criterion.R). The sampling timing probe uses the native sampling entry point
+                ##      and the summaries routine of this function's own environment (a model package's backend supplies its natives), so
+                ##      it is bound to that environment:
+                ##
+                time_criterion_sampling_quantities      <- NULL
+                time_criterion_previous_run_quantities  <- NULL
+                sampling_timing_probe_result            <- NULL
+                ## (sampling_overhead_in_leapfrog_steps = "auto": the built-in default for this model and sampling configuration, when one
+                ##  exists, see below)
+                sampling_overhead_in_leapfrog_steps_built_in_default <- NULL
+                if (fn_burnin_algorithm_is_time_criterion(burnin_algorithm) && !isTRUE(manual_tau)) {
+                      ##
+                      ## ---- the burn-in refuses these criteria with partitioned_HMC = TRUE (see R_fn_time_criterion.R); stop here, before
+                      ##      the previous-run read and the probe, instead of after them (partitioned_HMC is final at this point):
+                      ##
+                      if (isTRUE(partitioned_HMC)) {
+                            stop(paste0("burnin_algorithm = '", burnin_algorithm, "' is defined for the joint sampler (partitioned_HMC = FALSE), whose single tau ",
+                                        "sets the leapfrog steps of every gradient evaluation; use '", sub("_time$", "", burnin_algorithm), "' with partitioned_HMC = TRUE."))
+                      }
+                      if (!is.null(time_criterion_settings$time_criterion_previous_run_path)) {
+                            ## ESS_per_iter_sampling_expected is the minimum ESS over time_criterion_ess_parameter_set ("diagnostic" by default:
+                            ## the generated quantities of the model's Stan skeleton file, from its BridgeStan metadata, unless the saved run
+                            ## records its own diagnostic_parameter_names; never the parameters block):
+                            model_diagnostic_parameter_names_for_time_criterion <- if (is.character(init_object$stan_main_and_tp_and_gq_param_names) &&
+                                                                                       is.character(init_object$stan_main_and_tp_param_names))
+                                  setdiff(init_object$stan_main_and_tp_and_gq_param_names, init_object$stan_main_and_tp_param_names) else NULL
+                            time_criterion_previous_run_quantities <- fn_time_criterion_quantities_from_saved_run(
+                                  time_criterion_previous_run_path  = time_criterion_settings$time_criterion_previous_run_path,
+                                  time_criterion_ess_parameter_set  = time_criterion_settings$time_criterion_ess_parameter_set,
+                                  model_diagnostic_parameter_names  = model_diagnostic_parameter_names_for_time_criterion)
+                            message(colourise(paste0("time criterion: previous run(s) ", paste(basename(time_criterion_settings$time_criterion_previous_run_path), collapse = ", "),
+                                                     " (", time_criterion_previous_run_quantities$sampling_time_estimation_method, ")",
+                                                     " | time_per_leapfrog_step_sampling = ", signif(time_criterion_previous_run_quantities$time_per_leapfrog_step_sampling, 4), " s",
+                                                     " | sampling_overhead_in_leapfrog_steps = ", signif(time_criterion_previous_run_quantities$sampling_overhead_in_leapfrog_steps, 4),
+                                                     " | ESS_per_iter_sampling_expected = ", signif(time_criterion_previous_run_quantities$ESS_per_iter_sampling_expected, 4),
+                                                     " (min ESS over '", time_criterion_previous_run_quantities$ESS_per_iter_sampling_expected_parameter_set, "': ",
+                                                     time_criterion_previous_run_quantities$ESS_per_iter_sampling_expected_min_ESS_source, ")"),
+                                              "cyan"))
+                      }
+                      ##
+                      ## ---- sampling_overhead_in_leapfrog_steps = "auto": a value for the SAMPLING configuration (n_chains_sampling chains,
+                      ##      n_threads_WCP_sampling threads per chain, the sampling chunk count), never from the burn-in, whose configuration
+                      ##      differs, or from a saved run: the built-in default for this model, configuration and machine when one exists
+                      ##      (fn_sampling_overhead_in_leapfrog_steps_built_in_default_for_run and fn_default_sampling_overhead_in_leapfrog_steps,
+                      ##      R_fn_time_criterion.R), otherwise the sampling timing probe below in its "lite" mode (sampling_timing_probe_mode;
+                      ##      fn_sampling_timing_probe_mode_for_run):
+                      ##
+                      sampling_timing_probe_mode_for_run <- fn_sampling_timing_probe_mode_for_run(time_criterion_settings = time_criterion_settings)
+                      if (identical(time_criterion_settings$sampling_overhead_in_leapfrog_steps, "auto")) {
+                            built_in_default_lookup_for_run <- fn_sampling_overhead_in_leapfrog_steps_built_in_default_for_run(
+                                  Model_type              = Model_type,
+                                  init_object             = init_object,
+                                  model_args_list         = model_args_list,
+                                  num_chunks_sampling     = num_chunks_sampling,
+                                  n_chains_sampling       = n_chains_sampling,
+                                  n_threads_WCP_sampling  = n_threads_WCP_sampling)
+                            sampling_overhead_in_leapfrog_steps_built_in_default <- built_in_default_lookup_for_run$sampling_overhead_in_leapfrog_steps_built_in_default
+                            n_observations_for_built_in_default <- built_in_default_lookup_for_run$n_observations
+                            num_chunks_sampling_for_built_in_default <- built_in_default_lookup_for_run$num_chunks_sampling
+                            if (!is.null(sampling_overhead_in_leapfrog_steps_built_in_default)) {
+                                  message(colourise(paste0("time criterion: sampling_overhead_in_leapfrog_steps = \"auto\": built-in default for ", Model_type, ", ",
+                                                           n_observations_for_built_in_default, " observations, ", n_chains_sampling, " chains x ",
+                                                           n_threads_WCP_sampling, " thread(s), sampling chunk count ", num_chunks_sampling_for_built_in_default, " = ",
+                                                           signif(sampling_overhead_in_leapfrog_steps_built_in_default$sampling_overhead_in_leapfrog_steps, 4),
+                                                           " (iteration overhead ", signif(sampling_overhead_in_leapfrog_steps_built_in_default$sampling_overhead_in_leapfrog_steps_from_iteration_overhead, 4),
+                                                           " + summaries ", signif(sampling_overhead_in_leapfrog_steps_built_in_default$sampling_overhead_in_leapfrog_steps_from_summaries, 4),
+                                                           " leapfrog steps; ", sampling_overhead_in_leapfrog_steps_built_in_default$calibration_method, "); no sampling timing probe"),
+                                                    "cyan"))
+                            } else {
+                                  message(colourise(paste0("time criterion: sampling_overhead_in_leapfrog_steps = \"auto\": no built-in default for ", Model_type, ", ",
+                                                           n_observations_for_built_in_default, " observations, ", n_chains_sampling, " chains x ",
+                                                           n_threads_WCP_sampling, " thread(s), sampling chunk count ", num_chunks_sampling_for_built_in_default,
+                                                           ", ", built_in_default_lookup_for_run$n_physical_cores_of_this_machine, " physical cores",
+                                                           if (isTRUE(time_criterion_settings$run_sampling_timing_probe)) paste0("; the sampling timing probe runs in its \"",
+                                                                                                                                 sampling_timing_probe_mode_for_run, "\" mode") else
+                                                               "; run_sampling_timing_probe = FALSE, so no probe runs"),
+                                                    "cyan"))
+                            }
+                      }
+                      if (isTRUE(time_criterion_settings$run_sampling_timing_probe) &&
+                          fn_sampling_timing_probe_is_needed( time_criterion_settings                = time_criterion_settings,
+                                                              ## time_criterion_previous_run_quantities = time_criterion_previous_run_quantities)) {
+                                                              time_criterion_previous_run_quantities = time_criterion_previous_run_quantities,
+                                                              sampling_overhead_in_leapfrog_steps_built_in_default = sampling_overhead_in_leapfrog_steps_built_in_default)) {
+                            fn_run_sampling_timing_probe_in_sampler_environment <- fn_run_sampling_timing_probe
+                            environment(fn_run_sampling_timing_probe_in_sampler_environment) <- parent.env(environment())
+                            nested_rhat_grouping_for_probe <- tryCatch(fn_nested_rhat_grouping_from_burnin( n_chains_sampling     = n_chains_sampling,
+                                                                                                            n_superchains         = n_superchains,
+                                                                                                            n_chains_burnin       = n_chains_burnin,
+                                                                                                            nuisance_jitter_scale = if (n_nuisance == 0) 0 else nuisance_jitter_scale),
+                                                                       error = function(error_object) NULL)
+                            ## the start time is taken here so that a probe that fails part-way still has its wall time counted in time_burnin:
+                            sampling_timing_probe_call_start_time <- Sys.time()
+                            sampling_timing_probe_result <- tryCatch(
+                                fn_run_sampling_timing_probe_in_sampler_environment(
+                                      time_criterion_settings                         = time_criterion_settings,
+                                      ##
+                                      Model_type                                      = Model_type,
+                                      init_object                                     = init_object,
+                                      Model_args_as_Rcpp_List                         = Model_args_as_Rcpp_List,
+                                      model_args_list                                 = model_args_list,
+                                      Stan_data_list                                  = Stan_data_list,
+                                      stan_chunk_size_sampling                        = stan_chunk_size_sampling,
+                                      y                                               = y,
+                                      ##
+                                      theta_main_vectors_all_chains_input_from_R      = theta_main_vectors_all_chains_input_from_R,
+                                      theta_nuisance_vectors_all_chains_input_from_R  = theta_nuisance_vectors_all_chains_input_from_R,
+                                      n_chains_burnin                                 = n_chains_burnin,
+                                      n_params_main                                   = n_params_main,
+                                      n_nuisance                                      = n_nuisance,
+                                      ##
+                                      n_chains_sampling                               = n_chains_sampling,
+                                      n_threads_WCP_sampling                          = n_threads_WCP_sampling,
+                                      n_threads_WCP_burnin                            = n_threads_WCP_burnin,
+                                      num_chunks_sampling                             = num_chunks_sampling,
+                                      n_threads_to_restore_after_probe                = if (burnin_TBB_pool_equals_n_chains) n_chains_burnin else n_threads_WCP_burnin * n_chains_burnin,
+                                      parallel_method                                 = parallel_method,
+                                      use_disk                                        = use_disk,
+                                      use_disk_path                                   = use_disk_path,
+                                      store_log_lik_trace                             = store_log_lik_trace,
+                                      n_nuisance_to_track                             = n_nuisance_to_track,
+                                      ##
+                                      sample_nuisance                                 = sample_nuisance,
+                                      partitioned_HMC                                 = partitioned_HMC,
+                                      diffusion_HMC                                   = diffusion_HMC,
+                                      diffusion_HMC_integrator                        = diffusion_HMC_integrator,
+                                      metric_shape_main                               = metric_shape_main,
+                                      force_autodiff                                  = force_autodiff,
+                                      force_PartialLog                                = force_PartialLog,
+                                      multi_attempts                                  = multi_attempts,
+                                      seed                                            = seed,
+                                      eps_carry_over                                  = eps_carry_over,
+                                      ##
+                                      ## "full" (every value of sampling_timing_probe_L_values; the summaries timed by four calls) or "lite" (the smallest and the
+                                      ## largest number of leapfrog steps; the summaries timed once, less their fixed set-up cached for this R session):
+                                      sampling_timing_probe_mode                      = sampling_timing_probe_mode_for_run,
+                                      ##
+                                      model_results_template_for_summaries            = list( init_object             = init_object,
+                                                                                              test_perm               = test_perm,
+                                                                                              test_inv_perm           = test_inv_perm,
+                                                                                              LR_main                 = LR_main,
+                                                                                              LR_us                   = LR_us,
+                                                                                              adapt_delta             = adapt_delta,
+                                                                                              burnin_schedule         = resolved_burnin_schedule,
+                                                                                              n_burnin                = n_burnin,
+                                                                                              metric_type_main        = metric_type_main,
+                                                                                              metric_shape_main       = metric_shape_main,
+                                                                                              metric_type_nuisance    = metric_type_nuisance,
+                                                                                              metric_shape_nuisance   = metric_shape_nuisance,
+                                                                                              diffusion_HMC           = diffusion_HMC,
+                                                                                              partitioned_HMC         = partitioned_HMC,
+                                                                                              n_superchains           = n_superchains,
+                                                                                              nested_rhat_grouping    = nested_rhat_grouping_for_probe,
+                                                                                              interval_width_main     = interval_width_main,
+                                                                                              interval_width_nuisance = interval_width_nuisance,
+                                                                                              force_autodiff          = force_autodiff,
+                                                                                              force_PartialLog        = force_PartialLog,
+                                                                                              multi_attempts          = multi_attempts)),
+                                error = function(error_object) {
+                                      warning(paste0("sampling timing probe failed: ", conditionMessage(error_object)))
+                                      list(status                          = "failed",
+                                           error_message                   = conditionMessage(error_object),
+                                           sampling_timing_probe_wall_time = as.numeric(difftime(Sys.time(), sampling_timing_probe_call_start_time, units = "secs")))
+                                })
+                      }
+                      time_criterion_sampling_quantities <- fn_resolve_time_criterion_sampling_quantities(
+                            time_criterion_settings                = time_criterion_settings,
+                            time_criterion_previous_run_quantities = time_criterion_previous_run_quantities,
+                            sampling_timing_probe_result           = sampling_timing_probe_result,
+                            ## (sampling_overhead_in_leapfrog_steps = "auto" only; NULL = none for this model and sampling configuration):
+                            sampling_overhead_in_leapfrog_steps_built_in_default = sampling_overhead_in_leapfrog_steps_built_in_default,
+                            n_iter_planned                         = n_iter)
+                }
+                ##
                 burnin_object <-                 fn_burnin(  init_object = init_object,
                                                              debug_burnin_timing = debug_burnin_timing,
+                                                             ##
+                                                             ## CHESSR_time / SNAPER_time only (NULL otherwise):
+                                                             time_criterion_sampling_quantities = time_criterion_sampling_quantities,
                                                              ##
                                                              Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
                                                              ##
@@ -2051,6 +2376,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              tau_weight_by_p_jump = tau_weight_by_p_jump,
                                                              tau_ramp = tau_ramp,
                                                              eps_reinit_at_ChEES_handover = eps_reinit_at_ChEES_handover,
+                                                             eps_acceptance_mean = eps_acceptance_mean,
+                                                             tau_shrink_on_divergence        = tau_shrink_on_divergence,
+                                                             tau_shrink_factor               = tau_shrink_factor,
+                                                             tau_shrink_min_divergent_chains = tau_shrink_min_divergent_chains,
                                                              theta_hat_us_rule = theta_hat_us_rule,
                                                              theta_hat_us_freeze_iter = theta_hat_us_freeze_iter,
                                                              burnin_schedule = burnin_schedule,
@@ -2123,8 +2452,30 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              eps_initial = eps_initial,
                                                              eps_initial_iter = eps_initial_iter,
                                                              ##
+                                                             metric_pooled_window_resets         = metric_pooled_window_resets,
+                                                             metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
+                                                             ##
                                                              metric_estimator = metric_estimator)
                                                             
+                ##
+                ## ---- CHESSR_time / SNAPER_time: the sampling timing probe ran for this burn-in, so its wall time is part of the burn-in
+                ##      time (time_burnin, and burnin_object$time_burnin, which the summaries read). The time without it is kept:
+                ##
+                time_burnin_without_sampling_timing_probe <- burnin_object$time_burnin
+                sampling_timing_probe_fraction_of_burnin  <- NA_real_
+                if (!is.null(sampling_timing_probe_result) && is.finite(sampling_timing_probe_result$sampling_timing_probe_wall_time)) {
+                      burnin_object$time_burnin <- burnin_object$time_burnin + sampling_timing_probe_result$sampling_timing_probe_wall_time
+                      sampling_timing_probe_fraction_of_burnin <- sampling_timing_probe_result$sampling_timing_probe_wall_time /
+                                                                  (time_burnin_without_sampling_timing_probe - time_pre_burnin)
+                      message(colourise(paste0("sampling timing probe wall time = ", signif(sampling_timing_probe_result$sampling_timing_probe_wall_time, 4),
+                                               " s = ", signif(100 * sampling_timing_probe_fraction_of_burnin, 3), "% of the main burn-in (included in time_burnin)"),
+                                        "cyan"))
+                      if (is.finite(sampling_timing_probe_fraction_of_burnin) && sampling_timing_probe_fraction_of_burnin > 0.05) {
+                            warning(paste0("The sampling timing probe took ", signif(100 * sampling_timing_probe_fraction_of_burnin, 3),
+                                           "% of the main burn-in; a previous saved run (time_criterion_previous_run_path), fewer probe iterations ",
+                                           "or sampling_timing_probe_max_wall_time lowers this."))
+                      }
+                }
                 
                 {
 
@@ -2478,10 +2829,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    LR_main = LR_main, 
                    LR_us = LR_us, 
                    adapt_delta = adapt_delta,
+                   ## cross-chain mean acceptance targeted by the burn-in eps adaptation ("harmonic" | "arithmetic"):
+                   eps_acceptance_mean = eps_acceptance_mean,
                    burnin_algorithm = burnin_algorithm,
                    trajectory_adaptation_version = "metric_main_v4",
                    trajectory_criterion = if (burnin_algorithm == "CHESSR_log") "ema_log_expected_numerator_over_mean_tau" else
                                           if (burnin_algorithm %in% c("CHESSR", "SNAPER")) "expected_per_trajectory_rate" else
+                                          if (burnin_algorithm %in% c("CHESSR_time", "SNAPER_time")) "expected_per_trajectory_rate_with_time_to_target_ESS_penalty" else
                                           if (burnin_algorithm == "ChEES") "expected_squared_position_statistic_change" else "squared_kinetic_energy_change",
                    trajectory_coordinates = if (burnin_algorithm == "KE") "kinetic_energy" else "mass_metric",
                    trajectory_parameter_block = if_null_then_set_to(burnin_object$trajectory_parameter_block, "main"),
@@ -2505,6 +2859,28 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    learning_rate_initial = learning_rate_initial,
                    manual_tau = manual_tau,
                    tau_weight_by_p_jump = tau_weight_by_p_jump,
+                   ## divergence-triggered tau shrink in the main burn-in: settings and number of iterations at which it fired:
+                   tau_shrink_on_divergence        = tau_shrink_on_divergence,
+                   tau_shrink_factor               = tau_shrink_factor,
+                   tau_shrink_min_divergent_chains = tau_shrink_min_divergent_chains,
+                   tau_shrink_n_fired              = burnin_object$tau_shrink_n_fired,
+                   ## pooled metric estimator (read only when metric_estimator = "pooled"): window resets as given, the main
+                   ## burn-in iterations r they resolved to (reset at the start of iteration r + 1), and the off-diagonal shrinkage:
+                   metric_estimator                      = metric_estimator,
+                   metric_pooled_window_resets           = metric_pooled_window_resets,
+                   metric_pooled_window_reset_iterations = burnin_object$metric_pooled_window_reset_iterations,
+                   metric_pooled_offdiagonal_shrinkage   = metric_pooled_offdiagonal_shrinkage,
+                   ## CHESSR_time / SNAPER_time: settings, the quantities the criterion used and their sources, the sampling timing probe,
+                   ## the previous-run quantities and the burn-in record (NULL for every other criterion):
+                   time_criterion = if (fn_burnin_algorithm_is_time_criterion(burnin_algorithm) && !isTRUE(manual_tau)) list(
+                       time_criterion_settings                   = time_criterion_settings,
+                       time_criterion_sampling_quantities        = time_criterion_sampling_quantities,
+                       time_criterion_previous_run_quantities    = time_criterion_previous_run_quantities,
+                       sampling_timing_probe                     = sampling_timing_probe_result,
+                       sampling_timing_probe_wall_time           = if (is.null(sampling_timing_probe_result)) 0 else sampling_timing_probe_result$sampling_timing_probe_wall_time,
+                       sampling_timing_probe_fraction_of_burnin  = sampling_timing_probe_fraction_of_burnin,
+                       time_burnin_without_sampling_timing_probe = time_burnin_without_sampling_timing_probe,
+                       burnin                                    = burnin_object$time_criterion) else NULL,
                    ## tau ADAM bias correction counts PERFORMED updates (skipped iterations excluded); final counts per block:
                    tau_adam_bias_correction = burnin_object$tau_adam_bias_correction,
                    tau_adam_updates_main = burnin_object$tau_adam_updates_main,

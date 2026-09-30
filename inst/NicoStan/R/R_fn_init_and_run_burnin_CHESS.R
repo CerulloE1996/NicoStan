@@ -8,6 +8,21 @@
 #' init_and_run_burnin_ChESSR
 #' @param debug_burnin_timing Collect native component timings and per-chain integrator step counts; default FALSE.
 #' @param diffusion_HMC_integrator Joint diffusion integrator: "kick_flow_kick" (default) or "flow_kick_flow".
+## #' @param eps_acceptance_mean Cross-chain mean acceptance targeted by the step-size adaptation: "harmonic" (default) or "arithmetic".
+#' @param eps_acceptance_mean Cross-chain mean acceptance targeted by the step-size adaptation: "harmonic" (default), "arithmetic"
+#'   or "geometric".
+#' @param tau_shrink_on_divergence,tau_shrink_factor,tau_shrink_min_divergent_chains Divergence-triggered tau shrink during
+#'   adaptation; default FALSE (off). TRUE multiplies tau by tau_shrink_factor (default 0.95) at each adaptation iteration in
+#'   which at least tau_shrink_min_divergent_chains (default 2) burn-in chains diverge, which is the rule used in earlier runs.
+#' @param metric_pooled_window_resets Pooled metric estimator only: iterations r at which its Welford accumulators (main
+#'   covariance and nuisance variances) are reset, at the start of iteration r + 1. "stan_style" (default) =
+#'   round(c(0.30, 0.60) * n_adapt), the resets used in earlier runs; "none" = one window from metric_start_iter to
+#'   metric_adaptation_end_iter; or a numeric vector of whole numbers >= 0.
+#' @param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1] (default 0, as in earlier runs); each
+#'   pooled main covariance proposal becomes (1 - s) * cov + s * diag(diag(cov)). 0 = off-diagonals unshrunk.
+#' @param time_criterion_sampling_quantities For burnin_algorithm = "CHESSR_time" / "SNAPER_time": the sampling-side quantities of the
+#'   time-to-target-ESS criterion, as returned by fn_resolve_time_criterion_sampling_quantities() (see R_fn_time_criterion.R). NULL
+#'   (default) with a "_time" criterion gives the plain CHESSR / SNAPER criterion, with a warning; ignored by the other criteria.
 #' @export
 init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##
@@ -43,6 +58,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            learning_rate_initial_iter = NULL,
                                            tau_mult,
                                            tau_initial,
+                                           ## tau_initial: one positive number (e.g. pi, 2*pi), or "adaptive". With "adaptive" the ramp before the
+                                           ## handover targets pi (exactly as tau_initial = pi), and the handover sets tau = (pi/2) * sqrt(lambda_max),
+                                           ## lambda_max being the largest eigenvalue of the burn-in draws' covariance in metric coordinates over
+                                           ## [clip_iter, gap]: main block from the pooled (Welford) covariance, nuisance block from the pooled
+                                           ## within-individual (n_tests x n_tests) second moment (see the handover block in the burn-in loop).
                                            ##
                                            manual_tau,
                                            tau_if_manual,
@@ -75,6 +95,38 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##   FALSE - keep the eps (and its ADAM moments) adapted up to gap. tau is reset either way.
                                            eps_reinit_at_ChEES_handover = TRUE,
                                            ##
+                                           ## Cross-chain mean of the per-chain acceptance probabilities that the eps (step-size) ADAM update
+                                           ## targets to adapt_delta (see R_fn_harmonic_mean_acceptance.R):
+                                           ##   "harmonic"   - K / sum_k (1 / alpha_k), as in ChEES-HMC (Hoffman, Radul & Sountsov 2021, Algorithm 1)
+                                           ##                  and SNAPER-HMC (Sountsov & Hoffman 2022, eq. (15)). A chain with zero acceptance
+                                           ##                  (a divergent proposal, which includes |log ratio| > 1000 in either direction, or an
+                                           ##                  exp(log ratio) that underflowed to 0) makes it exactly 0.
+                                           ##   "arithmetic" - mean(alpha_k, na.rm = TRUE), the rule used before this option existed.
+                                           ##   "geometric"  - exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first; between the
+                                           ##                  harmonic and the arithmetic mean.
+                                           ## eps_acceptance_mean = c("harmonic", "arithmetic"),
+                                           eps_acceptance_mean = c("harmonic", "arithmetic", "geometric"),
+                                           ##
+                                           ## Divergence-triggered tau shrink during adaptation (a heuristic; not part of ChEES, ChEES-R or SNAPER):
+                                           ##   TRUE  - at the end of every iteration ii with clip_iter < ii < n_adapt (adaptive tau only), if at least
+                                           ##           tau_shrink_min_divergent_chains burn-in chains diverged in the main block, tau_main and tau_us
+                                           ##           are multiplied by tau_shrink_factor before the trajectory-criterion update. With
+                                           ##           tau_shrink_factor = 0.95 and tau_shrink_min_divergent_chains = 2 this is the rule used in
+                                           ##           all earlier runs.
+                                           ##   FALSE - (default) tau changes only through the ramp, the handover, the criterion update and the
+                                           ##           max_tau caps.
+                                           ## The iterations at which the shrink fired are returned as tau_shrink_fired_vec.
+                                           tau_shrink_on_divergence        = FALSE,
+                                           tau_shrink_factor               = 0.95,
+                                           tau_shrink_min_divergent_chains = 2,
+                                           ##
+                                           ## burnin_algorithm = "CHESSR_time" / "SNAPER_time" only: the sampling-side quantities of the time-to-target-ESS
+                                           ## criterion (time_per_leapfrog_step_sampling, sampling_overhead_in_leapfrog_steps, n_iter_sampling_for_time_criterion,
+                                           ## their sources, and an optional user-supplied time_per_leapfrog_step_burnin), from
+                                           ## fn_resolve_time_criterion_sampling_quantities() (R_fn_time_criterion.R). time_per_leapfrog_step_burnin is
+                                           ## measured below, during this burn-in.
+                                           time_criterion_sampling_quantities = NULL,
+                                           ##
                                            ## Centre (theta_hat_us) of the exact Gaussian rotation for the nuisance block:
                                            ##   "running_mean"        - re-set EVERY iteration to the running mean of the chains' current
                                            ##                           nuisance states. The centre then follows the chains, which inflates
@@ -99,7 +151,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## worker draws it from a separate RNG; each chain's momentum stays its own). Iterations then stop
                                            ## waiting for whichever chain drew the longest trajectory. FALSE = per-chain tau_ii (as before).
                                            share_tau_ii_across_chains_in_burnin = FALSE,
-                                           randomize_tau_burnin = FALSE,
+                                           randomize_tau_burnin,
                                            ##
                                            ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL):
                                            ##      which parameters feed the trajectory-length criterion. "main" = the main block only (the
@@ -112,6 +164,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## Sole trajectory-length selector. Canonical values are
                                            ## "KE", "ChEES", "CHESSR", "CHESSR_log" and "SNAPER".
                                            ## "CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion (different criteria).
+                                           ## "CHESSR_time" / "SNAPER_time": the time-to-target-ESS variants of CHESSR / SNAPER (R_fn_time_criterion.R).
                                            burnin_algorithm,
                                            diffusion_HMC,
                                            partitioned_HMC,
@@ -168,6 +221,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##
                                            metric_start_iter = NULL,  # first iteration whose draws feed the metric; NULL = max(clip_iter, 0.35*n_adapt)
                                            metric_estimator = "pooled",
+                                           ##
+                                           ## Pooled metric estimator only (metric_estimator = "pooled"; see R_fn_metric_pooled_settings.R). The
+                                           ## defaults are the rule of all earlier runs:
+                                           ##   metric_pooled_window_resets          - iterations r at which the pooled Welford accumulators (main
+                                           ##                                          covariance and nuisance variances) are reset (at the start of
+                                           ##                                          iteration r + 1):
+                                           ##                                            "stan_style" - (default) round(c(0.30, 0.60) * n_adapt), the
+                                           ##                                                           resets used in all earlier runs.
+                                           ##                                            "none"       - one window, metric_start_iter to
+                                           ##                                                           metric_adaptation_end_iter.
+                                           ##                                            numeric      - whole numbers >= 0.
+                                           ##   metric_pooled_offdiagonal_shrinkage  - s in [0, 1], applied once to each pooled main covariance proposal:
+                                           ##                                          (1 - s) * cov + s * diag(diag(cov)). 0 (default) = all
+                                           ##                                          off-diagonals unshrunk, as in all earlier runs.
+                                           metric_pooled_window_resets          = "stan_style",
+                                           metric_pooled_offdiagonal_shrinkage  = 0,
                                            ##
                                            ## NOTE: 'eps_init' and 'eps_initial' are DIFFERENT things.
                                            ## eps_init  = carry the step-size over from a previous stage
@@ -261,6 +330,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     burnin_algorithm <- fn_normalise_burnin_algorithm(burnin_algorithm)
     if (is.null(tau_weight_by_p_jump)) tau_weight_by_p_jump <- burnin_algorithm != "KE"
     tau_ramp <- match.arg(arg = tau_ramp, choices = c("original", "staged"))
+    ## eps_acceptance_mean <- match.arg(arg = eps_acceptance_mean, choices = c("harmonic", "arithmetic"))
+    eps_acceptance_mean <- match.arg(arg = eps_acceptance_mean, choices = c("harmonic", "arithmetic", "geometric"))
     if (!is.logical(eps_reinit_at_ChEES_handover) || length(eps_reinit_at_ChEES_handover) != 1 || is.na(eps_reinit_at_ChEES_handover)) {
       stop("eps_reinit_at_ChEES_handover must be TRUE or FALSE.")
     }
@@ -288,12 +359,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ## the metric, putting it back on the posterior (Sigma) scale. "pooled" estimates Sigma directly.
     ## Any other value used to leave the metric silently un-updated (metric_ready never TRUE).
     metric_estimator <- as.character(metric_estimator)   ## a factor (e.g. from expand.grid) would otherwise skip the x n_chains_burnin below
-    if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled"))) {
-        stop("metric_estimator must be 'pooled', 'chain_mean' or 'chain_mean_scaled'; got: ",
+    ## "per_iteration" estimates Sigma from each iteration's burn-in draws alone: the cross-chain (co)variance of the
+    ## n_chains_burnin draws of that iteration around their cross-chain mean (divisor n_chains_burnin - 1), with nothing
+    ## accumulated across iterations; ratio_M (and M_decay) then blend these proposals into the metric, so early draws fade.
+    ## if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled"))) {
+    if (length(metric_estimator) != 1 || !(metric_estimator %in% c("pooled", "chain_mean", "chain_mean_scaled", "per_iteration"))) {
+        ## stop("metric_estimator must be 'pooled', 'chain_mean' or 'chain_mean_scaled'; got: ",
+        stop("metric_estimator must be 'pooled', 'chain_mean', 'chain_mean_scaled' or 'per_iteration'; got: ",
              paste(as.character(metric_estimator), collapse = ", "))
     }
     metric_estimator <- as.character(metric_estimator)
     metric_variance_scale <- if (metric_estimator == "chain_mean_scaled") n_chains_burnin else 1
+    ##
+    ## ---- pooled metric estimator: window resets and off-diagonal shrinkage (read only when metric_estimator = "pooled"):
+    ##
+    metric_pooled_window_resets         <- fn_validate_metric_pooled_window_resets(metric_pooled_window_resets)
+    metric_pooled_offdiagonal_shrinkage <- fn_validate_metric_pooled_offdiagonal_shrinkage(metric_pooled_offdiagonal_shrinkage)
     ##
     if (!is.logical(tau_weight_by_p_jump) || length(tau_weight_by_p_jump) != 1 || is.na(tau_weight_by_p_jump)) {
         stop("tau_weight_by_p_jump must be a single TRUE or FALSE.")
@@ -301,6 +382,104 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ##
     if (!is.logical(tau_if_manual_in_L_units) || length(tau_if_manual_in_L_units) != 1 || is.na(tau_if_manual_in_L_units)) {
         stop("tau_if_manual_in_L_units must be a single TRUE or FALSE.")
+    }
+    ##
+    ## ---- divergence-triggered tau shrink (tau_shrink_on_divergence):
+    ##
+    if (!is.logical(tau_shrink_on_divergence) || length(tau_shrink_on_divergence) != 1 || is.na(tau_shrink_on_divergence)) {
+        stop("tau_shrink_on_divergence must be a single TRUE or FALSE.")
+    }
+    if (!is.numeric(tau_shrink_factor) || length(tau_shrink_factor) != 1 || !is.finite(tau_shrink_factor) ||
+        tau_shrink_factor <= 0 || tau_shrink_factor > 1) {
+        stop(paste0("tau_shrink_factor must be a single number in (0, 1]; got: ",
+                    paste(as.character(tau_shrink_factor), collapse = ", ")))
+    }
+    if (!is.numeric(tau_shrink_min_divergent_chains) || length(tau_shrink_min_divergent_chains) != 1 ||
+        !is.finite(tau_shrink_min_divergent_chains) || tau_shrink_min_divergent_chains < 1 ||
+        tau_shrink_min_divergent_chains != round(tau_shrink_min_divergent_chains)) {
+        stop(paste0("tau_shrink_min_divergent_chains must be a single whole number >= 1; got: ",
+                    paste(as.character(tau_shrink_min_divergent_chains), collapse = ", ")))
+    }
+    ##
+    message(colourise(paste0("divergence-triggered tau shrink = ", tau_shrink_on_divergence,
+                             if (isTRUE(tau_shrink_on_divergence)) paste0(" (tau x ", tau_shrink_factor,
+                                                                          " when >= ", tau_shrink_min_divergent_chains,
+                                                                          " burn-in chains diverge, clip_iter < iteration < n_adapt)") else ""),
+                      "cyan"))
+    ##
+    ## ---- CHESSR_time / SNAPER_time: the time-to-target-ESS criteria (R_fn_time_criterion.R). Active only with an adapted tau:
+    ##
+    time_criterion_active <-  fn_burnin_algorithm_is_time_criterion(burnin_algorithm) && !isTRUE(manual_tau)
+    if (time_criterion_active) {
+        if (isTRUE(partitioned_HMC)) {
+            stop(paste0("burnin_algorithm = '", burnin_algorithm, "' is defined for the joint sampler (partitioned_HMC = FALSE), whose single tau ",
+                        "sets the leapfrog steps of every gradient evaluation; use '", sub("_time$", "", burnin_algorithm), "' with partitioned_HMC = TRUE."))
+        }
+        if (is.null(time_criterion_sampling_quantities)) {
+            warning(paste0("burnin_algorithm = '", burnin_algorithm, "' without time_criterion_sampling_quantities: ",
+                           "sampling_overhead_in_leapfrog_steps = 0 and burnin_to_sampling_leapfrog_time_ratio = 0, i.e. the plain ",
+                           sub("_time$", "", burnin_algorithm), " criterion."))
+            time_criterion_sampling_quantities <-  suppressWarnings(
+                fn_resolve_time_criterion_sampling_quantities( time_criterion_settings                = fn_default_time_criterion_settings(),
+                                                               time_criterion_previous_run_quantities = NULL,
+                                                               sampling_timing_probe_result           = NULL,
+                                                               n_iter_planned                         = NA_real_))
+        }
+        ##
+        ## ---- n_iter_burnin of the time model: the main burn-in iterations whose number of leapfrog steps is set by the adapted tau,
+        ##      i.e. iterations clip_iter_tau + 1 to n_burnin (the update at iteration ii sets the tau of iteration ii + 1). The earlier
+        ##      iterations (one leapfrog step before clip_iter, then the ramp to tau_initial up to the handover at clip_iter_tau) and the
+        ##      pre-burnin (pre_burnin_L steps) take the same time whatever tau is chosen, so, like time_per_iter_overhead_burnin, they
+        ##      drop out of the derivative of the time to the target ESS. The count is fixed for the whole adaptation:
+        ##
+        n_iter_burnin_at_adapted_tau <-  n_burnin - clip_iter_tau
+        ##
+        ## ---- with per-chain jitter of the burn-in trajectory lengths (randomize_tau_burnin = TRUE and tau_ii not shared across the
+        ##      chains), each burn-in iteration waits for the longest of n_chains_burnin draws tau_ii ~ U(0, 2 tau), whose mean is about
+        ##      2 * n_chains_burnin / (n_chains_burnin + 1) times tau, while the time model charges tau / eps leapfrog steps per burn-in
+        ##      iteration; burnin_to_sampling_leapfrog_time_ratio is then too small by about that factor:
+        ##
+        if (isTRUE(randomize_tau_burnin) && !isTRUE(share_tau_ii_across_chains_in_burnin) && n_chains_burnin > 1) {
+            warning(paste0("burnin_algorithm = '", burnin_algorithm, "' with randomize_tau_burnin = TRUE and share_tau_ii_across_chains_in_burnin = FALSE: ",
+                           "each burn-in iteration waits for the longest of the ", n_chains_burnin, " jittered trajectories (on average about ",
+                           signif(2 * n_chains_burnin / (n_chains_burnin + 1), 3), " times tau), which the time model does not charge, so ",
+                           "burnin_to_sampling_leapfrog_time_ratio is too small by about that factor. share_tau_ii_across_chains_in_burnin = TRUE ",
+                           "or randomize_tau_burnin = FALSE avoids this."))
+        }
+        message(colourise(paste0("time-to-target-ESS criterion (", burnin_algorithm, "): ",
+                                 "sampling_overhead_in_leapfrog_steps = ", signif(time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps, 4),
+                                 " (", time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps_source, ")",
+                                 " | time_per_leapfrog_step_sampling = ", signif(time_criterion_sampling_quantities$time_per_leapfrog_step_sampling, 4), " s",
+                                 " (", time_criterion_sampling_quantities$time_per_leapfrog_step_sampling_source, ")",
+                                 " | n_iter_sampling_for_time_criterion = ", signif(time_criterion_sampling_quantities$n_iter_sampling_for_time_criterion, 5),
+                                 " (", time_criterion_sampling_quantities$n_iter_sampling_for_time_criterion_source, ")",
+                                 " | n_iter_burnin = n_burnin - clip_iter_tau = ", n_burnin, " - ", clip_iter_tau, " = ", n_iter_burnin_at_adapted_tau,
+                                 " (the iterations run at the adapted tau)"),
+                          "cyan"))
+        ##
+        ## ---- MALT's exponent (lag_one_autocorrelation_rho: a number in [0, 1] or "adaptive"; R_fn_time_criterion.R). Quantities from an
+        ##      older resolver lack these elements and give the defaults (lag_one_autocorrelation_rho = 1; offset 8). The
+        ##      sampling_overhead_in_leapfrog_steps of the time criterion (including "auto": a built-in default or the sampling timing
+        ##      probe, for the sampling configuration) is resolved before this burn-in and is fixed for all of it:
+        ##
+        lag_one_autocorrelation_rho_setting <-  if (is.null(time_criterion_sampling_quantities$lag_one_autocorrelation_rho)) 1 else
+                                                time_criterion_sampling_quantities$lag_one_autocorrelation_rho
+        lag_one_autocorrelation_rho_is_adaptive <-  identical(lag_one_autocorrelation_rho_setting, "adaptive")
+        lag_one_autocorrelation_rho_moment_averaging_offset <-  if (is.null(time_criterion_sampling_quantities$lag_one_autocorrelation_rho_moment_averaging_offset)) 8 else
+                                                                time_criterion_sampling_quantities$lag_one_autocorrelation_rho_moment_averaging_offset
+        ##
+        ## ---- the console messages show lag_one_autocorrelation_rho only when it is not at its default 1, so that at the default the
+        ##      messages are those of the criterion without it:
+        ##
+        time_criterion_messages_show_rho <-  !isTRUE(lag_one_autocorrelation_rho_setting == 1)
+        if (time_criterion_messages_show_rho) {
+            message(colourise(paste0("time-to-target-ESS criterion (", burnin_algorithm, "): lag_one_autocorrelation_rho = ", lag_one_autocorrelation_rho_setting,
+                                     if (lag_one_autocorrelation_rho_is_adaptive) paste0(" (MALT's running moments, lag_one_autocorrelation_rho_moment_averaging_offset = ",
+                                                                                          lag_one_autocorrelation_rho_moment_averaging_offset,
+                                                                                          "; lag_one_autocorrelation_rho = 1 until the first moment update)") else "",
+                                     " | penalty times (1 + lag_one_autocorrelation_rho) / 2"),
+                              "cyan"))
+        }
     }
     ##
     ## Position criteria use the mass metric of each adapted block. The joint
@@ -320,9 +499,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ##
     message(paste0("metric estimator = ", metric_estimator,
                    if (metric_variance_scale != 1) paste0(" (x ", metric_variance_scale, ")") else "",
+                   if (metric_estimator == "pooled") paste0(" (window resets = ", paste(metric_pooled_window_resets, collapse = "/"),
+                                                            ", off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage, ")") else "",
                    " | tau adaptation: algorithm = ", burnin_algorithm,
                    ", ramp = ", tau_ramp,
                    ", eps re-init at handover = ", eps_reinit_at_ChEES_handover,
+                   " | eps acceptance mean = ", eps_acceptance_mean,
                    " | nuisance centre: ", theta_hat_us_rule,
                    if (identical(theta_hat_us_rule, "running_mean_frozen")) paste0(" (frozen from iteration ", theta_hat_us_freeze_iter, ")") else "",
                    ", weight by p_jump = ", tau_weight_by_p_jump,
@@ -666,14 +848,51 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
   }
 
+  fn_update_eps_ADAM <-  function( eps,
+                                    eps_m_adam,
+                                    eps_v_adam,
+                                    iter,
+                                    n_burnin,
+                                    LR,
+                                    p_jump,
+                                    adapt_delta,
+                                    beta1_adam,
+                                    beta2_adam,
+                                    eps_adam,
+                                    bias_correction_step = iter) {
+
+        previous_state <-  c(eps, eps_m_adam, eps_v_adam)
+        attr(previous_state, "adam_update_performed") <-  FALSE
+        if (length(bias_correction_step) != 1 || !is.finite(bias_correction_step) || bias_correction_step < 1) {
+            stop("Step-size ADAM bias_correction_step must be a single finite number >= 1.")
+        }
+        ## Gradient moments count updates since their last reset; the learning-rate schedule retains its global iteration.
+        gradient <-  p_jump - adapt_delta
+        first_moment <-  beta1_adam * eps_m_adam + (1 - beta1_adam) * gradient
+        second_moment <-  beta2_adam * eps_v_adam + (1 - beta2_adam) * gradient^2
+        first_moment_corrected <-  first_moment / (1 - beta1_adam^bias_correction_step)
+        second_moment_corrected <-  second_moment / (1 - beta2_adam^bias_correction_step)
+        current_alpha <-  LR * (1 - (1 - LR) * iter / n_burnin)
+        next_eps <-  exp(log(eps) + current_alpha * first_moment_corrected / (sqrt(second_moment_corrected) + eps_adam))
+        next_state <-  c(next_eps, first_moment, second_moment)
+        if (any(!is.finite(next_state)) || next_eps <= 0) return(previous_state)
+        attr(next_state, "adam_update_performed") <-  TRUE
+        return(next_state)
+
+  }
+
   {
       # --------  eps for main (to load into C++ structs)
-      EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- EHMC_args_as_Rcpp_List$eps_main
+      ## EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- EHMC_args_as_Rcpp_List$eps_main
+      EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- 0   ## first moment of the acceptance error (p_jump - adapt_delta), not of eps
       EHMC_burnin_as_Rcpp_List$eps_v_adam_main <- 0
+      eps_adam_updates_main <- 0
   
       # --------  eps for nuisance (to load into C++ structs)
-      EHMC_burnin_as_Rcpp_List$eps_m_adam_us <- EHMC_args_as_Rcpp_List$eps_us
+      ## EHMC_burnin_as_Rcpp_List$eps_m_adam_us <- EHMC_args_as_Rcpp_List$eps_us
+      EHMC_burnin_as_Rcpp_List$eps_m_adam_us <- 0     ## first moment of the acceptance error (p_jump - adapt_delta), not of eps
       EHMC_burnin_as_Rcpp_List$eps_v_adam_us  <- 0
+      eps_adam_updates_us <- 0
   
       # --------  tau for main (to load into C++ structs)
       EHMC_args_as_Rcpp_List$tau_main  <-  EHMC_args_as_Rcpp_List$eps_main
@@ -797,8 +1016,54 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## Post-update settings at each iteration, not the realised per-chain jittered integration times.
   tau_main_during_burnin_vec <- eps_main_during_burnin_vec <- rep(x = NA_real_, times = n_burnin)
   tau_us_during_burnin_vec <- eps_us_during_burnin_vec <- rep(x = NA_real_, times = n_burnin)
+  ## Burn-in record for diagnosing the adapted metric (saved with the run): every burn-in chain's main-parameter draws after
+  ## each iteration (iteration x parameter x chain), the main metric variances (diagonal of M_inv) used in that iteration, and
+  ## quantiles of the nuisance metric variances (M_inv_us_vec) in that iteration:
+  burnin_trace_main_all_chains <-  array(data = NA_real_, dim = c(n_burnin, n_params_main, n_chains_burnin))
+  burnin_metric_main_variance_history <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_params_main)
+  burnin_metric_nuisance_variance_quantiles_history <-  matrix(data = NA_real_, nrow = n_burnin, ncol = 5,
+                                                              dimnames = list(NULL, c("q05", "q25", "q50", "q75", "q95")))
+  ## Cross-chain acceptance at each iteration: the arithmetic mean (printed as p_jump) and the mean that the eps update used
+  ## (eps_acceptance_mean; identical to the arithmetic mean when eps_acceptance_mean = "arithmetic"):
+  p_jump_main_during_burnin_vec <- p_jump_main_for_eps_during_burnin_vec <- rep(x = NA_real_, times = n_burnin)
+  p_jump_us_during_burnin_vec   <- p_jump_us_for_eps_during_burnin_vec   <- rep(x = NA_real_, times = n_burnin)
   ChEES_criterion_ema_vec <- ChEES_per_tau_gradient_vec <- rep(x = NA_real_, times = n_burnin)
   ChEES_criterion_ema <- NA_real_
+  ## Iterations at which the divergence-triggered tau shrink fired (tau_shrink_on_divergence = TRUE):
+  tau_shrink_fired_vec <- rep(x = FALSE, times = n_burnin)
+  ##
+  ## ---- CHESSR_time / SNAPER_time: per-iteration record of the online burn-in timing and of the criterion's quantities
+  ##      (R_fn_time_criterion.R); the two quantities stay 0 for every other criterion, which ignores them:
+  ##
+  tau_offset_from_sampling_overhead_at_update      <-  0
+  burnin_to_sampling_leapfrog_time_ratio_at_update <-  0
+  ## (MALT's exponent: 1 = the penalty without it; the other criteria ignore it)
+  lag_one_autocorrelation_rho_at_update            <-  1
+  if (time_criterion_active) {
+      time_per_iter_native_call_burnin_vec                 <-  rep(x = NA_real_, times = n_burnin)
+      n_leapfrog_steps_per_iter_burnin_vec                 <-  rep(x = NA_real_, times = n_burnin)
+      used_in_time_per_leapfrog_step_burnin_fit_vec        <-  rep(x = FALSE,    times = n_burnin)
+      time_per_leapfrog_step_burnin_vec                    <-  rep(x = NA_real_, times = n_burnin)
+      tau_offset_from_sampling_overhead_vec                <-  rep(x = NA_real_, times = n_burnin)
+      burnin_to_sampling_leapfrog_time_ratio_vec           <-  rep(x = NA_real_, times = n_burnin)
+      time_to_target_ESS_tau_penalty_at_tau_main_vec       <-  rep(x = NA_real_, times = n_burnin)
+      ESS_elasticity_wrt_log_tau_vec                       <-  rep(x = NA_real_, times = n_burnin)
+      ChEES_or_SNAPER_statistic_per_tau_chain_mean_vec     <-  rep(x = NA_real_, times = n_burnin)
+      ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec <-  rep(x = NA_real_, times = n_burnin)
+      iteration_of_no_interior_optimum_warning             <-  NA_real_
+      time_per_leapfrog_step_burnin_fit_sums               <-  fn_time_per_leapfrog_step_burnin_fit_init()
+      time_criterion_at_handover                           <-  NULL
+      time_criterion_at_last_update                        <-  NULL
+      eps_main_used_for_iteration                          <-  NA_real_
+      ##
+      ## ---- MALT's exponent (lag_one_autocorrelation_rho) used at each tau update and ("adaptive") its running moments:
+      ##
+      lag_one_autocorrelation_rho_used_vec                              <-  rep(x = NA_real_, times = n_burnin)
+      lag_one_autocorrelation_rho_estimate_after_update_vec             <-  rep(x = NA_real_, times = n_burnin)
+      lag_one_autocorrelation_rho_n_valid_chains_vec                    <-  rep(x = NA_real_, times = n_burnin)
+      lag_one_autocorrelation_rho_moments                               <-  fn_lag_one_autocorrelation_rho_moments_init()
+      lag_one_autocorrelation_rho_source_at_update                      <-  "setting"
+  }
   
   ## print every n_refresh iterations (Stan's 'refresh' convention). This used to be
   ## hard-wired to n_burnin/25, which silently ignored the n_refresh the caller passed:
@@ -810,9 +1075,53 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   gap <- clip_iter_tau
   ## Tau's optimiser starts at the handover, not at the beginning of the epsilon/metric warm-up.
   n_tau_adaptation_iterations <- n_adapt - gap
+  ##
+  ## ---- tau_initial = "adaptive": everything before the handover runs exactly as with tau_initial = pi (the ramp's
+  ##      stage target); only the handover itself (ii == gap) uses the eigenvalue estimate. A numeric tau_initial is untouched.
+  ##
+  tau_initial_adaptive <-  identical(tau_initial, "adaptive")
+  if (tau_initial_adaptive) tau_initial <-  pi
+  ##
+  ## ---- "all" uses every iteration from 1 to the handover. Numeric fractions retain the windows described below.
+  ##      The 30-iteration minimum applies only to numeric fractions; the default remains 0.5.
+  ##
+  ## ---- tau_initial = "adaptive": the part of [clip_iter, gap] whose draws feed lambda_max. Option
+  ##      NicoStan_tau_initial_moments_window_fraction (default 0.5 = the last half; 1 = the whole of [clip_iter, gap], the original
+  ##      behaviour) keeps only the last part of it, so that the early burn-in draws taken while the chains are still moving into the typical set do not
+  ##      inflate lambda_max. The window never has fewer than NicoStan_tau_initial_moments_window_min_iter iterations (default 30)
+  ##      and never starts before clip_iter:
+  ##
+  # tau_initial_moments_window_fraction <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_fraction", default = 1))
+  tau_initial_moments_window_fraction <-  getOption("NicoStan_tau_initial_moments_window_fraction", default = 0.5)
+  tau_initial_moments_all <-  identical(tau_initial_moments_window_fraction, "all")
+  ##
+  if (tau_initial_moments_all) {
+
+        tau_initial_moments_window_min_iter <-  NA_real_
+        tau_initial_moments_window_length <-  gap
+        tau_initial_moments_start_iter <-  1
+
+  } else {
+
+        tau_initial_moments_window_fraction <-  as.numeric(tau_initial_moments_window_fraction)
+        tau_initial_moments_window_min_iter <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_min_iter", default = 30))
+        if (length(tau_initial_moments_window_fraction) != 1 || !is.finite(tau_initial_moments_window_fraction) ||
+            tau_initial_moments_window_fraction <= 0 || tau_initial_moments_window_fraction > 1) {
+              stop("NicoStan_tau_initial_moments_window_fraction must be \"all\" or a single number in (0, 1].")
+        }
+        if (length(tau_initial_moments_window_min_iter) != 1 || !is.finite(tau_initial_moments_window_min_iter) || tau_initial_moments_window_min_iter < 1) {
+              stop("NicoStan_tau_initial_moments_window_min_iter must be a single number >= 1.")
+        }
+        tau_initial_moments_window_length <-  max(tau_initial_moments_window_min_iter,
+                                                  ceiling(tau_initial_moments_window_fraction * (gap - clip_iter + 1)))
+        tau_initial_moments_start_iter <-  max(clip_iter, gap - tau_initial_moments_window_length + 1)
+
+  }
+  ##
   if (!isTRUE(manual_tau)) {
       if (!is.numeric(tau_initial) || length(tau_initial) != 1 || !is.finite(tau_initial) || tau_initial <= 0) {
-          stop("tau_initial must be a single positive finite number.")
+          ## stop("tau_initial must be a single positive finite number.")
+          stop("tau_initial must be a single positive finite number or \"adaptive\".")
       }
       if (gap < clip_iter || clip_iter < 1 || gap != round(gap) || clip_iter != round(clip_iter) ||
           n_tau_adaptation_iterations < 1) {
@@ -821,6 +1130,379 @@ init_and_run_burnin_ChESSR   <- function(  debug,
       message("tau adaptation v2: ", tau_ramp, " ramp to tau_initial = ", signif(tau_initial, 5),
               "; one handover at iteration ", gap, "; updates ", gap, "-", n_adapt - 1,
               "; then frozen. No later resets.")
+      if (tau_initial_adaptive) {
+          message(colourise(paste0("tau_initial = \"adaptive\": the ramp targets pi; at the handover (iteration ", gap,
+                                   ") tau = (pi/2) * sqrt(lambda_max), lambda_max from the burn-in draws of iterations ",
+                                   ## clip_iter, "-", gap,
+                                   tau_initial_moments_start_iter, "-", gap, " in metric coordinates (main: pooled covariance; nuisance: pooled",
+                                   " within-individual second moment)."), "cyan"))
+      }
+  }
+  ##
+  ## ---- tau-only ADAM first-moment weight. Option NicoStan_tau_adam_beta1 (default NULL = beta1_adam, i.e. the tau ADAM as before;
+  ##      beta1_adam is 0, as in the ChEES / SNAPER papers). A number in [0, 1) replaces beta1_adam in every tau ADAM update (the
+  ##      first moment and its bias correction; every trajectory criterion, block and path). The step-size (eps) ADAM keeps
+  ##      beta1_adam:
+  ##
+  tau_adam_beta1_option <-  getOption("NicoStan_tau_adam_beta1", default = NULL)
+  if (!is.null(tau_adam_beta1_option) &&
+      (!is.numeric(tau_adam_beta1_option) || length(tau_adam_beta1_option) != 1 || !is.finite(tau_adam_beta1_option) ||
+       tau_adam_beta1_option < 0 || tau_adam_beta1_option >= 1)) {
+        stop(paste0("NicoStan_tau_adam_beta1 must be NULL (tau uses beta1_adam) or a single number in [0, 1); got: ",
+                    paste(as.character(tau_adam_beta1_option), collapse = ", "), "."))
+  }
+  tau_adam_beta1 <-  if (is.null(tau_adam_beta1_option)) beta1_adam else as.numeric(tau_adam_beta1_option)
+  ##
+  ## ---- eps-only ADAM first-moment weight. Option NicoStan_eps_adam_beta1 (default NULL = beta1_adam, i.e. the step-size ADAM as
+  ##      before). A number in [0, 1) replaces beta1_adam in both step-size (eps) ADAM updates (main and nuisance); the tau ADAM
+  ##      keeps beta1_adam (or NicoStan_tau_adam_beta1 when that is set):
+  ##
+  eps_adam_beta1_option <-  getOption("NicoStan_eps_adam_beta1", default = NULL)
+  if (!is.null(eps_adam_beta1_option) &&
+      (!is.numeric(eps_adam_beta1_option) || length(eps_adam_beta1_option) != 1 || !is.finite(eps_adam_beta1_option) ||
+       eps_adam_beta1_option < 0 || eps_adam_beta1_option >= 1)) {
+        stop(paste0("NicoStan_eps_adam_beta1 must be NULL (eps uses beta1_adam) or a single number in [0, 1); got: ",
+                    paste(as.character(eps_adam_beta1_option), collapse = ", "), "."))
+  }
+  eps_adam_beta1 <-  if (is.null(eps_adam_beta1_option)) beta1_adam else as.numeric(eps_adam_beta1_option)
+  message(colourise(paste0("step-size (eps) ADAM beta1 = ", eps_adam_beta1,
+                           if (is.null(eps_adam_beta1_option)) " (beta1_adam)" else " (NicoStan_eps_adam_beta1)"), "cyan"))
+  ##
+  ## ---- second-moment decay and denominator constant, separately for the step-size (eps) and the trajectory-length (tau) ADAM updates.
+  ##      Options NicoStan_eps_adam_beta2, NicoStan_eps_adam_epsilon, NicoStan_tau_adam_beta2 and NicoStan_tau_adam_epsilon; default NULL =
+  ##      the sampler arguments beta2_adam / eps_adam, so a caller that sets none of them is unchanged. A beta2 is a number in [0, 1), a
+  ##      denominator constant a positive number:
+  ##
+  fn_adam_option_or_argument <-  function(option_name,
+                                          argument_value,
+                                          is_decay) {
+
+        option_value <-  getOption(option_name, default = NULL)
+        if (is.null(option_value)) return(argument_value)
+        value_is_valid <-  is.numeric(option_value) && length(option_value) == 1 && is.finite(option_value) &&
+                           (if (is_decay) (option_value >= 0 && option_value < 1) else option_value > 0)
+        if (!value_is_valid) {
+              stop(paste0(option_name, " must be NULL (the sampler argument) or a single ", if (is_decay) "number in [0, 1)" else "positive number",
+                          "; got: ", paste(as.character(option_value), collapse = ", "), "."))
+        }
+        return(as.numeric(option_value))
+
+  }
+  eps_adam_beta2   <-  fn_adam_option_or_argument("NicoStan_eps_adam_beta2",   beta2_adam, is_decay = TRUE)
+  eps_adam_epsilon <-  fn_adam_option_or_argument("NicoStan_eps_adam_epsilon", eps_adam,   is_decay = FALSE)
+  tau_adam_beta2   <-  fn_adam_option_or_argument("NicoStan_tau_adam_beta2",   beta2_adam, is_decay = TRUE)
+  tau_adam_epsilon <-  fn_adam_option_or_argument("NicoStan_tau_adam_epsilon", eps_adam,   is_decay = FALSE)
+  message(colourise(paste0("eps ADAM: beta1 = ", eps_adam_beta1, ", beta2 = ", eps_adam_beta2, ", denominator constant = ", eps_adam_epsilon), "cyan"))
+  ##
+  ## ---- tau learning-rate restart at the metric freeze. Option NicoStan_tau_learning_rate_restart_at_metric_end (default FALSE = one
+  ##      linear decay of the tau learning rate from LR to LR^2 over the tau adaptation, iterations gap to n_adapt - 1).
+  ##      TRUE: from the first iteration after metric_adaptation_end_iter (the first whose trajectories use the final metric), the
+  ##      decay restarts at the full LR and falls linearly to LR^2 at the last tau update (iteration n_adapt - 1); tau itself is
+  ##      kept. The ADAM second moment (tau_v_adam) and the bias-correction counter are deliberately NOT reset: only the
+  ##      learning-rate schedule restarts, so the restarted steps are still normalised by the gradient scale already learned.
+  ##      It needs gap < metric_adaptation_end_iter and at least one tau update after metric_adaptation_end_iter; otherwise it
+  ##      has no effect (one message):
+  ##
+  ## ---- restart iteration = metric_adaptation_end_iter itself (not the iteration after it). Within burn-in iteration ii the order is:
+  ##      final metric update (forced at ii == metric_adaptation_end_iter by the automatic schedule), then the trajectory-metric factor,
+  ##      then the sampler step ("Perform iteration"), then the eps and tau updates. The trajectories scored by the tau update of
+  ##      iteration metric_adaptation_end_iter therefore already run with the final metric, and that update is the first one after
+  ##      the metric freeze. tau_v_adam, tau_m_adam and the bias-correction counter are kept (see above), which keeps the bias
+  ##      correction consistent (it counts the updates applied to the moments it corrects).
+  ##
+  tau_learning_rate_restart_at_metric_end <-  getOption("NicoStan_tau_learning_rate_restart_at_metric_end", default = FALSE)
+  if (!is.logical(tau_learning_rate_restart_at_metric_end) || length(tau_learning_rate_restart_at_metric_end) != 1 ||
+      is.na(tau_learning_rate_restart_at_metric_end)) {
+        stop("NicoStan_tau_learning_rate_restart_at_metric_end must be TRUE or FALSE.")
+  }
+  # tau_learning_rate_restart_iter <-  metric_adaptation_end_iter + 1
+  tau_learning_rate_restart_iter <-  metric_adaptation_end_iter
+  tau_learning_rate_restart_active <-  tau_learning_rate_restart_at_metric_end && !isTRUE(manual_tau) &&
+                                       (metric_adaptation_end_iter > gap) && (tau_learning_rate_restart_iter < n_adapt)
+  if (tau_learning_rate_restart_at_metric_end && !isTRUE(manual_tau) && !tau_learning_rate_restart_active) {
+        message(colourise(paste0("NicoStan_tau_learning_rate_restart_at_metric_end = TRUE has no effect in this burn-in: metric_adaptation_end_iter (",
+                                 metric_adaptation_end_iter, ") must be after the tau handover (iteration ", gap,
+                                 ## ") and before the last tau update (iteration ", n_adapt - 1, ")."), "cyan"))
+                                 ") and at or before the last tau update (iteration ", n_adapt - 1, ")."), "cyan"))
+  }
+  ##
+  ## ---- tau ADAM settings of this burn-in, reported once when tau is adapted:
+  ##
+  if (!isTRUE(manual_tau)) {
+        # message(colourise(paste0("tau ADAM: beta1 = ", tau_adam_beta1,
+        #                          if (is.null(tau_adam_beta1_option)) " (= beta1_adam, shared with eps)" else paste0(" (NicoStan_tau_adam_beta1; eps keeps beta1_adam = ", beta1_adam, ")"),
+        #                          ", beta2 = ", beta2_adam, ", eps_adam = ", eps_adam,
+        message(colourise(paste0("tau ADAM: beta1 = ", tau_adam_beta1, ", beta2 = ", tau_adam_beta2, ", denominator constant = ", tau_adam_epsilon,
+                                 " | learning-rate restart at the metric freeze = ", tau_learning_rate_restart_at_metric_end,
+                                 if (tau_learning_rate_restart_active) paste0(" (from the tau update of iteration ", tau_learning_rate_restart_iter,
+                                                                               " to iteration ", n_adapt - 1, ")") else ""), "cyan"))
+  }
+  ##
+  ## ---- tau adaptation scheme. Option NicoStan_tau_adaptation_scheme:
+  ##        "adam_decay"          (default) ADAM on log tau from the handover tau, learning rate decaying linearly from LR to LR^2 (the
+  ##                              scheme above; the code without this option, bit for bit).
+  ##        "probe_then_average"  1. at the handover tau = tau_handover / 8 (rung -3 of tau_handover x 2^rung);
+  ##                              2. probe: the aggregated gradient of every tau update (the one the ADAM update would use; every criterion
+  ##                                 and block) is summed over blocks of 4 tau updates. After a block with a sum >= 0 tau doubles (rung + 1),
+  ##                                 up to tau_handover x 4 (rung 2; a block with a sum >= 0 at rung 2 ends the probe there); the first block
+  ##                                 with a sum < 0 halves tau (rung - 1, never below rung -3) and ends the probe. tau changes only at the end
+  ##                                 of a block; the ADAM step computed during the probe is discarded and the ADAM moments are not touched;
+  ##                              3. from the tau update after the one that ends the probe: ADAM on log tau with the tau ADAM settings, fresh
+  ##                                 moments and the CONSTANT learning rate LR (so the learning-rate restart has no effect);
+  ##                              4. log tau after every tau update from iteration metric_adaptation_end_iter on (after the max_tau_main
+  ##                                 ceiling) is averaged; the tau handed to sampling is exp(that mean) (the last tau when no update was
+  ##                                 averaged), before any tau_sampling_scale factor.
+  ##        "fixed_length_probe_then_decay_and_average"  as "probe_then_average" with three changes: (a) the probe's updates run fixed-length
+  ##                              trajectories (tau_ii = tau) also when randomize_tau_burnin = TRUE, and the jitter resumes at the iteration
+  ##                              after the probe ends; (b) the top rung is 0 (tau_handover), not 2; (c) after the probe the learning rate falls
+  ##                              linearly from LR (first ADAM update) to LR^2 (last tau update, iteration n_adapt - 1).
+  ##                              Only tau_main is probed and averaged: tau_us follows it for the joint sampler; with partitioned_HMC = TRUE
+  ##                              tau_us is not adapted in this burn-in and is left as it is.
+  ##
+  tau_adaptation_scheme <-  getOption("NicoStan_tau_adaptation_scheme", default = "adam_decay")
+  # if (!is.character(tau_adaptation_scheme) || length(tau_adaptation_scheme) != 1 || !tau_adaptation_scheme %in% c("adam_decay", "probe_then_average")) {
+  #       stop(paste0("NicoStan_tau_adaptation_scheme must be \"adam_decay\" or \"probe_then_average\"; got: ",
+  if (!is.character(tau_adaptation_scheme) || length(tau_adaptation_scheme) != 1 ||
+      !tau_adaptation_scheme %in% c("adam_decay", "probe_then_average", "fixed_length_probe_then_decay_and_average")) {
+        stop(paste0("NicoStan_tau_adaptation_scheme must be \"adam_decay\", \"probe_then_average\" or \"fixed_length_probe_then_decay_and_average\"; got: ",
+                    paste(as.character(tau_adaptation_scheme), collapse = ", "), "."))
+  }
+  # tau_probe_then_average <-  identical(tau_adaptation_scheme, "probe_then_average") && !isTRUE(manual_tau)
+  tau_probe_fixed_length_decay <-  identical(tau_adaptation_scheme, "fixed_length_probe_then_decay_and_average") && !isTRUE(manual_tau)
+  tau_probe_then_average <-  (identical(tau_adaptation_scheme, "probe_then_average") || tau_probe_fixed_length_decay) && !isTRUE(manual_tau)
+  tau_probe_block_length <-  4
+  tau_probe_rung_start   <-  -3
+  # tau_probe_rung_max     <-  2
+  tau_probe_rung_max     <-  if (tau_probe_fixed_length_decay) 0 else 2
+  tau_probe_state <-  list(probing = FALSE, rung = tau_probe_rung_start, gradient_block_sum = 0, n_in_block = 0,
+                           log_tau_start = NA_real_, end_iteration = NA_real_)
+  tau_probe_tau_path_vec <-  rep(x = NA_real_, times = n_burnin)
+  tau_average_start_iteration <-  metric_adaptation_end_iter
+  tau_average_sum_log_tau <-  0
+  tau_average_n_updates <-  0
+  tau_main_last_iterate <-  NA_real_
+  tau_main_averaged <-  NA_real_
+  ##
+  ## one tau update of the probe: add the aggregated gradient to the block; at the end of a block move the rung and, when it
+  ## ends, record the iteration (the probe's tau is exp(log_tau_start + rung * log(2))):
+  fn_tau_probe_step <-  function(state,
+                                 aggregated_gradient,
+                                 iteration) {
+
+        state$gradient_block_sum <-  state$gradient_block_sum + aggregated_gradient
+        state$n_in_block <-  state$n_in_block + 1
+        if (state$n_in_block >= tau_probe_block_length) {
+              block_sum_negative <-  state$gradient_block_sum < 0
+              probe_at_top <-  !block_sum_negative && (state$rung >= tau_probe_rung_max)
+              probe_goes_up <-  !block_sum_negative && (state$rung < tau_probe_rung_max)
+              if (block_sum_negative && (state$rung > tau_probe_rung_start)) state$rung <-  state$rung - 1
+              if (probe_goes_up) state$rung <-  state$rung + 1
+              if (block_sum_negative || probe_at_top) {
+                    state$probing <-  FALSE
+                    state$end_iteration <-  iteration
+              }
+              state$gradient_block_sum <-  0
+              state$n_in_block <-  0
+        }
+        return(state)
+
+  }
+  if (tau_probe_then_average) {
+        # message(colourise(paste0("tau adaptation scheme = probe_then_average: tau_handover / 8, doubling in blocks of ", tau_probe_block_length,
+        #                          " tau updates up to tau_handover x 4, then ADAM with constant LR; tau for sampling = exp(mean log tau) over the tau updates of iterations ",
+        message(colourise(paste0("tau adaptation scheme = ", tau_adaptation_scheme, ": tau_handover / 8, doubling in blocks of ", tau_probe_block_length,
+                                 " tau updates up to tau_handover x ", 2^tau_probe_rung_max,
+                                 if (tau_probe_fixed_length_decay) "; fixed-length probe; LR decays LR -> LR^2 after the probe" else ", then ADAM with constant LR",
+                                 "; tau for sampling = exp(mean log tau) over the tau updates of iterations ",
+                                 max(gap, tau_average_start_iteration), "-", n_adapt - 1,
+                                 if (tau_learning_rate_restart_at_metric_end) " (the learning-rate restart has no effect with this scheme)" else ""), "cyan"))
+  }
+  ##
+  ## ---- tau_initial = "adaptive": lambda_max = the largest eigenvalue of each block's burn-in draws in metric coordinates, from the
+  ##      states of all burn-in chains at the start of every iteration in [clip_iter, gap]. For a Gaussian target with covariance Sigma
+  ##      and mass matrix M, the slowest oscillation has period 2 pi sqrt(lambda_max(M^(1/2) Sigma M^(1/2))), so
+  ##      tau = (pi/2) * sqrt(lambda_max) is a quarter of it.
+  ##
+  ##        - main block (d = n_params_main): Sigma_hat = the pooled sample covariance of the main parameter vectors over all chains
+  ##          and iterations (batch Welford update, the same update as wf_m / wf_C2 of the pooled metric estimator), and M = the main
+  ##          mass in force at the handover, as the trajectory criterion reads it (diag: 1 / M_inv_main_vec; dense: M_dense_main;
+  ##          unit: the identity). lambda_max_main = the largest eigenvalue of B Sigma_hat t(B), t(B) %*% B = M, by base::eigen()
+  ##          at the handover only. The metric's own moments are not the same quantity: wf_C2 exists only for
+  ##          metric_estimator = "pooled" (from metric_start_iter, with window resets), and empicical_cov_main of the chain_mean
+  ##          estimators is the Welford covariance of the across-chain MEAN.
+  ##
+  ##        - nuisance block (d = N x n_tests): each coordinate is standardised as y = (u - m) / s, m = the running centre
+  ##          snaper_m_vec_us and s = sqrt(M_inv_us_vec), the nuisance metric's own scale at that iteration (Empirical, uniform_diag
+  ##          and unit alike). The y of individual i (its n_tests coordinates, in the model's chunk-major storage order; see
+  ##          fn_nuisance_chunk_layout_positions) give y_i t(y_i), and the n_tests x n_tests sum over the N individuals and all
+  ##          chains is formed in compiled code (inst/src_extra/tau_initial_nuisance_moments.cpp, compiled at first use by
+  ##          Rcpp::sourceCpp and cached, so NicoStan / BayesMVP need no rebuild). R keeps the running sum and the count of terms;
+  ##          lambda_max_us = the largest eigenvalue of sum / count. External Stan models have no known (individual x test)
+  ##          layout, so there every nuisance coordinate is a 1 x 1 block.
+  ##
+  ##        - partitioned_HMC = TRUE: tau_main from lambda_max_main, tau_us from lambda_max_us. partitioned_HMC = FALSE (one tau):
+  ##          tau = (pi/2) * sqrt(max(lambda_max_main, lambda_max_us)).
+  ##          With one tau, the block(s) follow the trajectory criterion: tau_adaptation_block "main" gives tau = (pi/2) * sqrt(lambda_max_main)
+  ##          (the nuisance estimate is still formed and recorded, not used); "joint" gives the larger of the two as above.
+  ##
+  ##      A block whose estimate is missing, not finite or not positive uses pi (the numeric path with tau_initial = pi), with a
+  ##      message. The accumulation reads the chains, centres and metric only: it changes no sampler state, adaptation or random number.
+  ##
+  ##      Its cost falls inside time_burnin (adaptive fits only) and is recorded separately (proc.time() elapsed seconds): seconds_moments
+  ##      = the per-iteration accumulation, seconds_loader = finding / loading the compiled accumulator, seconds_handover = the two
+  ##      eigenvalue computations at the handover.
+  ##
+  tau_initial_moments <-  list(n_updates = 0,
+                               n_errors = 0,
+                               nuisance_sampled = isTRUE(sample_nuisance) && (n_nuisance > 0),
+                               seconds_moments = 0,
+                               seconds_loader = 0,
+                               seconds_handover = 0,
+                               main = list(n = 0, mean = NULL, C2 = NULL),
+                               us = list(sum = NULL, count = 0, positions = NULL, layout = NA_character_,
+                                         moments_function = NULL, loader_failed = FALSE,
+                                         scale_source = NULL, scale = NULL))
+  tau_initial_adaptive_record <-  NULL
+  ## the source file of this function when it was sourced from a development tree (keep.source = TRUE), else character(0);
+  ## the compiled nuisance accumulator is looked for next to it (R/ -> inst/src_extra/):
+  tau_initial_burnin_source_file <-  if (tau_initial_adaptive) utils::getSrcFilename(sys.function(), full.names = TRUE) else character(0)
+  ##
+  ## batch Welford update of the pooled mean and cross-product sum, one draw per column of X (the update of wf_m / wf_C2):
+  fn_tau_initial_welford_update <-  function( moments,
+                                              X) {
+
+          X <-  as.matrix(X)
+          n_draws_new <-  ncol(X)
+          if (is.null(moments$mean)) {
+              moments$mean <-  rep(0, nrow(X))
+              moments$C2   <-  matrix(0, nrow = nrow(X), ncol = nrow(X))
+          }
+          batch_mean  <-  rowMeans(X)
+          batch_dev   <-  X - batch_mean
+          mean_shift  <-  batch_mean - moments$mean
+          n_total_new <-  moments$n + n_draws_new
+          moments$C2   <-  moments$C2 + tcrossprod(batch_dev) + tcrossprod(mean_shift) * (moments$n * n_draws_new / n_total_new)
+          moments$mean <-  moments$mean + mean_shift * (n_draws_new / n_total_new)
+          moments$n    <-  n_total_new
+          return(moments)
+
+  }
+  ##
+  ## lambda_max of the pooled main covariance in metric coordinates, B Sigma_hat t(B), B = the trajectory criterion's metric factor:
+  fn_tau_initial_lambda_max_main <-  function( moments,
+                                               mass) {
+
+          if (is.null(moments$C2) || moments$n < 2) return(NA_real_)
+          covariance <-  moments$C2 / (moments$n - 1)
+          metric_factor <-  fn_trajectory_metric_factor(mass, nrow(covariance))
+          covariance_metric <-  fn_apply_trajectory_metric(metric_factor, t(fn_apply_trajectory_metric(metric_factor, covariance)))
+          covariance_metric <-  0.5 * (covariance_metric + t(covariance_metric))
+          if (!all(is.finite(covariance_metric))) return(NA_real_)
+          return(base::eigen(covariance_metric, symmetric = TRUE, only.values = TRUE)$values[1])
+
+  }
+  ##
+  ## lambda_max of the pooled within-individual second moment of the standardised nuisance coordinates:
+  fn_tau_initial_lambda_max_us <-  function(moments_us) {
+
+          if (is.null(moments_us$sum) || !(moments_us$count > 0)) return(NA_real_)
+          second_moment <-  moments_us$sum / moments_us$count
+          second_moment <-  0.5 * (second_moment + t(second_moment))
+          if (!all(is.finite(second_moment))) return(NA_real_)
+          return(base::eigen(second_moment, symmetric = TRUE, only.values = TRUE)$values[1])
+
+  }
+  ##
+  ## position (1-based) of every nuisance entry, one row per individual and one column per test: the built-in models store the
+  ## nuisance vector chunk by chunk (fn_nuisance_chunk_layout_positions, with the burn-in's chunk count and vectorisation);
+  ## without that layout, one column (each coordinate on its own):
+  fn_tau_initial_nuisance_positions <-  function() {
+
+          n_tests_us <-  if ((Model_type != "Stan") && is.matrix(y)) ncol(y) else NA_real_
+          N_us       <-  if ((Model_type != "Stan") && is.matrix(y)) nrow(y) else NA_real_
+          fn_layout_positions <-  get0(x = "fn_nuisance_chunk_layout_positions", mode = "function", inherits = TRUE)
+          if (is.finite(n_tests_us) && is.finite(N_us) && (N_us * n_tests_us == n_nuisance) && !is.null(fn_layout_positions)) {
+              positions <-  fn_layout_positions( N = N_us,
+                                                 n_tests = n_tests_us,
+                                                 n_chunks = Model_args_as_Rcpp_List$Model_args_ints[4],
+                                                 vect_type = Model_args_as_Rcpp_List$Model_args_strings[1])
+              return(list(positions = positions, layout = "chunk_major"))
+          }
+          message(colourise(paste0("tau_initial = \"adaptive\": no (individual x test) layout is known for the nuisance block (n_nuisance = ",
+                                   n_nuisance, "); each nuisance coordinate is taken as its own 1 x 1 block."), "cyan"))
+          return(list(positions = matrix(seq_len(n_nuisance), ncol = 1), layout = "coordinatewise"))
+
+  }
+  ##
+  ## the compiled accumulator: option NicoStan_tau_initial_nuisance_moments_cpp, else the development tree this function was
+  ## sourced from, else the installed package; compiled once per source version into the NicoStan user cache (or the folder in
+  ## option NicoStan_src_extra_cache_dir). Once loaded, it is kept for the R session (option
+  ## NicoStan_tau_initial_nuisance_moments_loaded, keyed on the file and its md5 sum), so later burn-ins of the same session do not
+  ## call Rcpp::sourceCpp() again. The cache folder is shared by every R process of the user; if loading from it fails (e.g. two
+  ## processes compiling into it at the same time), the file is compiled once more into a folder of this process only.
+  fn_tau_initial_nuisance_moments_function <-  function() {
+
+          cpp_file_name <-  "tau_initial_nuisance_moments.cpp"
+          cpp_function_name <-  "fn_tau_initial_nuisance_second_moment_sum"
+          cpp_file_candidates <-  c(getOption("NicoStan_tau_initial_nuisance_moments_cpp", default = NA_character_),
+                                    if (length(tau_initial_burnin_source_file) == 1 && nzchar(tau_initial_burnin_source_file))
+                                        file.path(dirname(dirname(tau_initial_burnin_source_file)), "inst", "src_extra", cpp_file_name) else NA_character_,
+                                    system.file("src_extra", cpp_file_name, package = "NicoStan"))
+          cpp_file_candidates <-  cpp_file_candidates[!is.na(cpp_file_candidates) & nzchar(cpp_file_candidates)]
+          cpp_file <-  cpp_file_candidates[file.exists(cpp_file_candidates)][1]
+          if (is.na(cpp_file)) {
+              message(colourise(paste0("tau_initial = \"adaptive\": ", cpp_file_name, " not found (looked in: ",
+                                       paste(cpp_file_candidates, collapse = ", "), "); the nuisance block has no estimate."), "red"))
+              return(NULL)
+          }
+          ##
+          ## already loaded in this R session (same file, same contents):
+          cpp_file <-  normalizePath(cpp_file, mustWork = TRUE)
+          cpp_file_md5 <-  unname(tools::md5sum(cpp_file))
+          session_loaded <-  getOption("NicoStan_tau_initial_nuisance_moments_loaded", default = NULL)
+          if (is.list(session_loaded) && identical(session_loaded$cpp_file, cpp_file) && identical(session_loaded$cpp_file_md5, cpp_file_md5) &&
+              is.function(session_loaded$moments_function)) {
+              return(session_loaded$moments_function)
+          }
+          ##
+          fn_source_cpp_into <-  function(cache_dir) {
+              dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+              moments_env <-  new.env()
+              load_result <-  try(Rcpp::sourceCpp(file = cpp_file, cacheDir = cache_dir, env = moments_env), silent = TRUE)
+              if (inherits(load_result, "try-error") || !exists(cpp_function_name, envir = moments_env, mode = "function", inherits = FALSE)) {
+                  return(list(moments_function = NULL, error = trimws(as.character(load_result))))
+              }
+              return(list(moments_function = get(cpp_function_name, envir = moments_env, inherits = FALSE), error = NA_character_))
+          }
+          cache_dir <-  getOption("NicoStan_src_extra_cache_dir", default = file.path(tools::R_user_dir(package = "NicoStan", which = "cache"), "src_extra"))
+          loaded <-  fn_source_cpp_into(cache_dir)
+          if (is.null(loaded$moments_function)) {
+              process_cache_dir <-  file.path(cache_dir, paste0("process_", Sys.getpid()))
+              message(colourise(paste0("tau_initial = \"adaptive\": ", cpp_file, " did not load from the shared cache ", cache_dir, " (",
+                                       loaded$error, "); compiling it again into ", process_cache_dir, "."), "cyan"))
+              loaded <-  fn_source_cpp_into(process_cache_dir)
+          }
+          if (is.null(loaded$moments_function)) {
+              message(colourise(paste0("tau_initial = \"adaptive\": ", cpp_file, " did not compile or load (",
+                                       loaded$error, "); the nuisance block has no estimate."), "red"))
+              return(NULL)
+          }
+          options(NicoStan_tau_initial_nuisance_moments_loaded = list(cpp_file = cpp_file,
+                                                                     cpp_file_md5 = cpp_file_md5,
+                                                                     moments_function = loaded$moments_function))
+          message(colourise(paste0("tau_initial = \"adaptive\": nuisance accumulator loaded from ", cpp_file), "cyan"))
+          return(loaded$moments_function)
+
+  }
+  ##
+  fn_tau_initial_from_eigen_max <-  function( eigen_max,
+                                              block_label) {
+
+          if (length(eigen_max) == 1 && is.finite(eigen_max) && eigen_max > 0) return(0.5 * pi * sqrt(eigen_max))
+          message(colourise(paste0("tau_initial = \"adaptive\": lambda_max (", block_label, ") = ", signif(eigen_max, 5),
+                                   " is not a positive finite number; tau falls back to pi."), "red"))
+          return(pi)
+
   }
   EHMC_args_as_Rcpp_List$record_kinetic_energy_tau_derivatives <- identical(burnin_algorithm, "KE") && !isTRUE(manual_tau)
   tau_adaptation_iteration_vec <- rep(x = NA_real_, times = n_burnin)
@@ -952,6 +1634,32 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## the joint trajectory block on the resident interface (every nuisance-sized quantity of its criterion is computed in the worker):
   use_resident_joint_block <-  use_resident_burnin && identical(tau_adaptation_block_effective, "joint")
   ##
+  ## ---- tau_initial = "adaptive" on the resident interface: the nuisance block's running n_tests x n_tests sum and its count
+  ##      (see tau_initial_moments above) are kept in the worker, which reads its own nuisance state and centre
+  ##      (fn_persistent_burnin_tau_initial_nuisance_moments_*_resident, chains in parallel), so the nuisance state is not
+  ##      copied to R at each iteration of [clip_iter, gap] and the separate accumulator is not loaded. Used only when the
+  ##      worker's compiled code provides these functions; otherwise (an older build, the original interface, or
+  ##      options(NicoStan_tau_initial_resident_moments = FALSE)) the state is copied and inst/src_extra/tau_initial_nuisance_moments.cpp
+  ##      is used, as before. The two give the same sum up to the order in which the chains are added (rounding only).
+  ##
+  resident_tau_initial_api_names <-  c("fn_persistent_burnin_tau_initial_api_version",
+                                       "fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident",
+                                       "fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident",
+                                       "fn_persistent_burnin_tau_initial_nuisance_moments_get_resident")
+  use_resident_tau_initial_moments <-  FALSE
+  tau_initial_resident_moments_reset <-  FALSE
+  if (tau_initial_adaptive && use_resident_burnin && isTRUE(getOption("NicoStan_tau_initial_resident_moments", TRUE)) &&
+      fn_worker_api_has_functions(resident_tau_initial_api_names)) {
+        resident_tau_initial_api <-  mget(x = resident_tau_initial_api_names, envir = worker_api_env, inherits = FALSE)
+        use_resident_tau_initial_moments <-  isTRUE(tryCatch(resident_tau_initial_api$fn_persistent_burnin_tau_initial_api_version() >= 1,
+                                                             error = function(e) FALSE))
+  }
+  if (tau_initial_adaptive && isTRUE(tau_initial_moments$nuisance_sampled)) {
+        message(colourise(paste0("tau_initial = \"adaptive\": nuisance moments accumulated ",
+                                 if (use_resident_tau_initial_moments) "inside the burn-in worker (no copy of the nuisance state)" else
+                                                                       "by the separate compiled accumulator (nuisance state copied to R)"), "cyan"))
+  }
+  ##
   if (use_resident_burnin) {
         run_burnin_iteration <-  if (debug_burnin_timing) resident_api$fn_persistent_burnin_run_one_iter_main_only_profiled else
                                                           resident_api$fn_persistent_burnin_run_one_iter_main_only
@@ -995,7 +1703,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   # metric_ready       <- FALSE
   ##
   if (is.null(metric_start_iter)) metric_start_iter <- round(n_burnin/10)     # same start as old ii_min
-  metric_window_resets <- round(c(0.30, 0.60) * n_adapt)                      # discard early, drift-contaminated draws
+  ## metric_window_resets <- round(c(0.30, 0.60) * n_adapt)                      # discard early, drift-contaminated draws
+  metric_window_resets <- fn_resolve_metric_pooled_window_reset_iterations( metric_pooled_window_resets = metric_pooled_window_resets,
+                                                                            n_adapt                     = n_adapt)
+  if (metric_estimator == "pooled") {
+      message(colourise(paste0("pooled metric: draws from iteration ", metric_start_iter, " to ", metric_adaptation_end_iter,
+                               if (length(metric_window_resets) == 0) " in one window (no reset)" else
+                                   paste0(", accumulators reset at the start of iteration(s) ", paste(metric_window_resets + 1, collapse = ", ")),
+                               " | off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage),
+                        "cyan"))
+  }
+  if (metric_estimator == "per_iteration") {
+      message(colourise(paste0("per-iteration metric: cross-chain (co)variance of each iteration's draws, iterations ", metric_start_iter,
+                               " to ", metric_adaptation_end_iter, ", blended into the metric with ratio_M (no accumulation, no window resets)",
+                               if (identical(metric_shape_main, "dense")) paste0(" | off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage) else ""),
+                        "cyan"))
+  }
   wf_min_draws <- n_params_main + 1
   ##
   wf_n  <- 0
@@ -1004,6 +1727,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   wf_C2 <- matrix(0, n_params_main, n_params_main)
   empicical_cov_main <- diag(rep(1, n_params_main))
   var_draws_all      <- rep(1, n_params)
+  ##
+  ## per-iteration metric estimator (metric_estimator = "per_iteration"): the main-parameter variances of the current iteration's
+  ## draws (the diagonal main metric reads them only once metric_ready is TRUE, by which time they have been computed), and the
+  ## number of draws that have entered the per-iteration proposals so far (the n of the Stan-style regularisation of the dense proposal):
+  per_iteration_variance_vec_main          <- rep(1, n_params_main)
+  per_iteration_metric_n_draws_since_start <- 0
   ##
   metric_ready <- (metric_estimator %in% c("chain_mean", "chain_mean_scaled"))   # pooled: wait for draws; chain_mean(_scaled): behave exactly as before
   ##
@@ -1157,6 +1886,85 @@ init_and_run_burnin_ChESSR   <- function(  debug,
               #       gc() ## ; gc()
               # }
               
+              ## "all" starts this accumulation at iteration 1; numeric fractions use the historical window below.
+              ## ---- tau_initial = "adaptive": accumulate the moments behind lambda_max (see tau_initial_moments above) on [clip_iter, gap],
+              ##      BEFORE the handover below, so that iteration gap reads the states at the start of that iteration. It only reads
+              ##      the chains, centres and metric: no sampler state, adaptation or random number is changed, so the burn-in up to
+              ##      the handover is the same as with tau_initial = pi.
+              ## if (tau_initial_adaptive && !isTRUE(manual_tau) && ii >= clip_iter && ii <= gap) {
+  if (tau_initial_adaptive && !isTRUE(manual_tau) && ii >= tau_initial_moments_start_iter && ii <= gap) {
+
+                tau_initial_moments_t0 <-  proc.time()[[3]]
+                tau_initial_loader_seconds_ii <-  0
+                tau_initial_moments_try <-  try({
+
+                      tau_initial_moments$n_updates <-  tau_initial_moments$n_updates + 1
+                      ##
+                      ## main block: the pooled (Welford) mean and cross-product sum of the main parameter vectors of all chains:
+                      tau_initial_moments$main <-  fn_tau_initial_welford_update( moments = tau_initial_moments$main,
+                                                                                  X = theta_main_vectors_all_chains_input_from_R)
+                      ##
+                      ## nuisance block: the n_tests x n_tests sum of y_i t(y_i), y = (u - snaper_m_vec_us) / sqrt(M_inv_us_vec), over the
+                      ## individuals and chains; on the resident interface the states and the centre are read from the worker:
+                      if (tau_initial_moments$nuisance_sampled && !tau_initial_moments$us$loader_failed) {
+                          if (is.null(tau_initial_moments$us$positions)) {
+                              tau_initial_nuisance_layout <-  fn_tau_initial_nuisance_positions()
+                              tau_initial_moments$us$positions <-  tau_initial_nuisance_layout$positions
+                              tau_initial_moments$us$layout    <-  tau_initial_nuisance_layout$layout
+                          }
+                          ## on the worker's accumulator (use_resident_tau_initial_moments): the layout is given to the worker once, and the
+                          ## worker adds this iteration from its own theta_us and snaper_m_vec_us; only the scale is passed from R:
+                          if (use_resident_tau_initial_moments) {
+                              if (!tau_initial_resident_moments_reset) {
+                                  resident_tau_initial_api$fn_persistent_burnin_tau_initial_nuisance_moments_reset_resident( worker_ptr,
+                                                                                                                            tau_initial_moments$us$positions)
+                                  tau_initial_resident_moments_reset <-  TRUE
+                              }
+                              if (!identical(tau_initial_moments$us$scale_source, EHMC_Metric_as_Rcpp_List$M_inv_us_vec)) {
+                                  tau_initial_moments$us$scale_source <-  EHMC_Metric_as_Rcpp_List$M_inv_us_vec
+                                  tau_initial_moments$us$scale        <-  sqrt(as.numeric(EHMC_Metric_as_Rcpp_List$M_inv_us_vec))
+                              }
+                              resident_tau_initial_api$fn_persistent_burnin_tau_initial_nuisance_moments_accumulate_resident( worker_ptr,
+                                                                                                                             "snaper_m_vec_us",
+                                                                                                                             tau_initial_moments$us$scale)
+                          }
+                          ## if (is.null(tau_initial_moments$us$moments_function)) {
+                          if (!use_resident_tau_initial_moments && is.null(tau_initial_moments$us$moments_function)) {
+                              tau_initial_loader_t0 <-  proc.time()[[3]]
+                              tau_initial_moments$us$moments_function <-  fn_tau_initial_nuisance_moments_function()
+                              tau_initial_moments$us$loader_failed    <-  is.null(tau_initial_moments$us$moments_function)
+                              tau_initial_loader_seconds_ii <-  proc.time()[[3]] - tau_initial_loader_t0
+                          }
+                          ## if (!tau_initial_moments$us$loader_failed) {
+                          if (!use_resident_tau_initial_moments && !tau_initial_moments$us$loader_failed) {
+                              tau_initial_us_states <-  if (use_resident_burnin) resident_api$fn_persistent_burnin_get_state(worker_ptr, "theta_us_vectors_all_chains_output_to_R") else
+                                                                                 theta_us_vectors_all_chains_input_from_R
+                              tau_initial_us_centre <-  if (use_resident_burnin) resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_vec_us") else
+                                                                                 EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
+                              ## s = sqrt(M_inv_us_vec), recomputed only when the nuisance metric has changed (every change assigns a new
+                              ## vector, so an unchanged metric is the same object and identical() returns at once):
+                              if (!identical(tau_initial_moments$us$scale_source, EHMC_Metric_as_Rcpp_List$M_inv_us_vec)) {
+                                  tau_initial_moments$us$scale_source <-  EHMC_Metric_as_Rcpp_List$M_inv_us_vec
+                                  tau_initial_moments$us$scale        <-  sqrt(as.numeric(EHMC_Metric_as_Rcpp_List$M_inv_us_vec))
+                              }
+                              tau_initial_us_sum <-  tau_initial_moments$us$moments_function( as.matrix(tau_initial_us_states),
+                                                                                             as.numeric(tau_initial_us_centre),
+                                                                                             tau_initial_moments$us$scale,
+                                                                                             tau_initial_moments$us$positions)
+                              tau_initial_moments$us$sum   <-  if (is.null(tau_initial_moments$us$sum)) tau_initial_us_sum else tau_initial_moments$us$sum + tau_initial_us_sum
+                              tau_initial_moments$us$count <-  tau_initial_moments$us$count + nrow(tau_initial_moments$us$positions) * ncol(as.matrix(tau_initial_us_states))
+                              rm(tau_initial_us_states, tau_initial_us_centre, tau_initial_us_sum)
+                          }
+                      }
+
+                })
+                if (inherits(tau_initial_moments_try, "try-error")) tau_initial_moments$n_errors <-  tau_initial_moments$n_errors + 1
+                tau_initial_moments$seconds_loader  <-  tau_initial_moments$seconds_loader + tau_initial_loader_seconds_ii
+                tau_initial_moments$seconds_moments <-  tau_initial_moments$seconds_moments +
+                                                        (proc.time()[[3]] - tau_initial_moments_t0 - tau_initial_loader_seconds_ii)
+
+              }
+
               if (manual_tau == FALSE) {
                       
                 try({
@@ -1173,16 +1981,97 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                             tau_adam_updates_performed_by_block$us   <- 0
                             ChEES_criterion_ema <- NA_real_
 
+                            ## ---- tau_initial = "adaptive": tau = (pi/2) * sqrt(lambda_max) per block (see tau_initial_moments above), the main
+                            ##      mass being the one in force now. The joint sampler (partitioned_HMC = FALSE) has one tau for both blocks,
+                            ##      so it takes the larger of the two, i.e. (pi/2) * sqrt(max(lambda_max_main, lambda_max_us)). A block whose
+                            ##      estimate is missing, not finite or not positive uses pi (the numeric path with tau_initial = pi).
+                            ##      With tau_adaptation_block "main" the joint sampler's tau comes from the main block alone.
+                            if (tau_initial_adaptive) {
+
+                                  tau_initial_handover_t0 <-  proc.time()[[3]]
+                                  ## on the worker's accumulator, the running sum and count are read from the worker (one n_tests x n_tests matrix
+                                  ## and one number); without a term the block keeps no estimate, as before:
+                                  if (use_resident_tau_initial_moments && tau_initial_resident_moments_reset) {
+                                      tau_initial_resident_moments <-  tryCatch(resident_tau_initial_api$fn_persistent_burnin_tau_initial_nuisance_moments_get_resident(worker_ptr),
+                                                                               error = function(e) { message(colourise(paste0("tau_initial = \"adaptive\": reading the nuisance moments from the worker failed: ",
+                                                                                                                              conditionMessage(e)), "red")) ; NULL })
+                                      if (!is.null(tau_initial_resident_moments) && (tau_initial_resident_moments$count > 0)) {
+                                          tau_initial_moments$us$sum   <-  tau_initial_resident_moments$sum
+                                          tau_initial_moments$us$count <-  tau_initial_resident_moments$count
+                                      }
+                                  }
+                                  tau_initial_mass_main <-  if (metric_shape_main == "diag") 1 / c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec) else
+                                                                                            EHMC_Metric_as_Rcpp_List$M_dense_main
+                                  lambda_max_main_handover <-  tryCatch(fn_tau_initial_lambda_max_main(tau_initial_moments$main, tau_initial_mass_main),
+                                                                        error = function(e) { message(colourise(paste0("tau_initial = \"adaptive\": lambda_max (main) failed: ",
+                                                                                                                       conditionMessage(e)), "red")) ; NA_real_ })
+                                  lambda_max_us_handover   <-  if (!tau_initial_moments$nuisance_sampled) NA_real_ else
+                                                               tryCatch(fn_tau_initial_lambda_max_us(tau_initial_moments$us),
+                                                                        error = function(e) { message(colourise(paste0("tau_initial = \"adaptive\": lambda_max (nuisance) failed: ",
+                                                                                                                       conditionMessage(e)), "red")) ; NA_real_ })
+                                  ## the Marchenko-Pastur upper edge (1 + sqrt(d / n))^2: the lambda_max that sampling noise alone gives for n
+                                  ## independent draws with covariance I in metric coordinates (diagnostic, not used for tau):
+                                  lambda_max_main_noise_edge <-  (1 + sqrt(n_params_main / max(1, tau_initial_moments$main$n)))^2
+                                  tau_initial_moments$seconds_handover <-  proc.time()[[3]] - tau_initial_handover_t0
+                                  ##
+                                  tau_block_main_handover <-  fn_tau_initial_from_eigen_max(lambda_max_main_handover, "main")
+                                  ## a nuisance block that is not sampled has no estimate: its tau is then set as by the numeric path with pi.
+                                  tau_block_us_handover   <-  if (tau_initial_moments$nuisance_sampled) fn_tau_initial_from_eigen_max(lambda_max_us_handover, "nuisance") else
+                                                                                                        tau_initial
+                                  lambda_max_joint_handover <-  if (tau_initial_moments$nuisance_sampled) max(lambda_max_main_handover, lambda_max_us_handover) else
+                                                                                                          lambda_max_main_handover
+                                  ##
+                                  ## the joint sampler (partitioned_HMC = FALSE) has one tau: from the main block when tau is adapted on the main
+                                  ## block (tau_adaptation_block "main"), from the larger of the two blocks when it is adapted on both ("joint"):
+                                  tau_initial_uses_nuisance_block <-  (partitioned_HMC == FALSE) && identical(tau_adaptation_block_effective, "joint") &&
+                                                                      isTRUE(tau_initial_moments$nuisance_sampled)
+                                  tau_initial_tau_source <-  if (partitioned_HMC == TRUE) "each block its own" else
+                                                             if (tau_initial_uses_nuisance_block) "larger of main and nuisance" else "main block"
+                                  ## tau_main_adaptive_handover <-  if (partitioned_HMC == TRUE) tau_block_main_handover else
+                                  ##                                if (tau_initial_moments$nuisance_sampled) max(tau_block_main_handover, tau_block_us_handover) else
+                                  ##                                                                          tau_block_main_handover
+                                  tau_main_adaptive_handover <-  if (partitioned_HMC == TRUE) tau_block_main_handover else
+                                                                 if (tau_initial_uses_nuisance_block) max(tau_block_main_handover, tau_block_us_handover) else
+                                                                                                      tau_block_main_handover
+                                  tau_us_adaptive_handover   <-  if (partitioned_HMC == TRUE) tau_block_us_handover else tau_main_adaptive_handover
+                                  ##
+                                  message(colourise(paste0("tau_initial = \"adaptive\" handover (iteration ", ii, ", ", tau_initial_moments$n_updates,
+                                                           " iterations of moments, ", tau_initial_moments$main$n, " main draws): lambda_max main = ",
+                                                           signif(lambda_max_main_handover, 5),
+                                                           ", nuisance = ", if (tau_initial_moments$nuisance_sampled) signif(lambda_max_us_handover, 5) else "not sampled",
+                                                           if (partitioned_HMC == TRUE) "" else paste0(", joint (larger) = ", signif(lambda_max_joint_handover, 5)),
+                                                           "; tau from: ", tau_initial_tau_source, " (tau_adaptation_block = ", tau_adaptation_block_effective, ")",
+                                                           " -> tau_main = ", signif(tau_main_adaptive_handover, 5),
+                                                           ", tau_us = ", signif(tau_us_adaptive_handover, 5)), "cyan"))
+                                  message(colourise(paste0("tau_initial = \"adaptive\" diagnostics (not used for tau): main noise edge (1 + sqrt(d/n))^2 = ",
+                                                           signif(lambda_max_main_noise_edge, 5), " (d = ", n_params_main, ", n = ", tau_initial_moments$main$n, ")",
+                                                           "; nuisance layout = ", tau_initial_moments$us$layout,
+                                                           " (", if (is.null(tau_initial_moments$us$positions)) NA else ncol(tau_initial_moments$us$positions), " per individual, ",
+                                                           tau_initial_moments$us$count, " terms)",
+                                                           "; errors = ", tau_initial_moments$n_errors,
+                                                           "; seconds (inside time_burnin): moments = ", signif(tau_initial_moments$seconds_moments, 4),
+                                                           ", loader = ", signif(tau_initial_moments$seconds_loader, 4),
+                                                           ", handover = ", signif(tau_initial_moments$seconds_handover, 4)), "cyan"))
+                                  if (tau_main_adaptive_handover > max_tau_main || tau_us_adaptive_handover > max_tau_us) {
+                                      message(colourise(paste0("tau_initial = \"adaptive\": handover tau exceeds its ceiling (tau_main = ", signif(tau_main_adaptive_handover, 5),
+                                                               " vs max_tau_main = ", max_tau_main, "; tau_us = ", signif(tau_us_adaptive_handover, 5),
+                                                               " vs max_tau_us = ", max_tau_us, "); the ceiling is applied later in this iteration."), "red"))
+                                  }
+
+                            }
+
                             if (partitioned_HMC == TRUE) {
 
                                         ## For main:
                                         ## or: ## tau_mult * sqrt(EHMC_burnin_as_Rcpp_List$eigen_max_main)
                                         tau_main_prop <-    tau_initial
+                                        if (tau_initial_adaptive) tau_main_prop <-  tau_main_adaptive_handover
                                         EHMC_args_as_Rcpp_List$tau_main  <-   if_not_NA_or_INF_else(tau_main_prop, 5.0 *   EHMC_args_as_Rcpp_List$eps_main)
                                         message(paste("tau handover: main =", EHMC_args_as_Rcpp_List$tau_main))
 
                                         ## For nuisance:
                                         tau_us_prop <-   tau_initial
+                                        if (tau_initial_adaptive) tau_us_prop <-  tau_us_adaptive_handover
                                         EHMC_args_as_Rcpp_List$tau_us  <-   if_not_NA_or_INF_else(tau_us_prop, 5.0 * EHMC_args_as_Rcpp_List$eps_us)
                                         message(paste("tau handover: nuisance =", EHMC_args_as_Rcpp_List$tau_us))
 
@@ -1190,11 +2079,78 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
                                         ## For ALL:
                                         tau_main_prop <- tau_initial
+                                        if (tau_initial_adaptive) tau_main_prop <-  tau_main_adaptive_handover
                                         EHMC_args_as_Rcpp_List$tau_main <-   if_not_NA_or_INF_else(tau_main_prop, 5.0 * EHMC_args_as_Rcpp_List$eps_main)
                                         message(paste("tau handover: joint =", EHMC_args_as_Rcpp_List$tau_main))
                                         ##
                                         # EHMC_args_as_Rcpp_List$tau_main <- EHMC_args_as_Rcpp_List$tau_main
                                         EHMC_args_as_Rcpp_List$tau_us   <- EHMC_args_as_Rcpp_List$tau_main
+                            }
+
+                            ## ---- tau adaptation scheme "probe_then_average": the probe starts at tau_handover / 8 (rung -3), with fresh ADAM moments:
+                            if (tau_probe_then_average) {
+                                  tau_probe_state$log_tau_start <-  log(EHMC_args_as_Rcpp_List$tau_main)
+                                  tau_probe_state$probing <-  TRUE
+                                  tau_probe_state$rung <-  tau_probe_rung_start
+                                  tau_probe_state$gradient_block_sum <-  0
+                                  tau_probe_state$n_in_block <-  0
+                                  ## "fixed_length_probe_then_decay_and_average": fixed-length trajectories (tau_ii = tau) for the probe's updates:
+                                  if (tau_probe_fixed_length_decay) EHMC_args_as_Rcpp_List$randomize_tau <-  FALSE
+                                  EHMC_args_as_Rcpp_List$tau_main <-  exp(tau_probe_state$log_tau_start + tau_probe_state$rung * log(2))
+                                  if (partitioned_HMC == FALSE) EHMC_args_as_Rcpp_List$tau_us <-  EHMC_args_as_Rcpp_List$tau_main
+                                  message(paste("tau probe start (tau_handover / 8): main =", EHMC_args_as_Rcpp_List$tau_main))
+                            }
+
+                            if (tau_initial_adaptive) {
+                                  ## tau as set here; the max_tau_main / max_tau_us ceilings are applied later in this iteration.
+                                  tau_initial_adaptive_record <-  list( estimator = "pooled_welford_main_and_within_individual_nuisance",
+                                                                        handover_iteration = ii,
+                                                                        clip_iter = clip_iter,
+                                                                        moments_start_iter = tau_initial_moments_start_iter,
+                                                                        moments_window = if (tau_initial_moments_all) "all" else "after_clip_iter",
+                                                                        moments_window_fraction = if (tau_initial_moments_all) NA_real_ else tau_initial_moments_window_fraction,
+                                                                        moments_window_min_iter = tau_initial_moments_window_min_iter,
+                                                                        ## tau ADAM options of this burn-in (NA = beta1_adam for tau; the restart iteration is NA when there was no restart):
+                                                                        tau_adam_beta1_option = if (is.null(tau_adam_beta1_option)) NA_real_ else as.numeric(tau_adam_beta1_option),
+                                                                        tau_adam_beta1_used = tau_adam_beta1,
+                                                                        tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
+                                                                        tau_learning_rate_restart_iteration = if (tau_learning_rate_restart_active) tau_learning_rate_restart_iter else NA_real_,
+                                                                        n_updates = tau_initial_moments$n_updates,
+                                                                        n_errors = tau_initial_moments$n_errors,
+                                                                        partitioned_HMC = partitioned_HMC,
+                                                                        nuisance_sampled = tau_initial_moments$nuisance_sampled,
+                                                                        ##
+                                                                        lambda_max_main = lambda_max_main_handover,
+                                                                        lambda_max_us = lambda_max_us_handover,
+                                                                        lambda_max_joint = if (partitioned_HMC == TRUE) NA_real_ else lambda_max_joint_handover,
+                                                                        tau_adaptation_block = tau_adaptation_block_effective,
+                                                                        tau_source = tau_initial_tau_source,
+                                                                        ##
+                                                                        dimension_main = n_params_main,
+                                                                        n_draws_main = tau_initial_moments$main$n,
+                                                                        lambda_max_main_noise_edge = lambda_max_main_noise_edge,
+                                                                        dimension_us = if (tau_initial_moments$nuisance_sampled) n_nuisance else 0,
+                                                                        nuisance_layout = tau_initial_moments$us$layout,
+                                                                        nuisance_accumulator = if (!tau_initial_moments$nuisance_sampled) NA_character_ else
+                                                                                               if (use_resident_tau_initial_moments) "worker" else "standalone",
+                                                                        n_tests_us = if (is.null(tau_initial_moments$us$positions)) NA_real_ else ncol(tau_initial_moments$us$positions),
+                                                                        n_terms_us = tau_initial_moments$us$count,
+                                                                        second_moment_us = if (is.null(tau_initial_moments$us$sum) || !(tau_initial_moments$us$count > 0)) NULL else
+                                                                                               tau_initial_moments$us$sum / tau_initial_moments$us$count,
+                                                                        ##
+                                                                        tau_block_main = tau_block_main_handover,
+                                                                        tau_block_us = tau_block_us_handover,
+                                                                        tau_main_handover = EHMC_args_as_Rcpp_List$tau_main,
+                                                                        tau_us_handover = EHMC_args_as_Rcpp_List$tau_us,
+                                                                        max_tau_main = max_tau_main,
+                                                                        max_tau_us = max_tau_us,
+                                                                        tau_main_handover_capped = min(max_tau_main, EHMC_args_as_Rcpp_List$tau_main),
+                                                                        tau_us_handover_capped = min(max_tau_us, EHMC_args_as_Rcpp_List$tau_us),
+                                                                        ##
+                                                                        ## elapsed seconds inside time_burnin (see tau_initial_moments above):
+                                                                        seconds_moments = tau_initial_moments$seconds_moments,
+                                                                        seconds_loader = tau_initial_moments$seconds_loader,
+                                                                        seconds_handover = tau_initial_moments$seconds_handover)
                             }
 
                     }
@@ -1450,7 +2406,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                          ## ---- the same update: the main rows here (the same code on the main rows only; every operation of it is row-local),
                          ##      the nuisance rows of wf_m, wf_M2 and var_draws_all in the worker:
                          window_reset_now <-  ii %in% (metric_window_resets + 1)
-                         if (window_reset_now) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
+                         ## if (window_reset_now) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
+                         ## after a window reset the metric is held (no blending towards the previous window's proposal) until the new window has wf_min_draws draws:
+                         if (window_reset_now) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE }
                          wf_n_before_update <-  wf_n
                          ##
                          X_main <- theta_main_vectors_all_chains_input_from_R
@@ -1475,13 +2433,18 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                              cov_draws     <- wf_C2 / (wf_n - 1)
                              w <- wf_n / (wf_n + 5)
                              empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
+                             ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
+                             empicical_cov_main <- fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                                        metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
                              empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                              metric_ready <- TRUE
                          }
                     }
                } else {
                if ((metric_estimator == "pooled") && (ii >= metric_start_iter) && (ii <= metric_adaptation_end_iter)) {
-                    if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
+                    ## if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
+                    ## after a window reset the metric is held (no blending towards the previous window's proposal) until the new window has wf_min_draws draws:
+                    if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE }
                     ##
                     X_all <- if (sample_nuisance) rbind(theta_us_vectors_all_chains_input_from_R,
                                                         theta_main_vectors_all_chains_input_from_R)
@@ -1502,11 +2465,68 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         cov_draws     <- wf_C2 / (wf_n - 1)
                         w <- wf_n / (wf_n + 5)
                         empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
+                        ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
+                        empicical_cov_main <- fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                                   metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
                         empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                         metric_ready <- TRUE
                     }
                }
                }  ## end of: if (use_resident_burnin)
+               ##
+               ## ---- per-iteration metric estimator (metric_estimator = "per_iteration"): at iteration ii the proposal is the
+               ##      cross-chain (co)variance of THIS iteration's n_chains_burnin draws around their cross-chain mean (divisor
+               ##      n_chains_burnin - 1), over the same iterations as the pooled moments (metric_start_iter to
+               ##      metric_adaptation_end_iter). Nothing is accumulated across iterations, so there are no window resets; the
+               ##      metric updates blend each proposal into the metric with ratio_M (and M_decay), as for every estimator:
+               ##        main, diagonal   per_iteration_variance_vec_main (passed to update_M_Empirical_main);
+               ##        main, dense      empicical_cov_main, with the Stan-style regularisation w * cov + (1 - w) * 1e-3 * I,
+               ##                         w = n / (n + 5), n = the draws that have entered the per-iteration proposals so far,
+               ##                         then the off-diagonal shrinkage of the pooled estimator. Each proposal has rank at most
+               ##                         n_chains_burnin - 1 and w goes to 1 as n grows, so with metric_pooled_offdiagonal_shrinkage
+               ##                         < 1 the dense metric is well conditioned only when n_chains_burnin - 1 >= n_params_main;
+               ##        nuisance         var_draws_all[index_nuisance]; in the resident burn-in var_draws_us in the worker, from the
+               ##                         pooled nuisance Welford update with its accumulators reset at every iteration (wf_n_R = 0).
+               if ((metric_estimator == "per_iteration") && (ii >= metric_start_iter) && (ii <= metric_adaptation_end_iter)) {
+                    ##
+                    per_iteration_draws_main <- theta_main_vectors_all_chains_input_from_R
+                    per_iteration_n_chains   <- ncol(per_iteration_draws_main)
+                    ##
+                    if (per_iteration_n_chains >= 2) {
+                         ##
+                         per_iteration_deviations_main   <- per_iteration_draws_main - rowMeans(per_iteration_draws_main)
+                         per_iteration_variance_vec_main <- rowSums(per_iteration_deviations_main^2) / (per_iteration_n_chains - 1)
+                         ##
+                         if (metric_shape_main == "dense") {
+                              per_iteration_metric_n_draws_since_start <- per_iteration_metric_n_draws_since_start + per_iteration_n_chains
+                              per_iteration_covariance_main       <- tcrossprod(per_iteration_deviations_main) / (per_iteration_n_chains - 1)
+                              per_iteration_regularisation_weight <- per_iteration_metric_n_draws_since_start / (per_iteration_metric_n_draws_since_start + 5)
+                              empicical_cov_main <- per_iteration_regularisation_weight * per_iteration_covariance_main +
+                                                    (1 - per_iteration_regularisation_weight) * 1e-3 * diag(n_params_main)
+                              ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
+                              empicical_cov_main <- fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                                         metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                              empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
+                         }
+                         ##
+                         if ((sample_nuisance == TRUE) && (metric_type_nuisance %in% c("Empirical", "uniform_diag"))) {
+                              if (use_resident_burnin) {
+                                   ## wf_n_R = 0 and reset_R = TRUE: var_draws_us = rowSums(D_b^2) / (n_chains_burnin - 1) of this iteration's
+                                   ## nuisance draws, D_b = draws - their cross-chain mean (wf_min_draws_R = 2: any 2 or more draws):
+                                   per_iteration_n_draws_resident <- resident_api$fn_persistent_burnin_pooled_welford_nuisance_resident( worker_ptr,
+                                                                                                                                       wf_n_R = 0,
+                                                                                                                                       reset_R = TRUE,
+                                                                                                                                       wf_min_draws_R = 2)
+                                   if (per_iteration_n_draws_resident != per_iteration_n_chains) stop("BUG: the resident per-iteration draw count differs from n_chains_burnin.")
+                              } else {
+                                   per_iteration_deviations_nuisance <- theta_us_vectors_all_chains_input_from_R - rowMeans(theta_us_vectors_all_chains_input_from_R)
+                                   var_draws_all[index_nuisance]     <- rowSums(per_iteration_deviations_nuisance^2) / (per_iteration_n_chains - 1)
+                              }
+                         }
+                         ##
+                         metric_ready <- TRUE
+                    }
+               }
                ##
                if (ii < 0.333333 * n_burnin)  {
                         shrinkage_factor <- 0.75
@@ -1620,7 +2640,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                    ## acceptance-probability weighted proposal minibatch.
                    ## With realised accept/reject endpoints, the current mean
                    ## is the corresponding lower-variance-free fallback.
-                   if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) {
+                   ## if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) {
+                   if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) {
                      if (use_resident_burnin) {
                          ##
                          ## ---- the full update below (every row, as in its last branch), in the worker on the resident proposals of the
@@ -1983,6 +3004,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                  M_decay_power = M_decay_power,
                                                                  M_decay_scale = M_decay_scale,
                                                                  variance_scale = metric_variance_scale,   ## x n_chains_burnin only for chain_mean_scaled
+                                                                 ## per-iteration estimator: this iteration's cross-chain variances of the main parameters (NULL keeps
+                                                                 ## variance_scale * snaper_s_vec_main_empirical, for every other estimator):
+                                                                 ## per_iteration_variance_vec_main = if (metric_estimator == "per_iteration") per_iteration_variance_vec_main else NULL,
+                                                                 ## pooled estimator, diagonal shape: its own regularised pooled variances (the diagonal of empicical_cov_main, set by the
+                                                                 ## pooled blocks above), not the running variance of the cross-chain mean (snaper_s_vec_main_empirical, ~ Sigma / n_chains):
+                                                                 per_iteration_variance_vec_main = if (metric_estimator == "per_iteration") per_iteration_variance_vec_main else
+                                                                                                   if (metric_estimator == "pooled") diag(empicical_cov_main) else NULL,
                                                                  compute_M_dense_sqrt = FALSE)             ## M_dense_sqrt is only read by SNAPER
                                
                                EHMC_Metric_as_Rcpp_List <- outs$EHMC_Metric_as_Rcpp_List
@@ -2007,7 +3035,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                        if (use_resident_burnin && (metric_type_nuisance %in% c("Empirical", "uniform_diag"))) {
                                                ## the nuisance statistic read below comes from the worker (R's copy of it is not updated during a
                                                ## resident burn-in); the nuisance metric computed from it reaches the worker with the next push:
-                                               if (metric_estimator == "pooled") {
+                                               ## if (metric_estimator == "pooled") {
+                                               if (metric_estimator %in% c("pooled", "per_iteration")) {
                                                     var_draws_all[index_nuisance] <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "var_draws_us")
                                                } else {
                                                     EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_s_vec_us_empirical")
@@ -2023,7 +3052,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                          
                                        } else if (metric_type_nuisance == "Empirical") {
                                          
-                                               if (metric_estimator == "pooled") {
+                                               ## if (metric_estimator == "pooled") {
+                                               if (metric_estimator %in% c("pooled", "per_iteration")) {
                                                     proposed_variance_vec_us <- var_draws_all[index_nuisance]
                                                } else {
                                                     proposed_variance_vec_us <- metric_variance_scale * EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical
@@ -2055,7 +3085,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                          
                                        } else if (metric_type_nuisance == "uniform_diag") {
                                          
-                                               if (metric_estimator == "pooled") {
+                                               ## if (metric_estimator == "pooled") {
+                                               if (metric_estimator %in% c("pooled", "per_iteration")) {
                                                     proposed_variance_vec_us <- var_draws_all[index_nuisance]
                                                } else {
                                                     proposed_variance_vec_us <- metric_variance_scale * EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical
@@ -2084,9 +3115,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                EHMC_Metric_as_Rcpp_List <- outs$EHMC_Metric_as_Rcpp_List
                                                EHMC_burnin_as_Rcpp_List <- outs$EHMC_burnin_as_Rcpp_List
                                                ##
-                                               EHMC_Metric_as_Rcpp_List$M_inv_us_vec <- rep(median(EHMC_Metric_as_Rcpp_List$M_inv_us_vec), n_nuisance)
-                                               EHMC_Metric_as_Rcpp_List$M_us_vec <- rep(median(EHMC_Metric_as_Rcpp_List$M_us_vec), n_nuisance)
-                                               EHMC_Metric_as_Rcpp_List$sqrt_M_us_vec <- rep(median(EHMC_Metric_as_Rcpp_List$sqrt_M_us_vec), n_nuisance)
+                                               EHMC_Metric_as_Rcpp_List$M_inv_us_vec <- rep(stats::median(EHMC_Metric_as_Rcpp_List$M_inv_us_vec), n_nuisance)
+                                               EHMC_Metric_as_Rcpp_List$M_us_vec <- 1 / EHMC_Metric_as_Rcpp_List$M_inv_us_vec
+                                               EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec <- sqrt(EHMC_Metric_as_Rcpp_List$M_us_vec)
                                          
                                        }
                                        
@@ -2145,8 +3176,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
               eps_new <- min(max_eps_main, par_res[[1]])
               EHMC_args_as_Rcpp_List$eps_main <- eps_new
               EHMC_args_as_Rcpp_List$eps_us   <- eps_new
-              EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- eps_new ; EHMC_burnin_as_Rcpp_List$eps_v_adam_main <- 0
-              EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- eps_new ; EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <- 0
+              ## EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- eps_new ; EHMC_burnin_as_Rcpp_List$eps_v_adam_main <- 0
+              ## EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- eps_new ; EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <- 0
+              EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- 0 ; EHMC_burnin_as_Rcpp_List$eps_v_adam_main <- 0   ## first moment of the acceptance error, not of eps
+              EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- 0 ; EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <- 0
+              eps_adam_updates_main <- 0
+              eps_adam_updates_us <- 0
               cat("eps re-initialised at ChEES handover (ii =", ii, "):", signif(eps_new, 4), "\n")
             })
           }
@@ -2185,15 +3220,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       ## ---- fn_transport_snaper_direction() of the resident joint direction: the main-block part here, with the same R
                       ##      code on the direction's main rows; the nuisance part and the joint normalisation in the worker:
                       previous_joint_factor <-  trajectory_metric[[adapted_block]]
-                      if (!(is.null(previous_joint_factor) || identical(previous_joint_factor, new_factor))) {
-                          direction_main_rows <-  resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, TRUE)
-                          transported_main_rows <-  fn_transport_snaper_direction(direction_main_rows, previous_joint_factor$main, new_factor$main) *
-                                                        sqrt(sum(direction_main_rows^2))
-                          resident_api$fn_persistent_burnin_joint_direction_transport_resident( worker_ptr,
-                                                                                               transported_main = transported_main_rows,
-                                                                                               previous_factor_us = previous_joint_factor$us,
-                                                                                               new_factor_us = new_factor$us,
-                                                                                               us_factor_unchanged_R = identical(previous_joint_factor$us, new_factor$us))
+                      if (burnin_algorithm %in% c("SNAPER", "SNAPER_time") &&
+                          !(is.null(previous_joint_factor) || identical(previous_joint_factor, new_factor))) {
+                          ## Both blocks retain their transported magnitudes until the single joint normalisation.
+                          ## The complete direction is a temporary vector; no chain draws or direction history are stored.
+                          direction_joint <-  resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, FALSE)
+                          transported_joint <-  fn_transport_snaper_direction(direction_joint, previous_joint_factor, new_factor)
+                          resident_api$fn_persistent_burnin_joint_direction_set(worker_ptr, transported_joint)
                       }
                       } else {
                       trajectory_direction[[adapted_block]] <- fn_transport_snaper_direction(
@@ -2202,7 +3235,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       trajectory_metric[[adapted_block]] <- new_factor
                       trajectory_mass[[adapted_block]] <- mass
                   }
-                  if (ii < n_adapt && burnin_algorithm == "SNAPER") {
+                  ## if (ii < n_adapt && burnin_algorithm == "SNAPER") {
+                  if (ii < n_adapt && burnin_algorithm %in% c("SNAPER", "SNAPER_time")) {
                       if (use_resident_joint_block) {
                       ## ---- fn_update_snaper_w_minibatch() of the resident joint direction: the main rows of the states in metric
                       ##      coordinates here (the same R code on the main rows), the nuisance rows and the update in the worker:
@@ -2319,10 +3353,18 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         t0 <- proc.time()[3]
                                         ##
                                         ## Run one iteration (all heavy state resident in C++):
+                                        ## (CHESSR_time / SNAPER_time: the step size this iteration runs with, and the wall time of the native call)
+                                        if (time_criterion_active) {
+                                            eps_main_used_for_iteration <-  EHMC_args_as_Rcpp_List$eps_main
+                                            native_call_start_time <-  Sys.time()
+                                        }
                                         result <- run_burnin_iteration(
                                                   worker_ptr,
                                                   seed_R = seed + ii,
                                                   current_iter_R = ii)
+                                        if (time_criterion_active) {
+                                            time_per_iter_native_call_burnin_vec[ii] <-  as.numeric(difftime(Sys.time(), native_call_start_time, units = "secs"))
+                                        }
                                         ##
                                         ## Everything AFTER this point in the loop stays byte-for-byte identical:
                                         ## the returned list has the same element names, so all the
@@ -2735,11 +3777,38 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                        #   }, error = function(e) message("PHASE-2 METRIC FAILED at ii = ", ii, ": ", conditionMessage(e)))
                        # }
    
-                        if (!isTRUE(manual_tau) && ii > clip_iter && ii < n_adapt && sum(div_main) > 1) {
+                        ## ---- CHESSR_time / SNAPER_time: add this iteration to the online fit of time_per_leapfrog_step_burnin (iterations from
+                        ##      clip_iter on with no divergent chain; step count = the longest trajectory of the iteration, max(1, ceiling(tau_ii / eps)),
+                        ##      see fn_time_per_leapfrog_step_burnin_fit_update in R_fn_time_criterion.R):
+                        ##
+                        if (time_criterion_active) {
+                            try({
+                                n_leapfrog_steps_per_iter_burnin_vec[ii] <-  max(1, ceiling(max(tau_main_ii_vec) / eps_main_used_for_iteration))
+                                if (ii >= clip_iter && length(div_main) == n_chains_burnin && all(is.finite(div_main)) && sum(div_main) == 0) {
+                                    time_per_leapfrog_step_burnin_fit_sums <-  fn_time_per_leapfrog_step_burnin_fit_update(
+                                        time_per_leapfrog_step_burnin_fit_sums = time_per_leapfrog_step_burnin_fit_sums,
+                                        n_leapfrog_steps_per_iter              = n_leapfrog_steps_per_iter_burnin_vec[ii],
+                                        time_per_iter                          = time_per_iter_native_call_burnin_vec[ii])
+                                    used_in_time_per_leapfrog_step_burnin_fit_vec[ii] <-  TRUE
+                                }
+                            })
+                        }
+   
+                        ## ---- divergence-triggered tau shrink (tau_shrink_on_divergence; OFF by default). div_main holds one
+                        ##      0/1 divergence flag per burn-in chain, so "sum(div_main) > (tau_shrink_min_divergent_chains - 1)"
+                        ##      with the defaults (0.95, 2) is exactly the original "sum(div_main) > 1" rule:
+                        ##
+                        ## if (!isTRUE(manual_tau) && ii > clip_iter && ii < n_adapt && sum(div_main) > 1) {
+                        if (isTRUE(tau_shrink_on_divergence) && !isTRUE(manual_tau) && ii > clip_iter && ii < n_adapt &&
+                            sum(div_main) > (tau_shrink_min_divergent_chains - 1)) {
                              warning(paste0("Too many divergences at iter ", ii, ", reducing tau"))
                              ##
-                             EHMC_args_as_Rcpp_List$tau_main <- 0.95 * EHMC_args_as_Rcpp_List$tau_main
-                             EHMC_args_as_Rcpp_List$tau_us   <- 0.95 * EHMC_args_as_Rcpp_List$tau_us
+                             ## EHMC_args_as_Rcpp_List$tau_main <- 0.95 * EHMC_args_as_Rcpp_List$tau_main
+                             ## EHMC_args_as_Rcpp_List$tau_us   <- 0.95 * EHMC_args_as_Rcpp_List$tau_us
+                             EHMC_args_as_Rcpp_List$tau_main <- tau_shrink_factor * EHMC_args_as_Rcpp_List$tau_main
+                             EHMC_args_as_Rcpp_List$tau_us   <- tau_shrink_factor * EHMC_args_as_Rcpp_List$tau_us
+                             ##
+                             tau_shrink_fired_vec[ii] <- TRUE
                         }
    
                         # if (ii == cov_start_iter) {
@@ -2756,42 +3825,83 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                          #   p_jump_us <- median(p_jump_us_per_chain, na.rm = TRUE)
                          # }
 
+                        ## ---- cross-chain acceptance fed to the eps update (eps_acceptance_mean). "arithmetic" reuses p_jump_main /
+                        ##      p_jump_us above unchanged; "harmonic" is K / sum_k (1 / alpha_k), exactly 0 when any chain has zero
+                        ##      acceptance (see R_fn_harmonic_mean_acceptance.R). p_jump_main / p_jump_us stay the arithmetic means (printed).
+                        ##      "geometric" is exp(mean(log(alpha_k))) with alpha_k clamped to [1e-8, 1] (fn_geometric_mean_acceptance).
+                        # p_jump_main_for_eps <- if (identical(eps_acceptance_mean, "arithmetic")) p_jump_main else
+                        #                        fn_harmonic_mean_acceptance( p     = p_jump_per_chain,
+                        #                                                     floor = 0)
+                        p_jump_main_for_eps <- if (identical(eps_acceptance_mean, "arithmetic")) p_jump_main else
+                                               if (identical(eps_acceptance_mean, "geometric"))
+                                               fn_geometric_mean_acceptance( p           = p_jump_per_chain,
+                                                                             lower_clamp = 1e-8) else
+                                               fn_harmonic_mean_acceptance( p     = p_jump_per_chain,
+                                                                            floor = 0)
+                        p_jump_main_during_burnin_vec[ii]         <- p_jump_main
+                        p_jump_main_for_eps_during_burnin_vec[ii] <- p_jump_main_for_eps
+                        if (sample_nuisance == TRUE) {
+                           # p_jump_us_for_eps <- if (identical(eps_acceptance_mean, "arithmetic")) p_jump_us else
+                           #                      fn_harmonic_mean_acceptance( p     = p_jump_us_per_chain,
+                           #                                                   floor = 0)
+                           p_jump_us_for_eps <- if (identical(eps_acceptance_mean, "arithmetic")) p_jump_us else
+                                                if (identical(eps_acceptance_mean, "geometric"))
+                                                fn_geometric_mean_acceptance( p           = p_jump_us_per_chain,
+                                                                              lower_clamp = 1e-8) else
+                                                fn_harmonic_mean_acceptance( p     = p_jump_us_per_chain,
+                                                                             floor = 0)
+                           p_jump_us_during_burnin_vec[ii]         <- p_jump_us
+                           p_jump_us_for_eps_during_burnin_vec[ii] <- p_jump_us_for_eps
+                        }
+
                         if (ii < n_adapt) {
     
                             ## //////////////////   --------------------------------  update eps (step-size) for main ----------------------------------------------------------
-                                            adapt_eps_outs <-  fn_Rcpp_wrapper_adapt_eps_ADAM( EHMC_args_as_Rcpp_List$eps_main,
+                                            adapt_eps_outs <-  fn_update_eps_ADAM( EHMC_args_as_Rcpp_List$eps_main,
                                                                                                EHMC_burnin_as_Rcpp_List$eps_m_adam_main,
                                                                                                EHMC_burnin_as_Rcpp_List$eps_v_adam_main,
                                                                                                ii, 
                                                                                                n_adapt,
                                                                                                EHMC_burnin_as_Rcpp_List$LR_main,
-                                                                                               p_jump_main, 
+                                                                                               ## p_jump_main,
+                                                                                               p_jump_main_for_eps,
                                                                                                EHMC_burnin_as_Rcpp_List$adapt_delta_main,
-                                                                                               beta1_adam,
-                                                                                               beta2_adam, 
-                                                                                               eps_adam)
+                                                                                               ## beta1_adam,
+                                                                                               eps_adam_beta1,
+                                                                                               ## beta2_adam, 
+                                                                                               ## eps_adam)
+                                                                                               eps_adam_beta2,
+                                                                                               eps_adam_epsilon,
+                                                                                               bias_correction_step = eps_adam_updates_main + 1)
     
                                             EHMC_args_as_Rcpp_List$eps_main <-    min(max_eps_main, adapt_eps_outs[1])   ;  EHMC_args_as_Rcpp_List$eps_main
                                             EHMC_burnin_as_Rcpp_List$eps_m_adam_main <-  adapt_eps_outs[2]   ; EHMC_burnin_as_Rcpp_List$eps_m_adam_main
                                             EHMC_burnin_as_Rcpp_List$eps_v_adam_main <-  adapt_eps_outs[3]   ;    EHMC_burnin_as_Rcpp_List$eps_v_adam_main
+                                            if (isTRUE(attr(adapt_eps_outs, "adam_update_performed"))) eps_adam_updates_main <- eps_adam_updates_main + 1
     
                             ## //////////////////   --------------------------------  update eps (step-size) for nuisance ------------------------------------------------------
                                             if ((partitioned_HMC == TRUE) && (sample_nuisance == TRUE)) {
-                                                    adapt_eps_outs <-  fn_Rcpp_wrapper_adapt_eps_ADAM(  EHMC_args_as_Rcpp_List$eps_us,
+                                                    adapt_eps_outs <-  fn_update_eps_ADAM(  EHMC_args_as_Rcpp_List$eps_us,
                                                                                                         EHMC_burnin_as_Rcpp_List$eps_m_adam_us,
                                                                                                         EHMC_burnin_as_Rcpp_List$eps_v_adam_us ,
                                                                                                         ii, 
                                                                                                         n_adapt,
                                                                                                         EHMC_burnin_as_Rcpp_List$LR_us,
-                                                                                                        p_jump_us, 
+                                                                                                        ## p_jump_us,
+                                                                                                        p_jump_us_for_eps,
                                                                                                         EHMC_burnin_as_Rcpp_List$adapt_delta_us,
-                                                                                                        beta1_adam, 
-                                                                                                        beta2_adam, 
-                                                                                                        eps_adam)
+                                                                                                        ## beta1_adam, 
+                                                                                                        eps_adam_beta1, 
+                                                                                                        ## beta2_adam, 
+                                                                                                        ## eps_adam)
+                                                                                                        eps_adam_beta2,
+                                                                                                        eps_adam_epsilon,
+                                                                                                        bias_correction_step = eps_adam_updates_us + 1)
             
                                                     EHMC_args_as_Rcpp_List$eps_us <-          min(max_eps_us,   adapt_eps_outs[1] )
                                                     EHMC_burnin_as_Rcpp_List$eps_m_adam_us  <- adapt_eps_outs[2]
                                                     EHMC_burnin_as_Rcpp_List$eps_v_adam_us <- adapt_eps_outs[3]
+                                                    if (isTRUE(attr(adapt_eps_outs, "adam_update_performed"))) eps_adam_updates_us <- eps_adam_updates_us + 1
                                             }
 
                         }
@@ -2814,20 +3924,24 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                     EHMC_args_as_Rcpp_List$eps_main <- eps_initial_main
                                     EHMC_args_as_Rcpp_List$eps_us   <- eps_initial_us
                                     ##
-                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- eps_initial_main
+                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- 0
                                     EHMC_burnin_as_Rcpp_List$eps_v_adam_main <- 0
-                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- eps_initial_us
+                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- 0
                                     EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <- 0
+                                    eps_adam_updates_main <- 0
+                                    eps_adam_updates_us <- 0
 
                               } else if (ii == eps_initial_iter) {
 
                                     EHMC_args_as_Rcpp_List$eps_main <- eps_main_after_warm_start
                                     EHMC_args_as_Rcpp_List$eps_us   <- eps_us_after_warm_start
                                     ##
-                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- eps_main_after_warm_start
+                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_main <- 0
                                     EHMC_burnin_as_Rcpp_List$eps_v_adam_main <- 0
-                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- eps_us_after_warm_start
+                                    EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <- 0
                                     EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <- 0
+                                    eps_adam_updates_main <- 0
+                                    eps_adam_updates_us <- 0
                                     ##
                                     message(paste0( "eps warm start finished at iteration ", ii,
                                                     ": eps reset to ", signif(eps_main_after_warm_start, 4),
@@ -2841,6 +3955,147 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         if (ii >= gap && ii < n_adapt && !isTRUE(manual_tau)) {
                             tau_adaptation_iteration <- ii - gap + 1
                             tau_adaptation_iteration_vec[ii] <- tau_adaptation_iteration
+                            ##
+                            ## ---- position in the tau learning-rate schedule (LR -> LR^2): the tau adaptation iteration and window, or, after the
+                            ##      restart at the metric freeze (NicoStan_tau_learning_rate_restart_at_metric_end), the iteration counted from
+                            ##      tau_learning_rate_restart_iter and the window from there to the last tau update (iteration n_adapt - 1):
+                            ##
+                            tau_learning_rate_schedule_iteration <- tau_adaptation_iteration
+                            tau_learning_rate_schedule_length <- n_tau_adaptation_iterations
+                            if (tau_learning_rate_restart_active && (ii >= tau_learning_rate_restart_iter)) {
+                                tau_learning_rate_schedule_iteration <- ii - tau_learning_rate_restart_iter + 1
+                                tau_learning_rate_schedule_length <- n_adapt - tau_learning_rate_restart_iter
+                                if (ii == tau_learning_rate_restart_iter) {
+                                    # message(colourise(paste0("tau learning rate restarted at iteration ", ii, " (the first after metric_adaptation_end_iter = ",
+                                    message(colourise(paste0("tau learning rate restarted at iteration ", ii, " (the first tau update with the final metric; metric_adaptation_end_iter = ",
+                                                             metric_adaptation_end_iter, "): full LR, decaying linearly to LR^2 at iteration ", n_adapt - 1,
+                                                             "; tau and the ADAM moments are kept."), "cyan"))
+                                }
+                            }
+                            ##
+                            ## ---- "probe_then_average": the constant learning rate LR (schedule position 1 of 1), and whether this tau update belongs
+                            ##      to the probe (decided before the update, so the update that ends the probe is not also an ADAM step):
+                            tau_probe_probing_now <-  tau_probe_then_average && isTRUE(tau_probe_state$probing)
+                            if (tau_probe_then_average) {
+                                tau_learning_rate_schedule_iteration <- 1
+                                tau_learning_rate_schedule_length <- 1
+                            }
+                            ## ---- "fixed_length_probe_then_decay_and_average": after the probe, LR at the first ADAM update (end_iteration + 1) -> LR^2 at iteration n_adapt - 1:
+                            if (tau_probe_fixed_length_decay && !tau_probe_probing_now && is.finite(tau_probe_state$end_iteration)) {
+                                tau_learning_rate_schedule_iteration <- ii - tau_probe_state$end_iteration
+                                tau_learning_rate_schedule_length <- max(1, (n_adapt - 1) - tau_probe_state$end_iteration)
+                            }
+                            ##
+                            ## ---- CHESSR_time / SNAPER_time: tau_offset_from_sampling_overhead (at the step size the scored trajectories ran
+                            ##      with) and burnin_to_sampling_leapfrog_time_ratio (at the current time_per_leapfrog_step_burnin) for this update:
+                            ##
+                            if (time_criterion_active) {
+                                time_per_leapfrog_step_burnin_estimate <-  fn_time_per_leapfrog_step_burnin_fit_estimate(
+                                    time_per_leapfrog_step_burnin_fit_sums       = time_per_leapfrog_step_burnin_fit_sums,
+                                    time_per_leapfrog_step_burnin_min_iterations = time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_min_iterations)
+                                time_per_leapfrog_step_burnin_used <-  if (is.finite(time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_user_supplied))
+                                    time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_user_supplied else
+                                    time_per_leapfrog_step_burnin_estimate$time_per_leapfrog_step_burnin
+                                ##
+                                ## ---- MALT's exponent: lag_one_autocorrelation_rho for this update (the setting, or "adaptive": from the moments of the
+                                ##      earlier updates):
+                                ##
+                                lag_one_autocorrelation_rho_for_update <-  fn_lag_one_autocorrelation_rho_for_tau_update(
+                                    lag_one_autocorrelation_rho_setting = lag_one_autocorrelation_rho_setting,
+                                    lag_one_autocorrelation_rho_moments = lag_one_autocorrelation_rho_moments)
+                                lag_one_autocorrelation_rho_at_update <-  lag_one_autocorrelation_rho_for_update$value
+                                lag_one_autocorrelation_rho_source_at_update <-  lag_one_autocorrelation_rho_for_update$source
+                                lag_one_autocorrelation_rho_used_vec[ii] <-  lag_one_autocorrelation_rho_at_update
+                                ##
+                                time_criterion_quantities_at_update <-  fn_time_criterion_quantities_at_tau_update(
+                                    time_criterion_sampling_quantities = time_criterion_sampling_quantities,
+                                    time_per_leapfrog_step_burnin      = time_per_leapfrog_step_burnin_used,
+                                    eps_used_for_iteration             = eps_main_used_for_iteration,
+                                    n_iter_burnin                      = n_iter_burnin_at_adapted_tau)
+                                tau_offset_from_sampling_overhead_at_update      <-  time_criterion_quantities_at_update$tau_offset_from_sampling_overhead
+                                burnin_to_sampling_leapfrog_time_ratio_at_update <-  time_criterion_quantities_at_update$burnin_to_sampling_leapfrog_time_ratio
+                                ##
+                                ## ---- with no sampling overhead the penalty is 1 + burnin_to_sampling_leapfrog_time_ratio at every tau; at 2 or more it
+                                ##      exceeds the ChEES / SNAPER elasticity at every tau on a Gaussian target (2 tau cot(tau) < 2 on the unit Gaussian),
+                                ##      so the criterion has no interior optimum and shortens tau towards one leapfrog step:
+                                ##
+                                ## ---- (with MALT's exponent the penalty with no sampling overhead is ((1 + lag_one_autocorrelation_rho) / 2) *
+                                ##      (1 + burnin_to_sampling_leapfrog_time_ratio), and the same holds at 2 or more. At lag_one_autocorrelation_rho = 1 the
+                                ##      test is burnin_to_sampling_leapfrog_time_ratio >= 1 and the warning is the one of the criterion without
+                                ##      lag_one_autocorrelation_rho)
+                                ##
+                                time_to_target_ESS_tau_penalty_without_sampling_overhead <-  ((1 + lag_one_autocorrelation_rho_at_update) / 2) *
+                                                                                            (1 + burnin_to_sampling_leapfrog_time_ratio_at_update)
+                                ## if (is.na(iteration_of_no_interior_optimum_warning) &&
+                                ##     isTRUE(time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps == 0) &&
+                                ##     burnin_to_sampling_leapfrog_time_ratio_at_update >= 1) {
+                                penalty_has_no_interior_optimum_at_update <-  if (isTRUE(lag_one_autocorrelation_rho_at_update == 1))
+                                                                                  burnin_to_sampling_leapfrog_time_ratio_at_update >= 1 else
+                                                                                  time_to_target_ESS_tau_penalty_without_sampling_overhead >= 2
+                                if (is.na(iteration_of_no_interior_optimum_warning) &&
+                                    isTRUE(time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps == 0) &&
+                                    penalty_has_no_interior_optimum_at_update) {
+                                    iteration_of_no_interior_optimum_warning <-  ii
+                                    if (isTRUE(lag_one_autocorrelation_rho_at_update == 1)) {
+                                        warning(paste0("burnin_algorithm = '", burnin_algorithm, "' at iteration ", ii, ": sampling_overhead_in_leapfrog_steps = 0 (",
+                                                       time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps_source, ") and ",
+                                                       "burnin_to_sampling_leapfrog_time_ratio = ", signif(burnin_to_sampling_leapfrog_time_ratio_at_update, 4),
+                                                       " >= 1, so time_to_target_ESS_tau_penalty = ", signif(1 + burnin_to_sampling_leapfrog_time_ratio_at_update, 4),
+                                                       " at every tau. On a Gaussian target the ChEES / SNAPER elasticity is below 2 at every tau, so the criterion ",
+                                                       "has no interior optimum and shortens tau towards one leapfrog step. Supply time_per_iter_overhead_sampling and ",
+                                                       "time_per_iter_summaries_sampling (or a previous run), or let the sampling timing probe time the summaries."))
+                                    } else {
+                                        warning(paste0("burnin_algorithm = '", burnin_algorithm, "' at iteration ", ii, ": sampling_overhead_in_leapfrog_steps = 0 (",
+                                                       time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps_source, "), ",
+                                                       "burnin_to_sampling_leapfrog_time_ratio = ", signif(burnin_to_sampling_leapfrog_time_ratio_at_update, 4),
+                                                       " and lag_one_autocorrelation_rho = ", signif(lag_one_autocorrelation_rho_at_update, 4),
+                                                       ", so time_to_target_ESS_tau_penalty = ((1 + lag_one_autocorrelation_rho) / 2) * (1 + burnin_to_sampling_leapfrog_time_ratio) = ",
+                                                       signif(time_to_target_ESS_tau_penalty_without_sampling_overhead, 4),
+                                                       " >= 2 at every tau. On a Gaussian target the ChEES / SNAPER elasticity is below 2 at every tau, so the criterion ",
+                                                       "has no interior optimum and shortens tau towards one leapfrog step. Supply time_per_iter_overhead_sampling and ",
+                                                       "time_per_iter_summaries_sampling (or a previous run), set sampling_overhead_in_leapfrog_steps (a number or \"auto\"), ",
+                                                       "or let the sampling timing probe time the summaries."))
+                                    }
+                                }
+                                ##
+                                time_per_leapfrog_step_burnin_vec[ii]              <-  time_per_leapfrog_step_burnin_used
+                                tau_offset_from_sampling_overhead_vec[ii]          <-  tau_offset_from_sampling_overhead_at_update
+                                burnin_to_sampling_leapfrog_time_ratio_vec[ii]     <-  burnin_to_sampling_leapfrog_time_ratio_at_update
+                                time_to_target_ESS_tau_penalty_at_tau_main_vec[ii] <-  fn_time_to_target_ESS_tau_penalty(
+                                    tau_values                             = EHMC_args_as_Rcpp_List$tau_main,
+                                    tau_offset_from_sampling_overhead      = tau_offset_from_sampling_overhead_at_update,
+                                    ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update)
+                                    burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                    lag_one_autocorrelation_rho            = lag_one_autocorrelation_rho_at_update)
+                                time_criterion_snapshot <-  list( iteration                                 = ii,
+                                                                  eps_main_used_for_iteration               = eps_main_used_for_iteration,
+                                                                  tau_main_before_update                    = EHMC_args_as_Rcpp_List$tau_main,
+                                                                  time_per_leapfrog_step_burnin             = time_per_leapfrog_step_burnin_used,
+                                                                  time_per_leapfrog_step_burnin_source      = if (is.finite(time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_user_supplied))
+                                                                                                                  "user_supplied" else "online_burnin_fit",
+                                                                  time_per_leapfrog_step_burnin_fit         = time_per_leapfrog_step_burnin_estimate,
+                                                                  sampling_overhead_in_leapfrog_steps       = time_criterion_sampling_quantities$sampling_overhead_in_leapfrog_steps,
+                                                                  tau_offset_from_sampling_overhead         = tau_offset_from_sampling_overhead_at_update,
+                                                                  burnin_to_sampling_leapfrog_time_ratio    = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                                                  lag_one_autocorrelation_rho               = lag_one_autocorrelation_rho_at_update,
+                                                                  lag_one_autocorrelation_rho_source        = lag_one_autocorrelation_rho_source_at_update,
+                                                                  time_to_target_ESS_tau_penalty_at_tau_main = time_to_target_ESS_tau_penalty_at_tau_main_vec[ii],
+                                                                  ESS_elasticity_wrt_log_tau                = NA_real_)
+                                if (ii == gap) {
+                                    time_criterion_at_handover <-  time_criterion_snapshot
+                                    message(colourise(paste0("time-to-target-ESS criterion at the handover (iteration ", ii, "): ",
+                                                             "time_per_leapfrog_step_burnin = ", signif(time_per_leapfrog_step_burnin_used, 4), " s (",
+                                                             time_criterion_snapshot$time_per_leapfrog_step_burnin_source, ", ",
+                                                             time_per_leapfrog_step_burnin_estimate$status, ")",
+                                                             " | tau_offset_from_sampling_overhead = ", signif(tau_offset_from_sampling_overhead_at_update, 4),
+                                                             ## " | burnin_to_sampling_leapfrog_time_ratio = ", signif(burnin_to_sampling_leapfrog_time_ratio_at_update, 4)),
+                                                             " | burnin_to_sampling_leapfrog_time_ratio = ", signif(burnin_to_sampling_leapfrog_time_ratio_at_update, 4),
+                                                             if (time_criterion_messages_show_rho) paste0(
+                                                                 " | lag_one_autocorrelation_rho = ", signif(lag_one_autocorrelation_rho_at_update, 4), " (", lag_one_autocorrelation_rho_source_at_update, ")") else ""),
+                                                      "cyan"))
+                                }
+                                time_criterion_at_last_update <-  time_criterion_snapshot
+                            }
                             adapted_blocks <- tau_adaptation_block_effective   ## "main" (default) or "joint" (EXPERIMENTAL)
                             for (adapted_block in adapted_blocks) {
                                 is_main <- adapted_block == "main"
@@ -2925,10 +4180,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ii = tau_adaptation_iteration, n_burnin = n_tau_adaptation_iterations,
                                         tau_m_adam = EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
                                         tau_v_adam = EHMC_burnin_as_Rcpp_List[[adam_variance_name]],
-                                        beta1_adam = beta1_adam, beta2_adam = beta2_adam, eps_adam = eps_adam,
+                                        ## beta1_adam = beta1_adam, beta2_adam = beta2_adam, eps_adam = eps_adam,
+                                        ## beta1_adam = tau_adam_beta1, beta2_adam = beta2_adam, eps_adam = eps_adam,
+                                        beta1_adam = tau_adam_beta1, beta2_adam = tau_adam_beta2, eps_adam = tau_adam_epsilon,
                                         bias_correction_step = tau_adam_bias_correction_step,
                                         weights_per_chain = if (tau_weight_by_p_jump) probabilities else NULL,
-                                        aggregation = "weighted_mean")
+                                        ## aggregation = "weighted_mean")
+                                        aggregation = "weighted_mean",
+                                        learning_rate_schedule_iteration = tau_learning_rate_schedule_iteration,
+                                        learning_rate_schedule_length = tau_learning_rate_schedule_length)
                                     tau_adam_update_performed <- isTRUE(attr(updated, "adam_update_performed"))
                                 } else {
                                     if (use_resident_joint_block) {
@@ -2947,7 +4207,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                                         if (use_proposals_joint) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R else
                                                                                                                  velocity_main_vectors_all_chains_input_from_R)
                                     joint_reductions <-  resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
-                                                                                                                              projection_R = identical(burnin_algorithm, "SNAPER"),
+                                                                                                                              ## projection_R = identical(burnin_algorithm, "SNAPER"),
+                                                                                                                              projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time"),
                                                                                                                               use_proposals_R = use_proposals_joint,
                                                                                                                               initial_main = initial_main_metric,
                                                                                                                               proposed_main = proposed_main_metric,
@@ -2977,7 +4238,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                     } else {
                                         joint_position_criterion <-  fn_metric_position_criterion_from_reductions(algorithm = burnin_algorithm,
                                                                                                                   reductions = joint_reductions,
-                                                                                                                  tau_values = tau_values)
+                                                                                                                  ## tau_values = tau_values)
+                                                                                                                  tau_values = tau_values,
+                                                                                                                  tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                                                                                                  ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update)
+                                                                                                                  burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                                                                                                  lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
                                         ## (with the criterion given, only the number of columns (chains) of theta_initial is read)
                                         theta_initial <-  theta_main_0_burnin_tau_adapt_all_chains_input_from_R
                                     }
@@ -2992,10 +4258,20 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         iteration = tau_adaptation_iteration, adaptation_iterations = n_tau_adaptation_iterations,
                                         adam_mean = EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
                                         adam_variance = EHMC_burnin_as_Rcpp_List[[adam_variance_name]],
-                                        beta1 = beta1_adam, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        ## beta1 = beta1_adam, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        ## beta1 = tau_adam_beta1, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        beta1 = tau_adam_beta1, beta2 = tau_adam_beta2, adam_epsilon = tau_adam_epsilon,
                                         criterion_ema = ChEES_criterion_ema,
                                         bias_correction_step = tau_adam_bias_correction_step,
-                                        position_criterion = joint_position_criterion)
+                                        ## position_criterion = joint_position_criterion)
+                                        position_criterion = joint_position_criterion,
+                                        tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                        ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update)
+                                        burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                        ## lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
+                                        lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update,
+                                        learning_rate_schedule_iteration = tau_learning_rate_schedule_iteration,
+                                        learning_rate_schedule_length = tau_learning_rate_schedule_length)
                                     } else {
                                     initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
                                                     if (is_joint) c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
@@ -3012,9 +4288,19 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         iteration = tau_adaptation_iteration, adaptation_iterations = n_tau_adaptation_iterations,
                                         adam_mean = EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
                                         adam_variance = EHMC_burnin_as_Rcpp_List[[adam_variance_name]],
-                                        beta1 = beta1_adam, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        ## beta1 = beta1_adam, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        ## beta1 = tau_adam_beta1, beta2 = beta2_adam, adam_epsilon = eps_adam,
+                                        beta1 = tau_adam_beta1, beta2 = tau_adam_beta2, adam_epsilon = tau_adam_epsilon,
                                         criterion_ema = ChEES_criterion_ema,
-                                        bias_correction_step = tau_adam_bias_correction_step)
+                                        ## bias_correction_step = tau_adam_bias_correction_step)
+                                        bias_correction_step = tau_adam_bias_correction_step,
+                                        tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                        ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update)
+                                        burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                        ## lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
+                                        lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update,
+                                        learning_rate_schedule_iteration = tau_learning_rate_schedule_iteration,
+                                        learning_rate_schedule_length = tau_learning_rate_schedule_length)
                                     }  ## end of: if (use_resident_joint_block)
                                     updated <- update$updated
                                     tau_adam_update_performed <- isTRUE(update$adam_update_performed)
@@ -3022,6 +4308,90 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ChEES_criterion_ema <- update$criterion_ema
                                         ChEES_criterion_ema_vec[ii] <- update$criterion_ema
                                         ChEES_per_tau_gradient_vec[ii] <- update$gradient
+                                    }
+                                    ##
+                                    ## ---- CHESSR_time / SNAPER_time: the chain-mean estimate of ESS_elasticity_wrt_log_tau at this update (the snapshots
+                                    ##      were taken before the update, so it is added to them here):
+                                    ##
+                                    if (time_criterion_active && (is_main || is_joint) && !is.null(update$ESS_elasticity_wrt_log_tau)) {
+                                        ESS_elasticity_wrt_log_tau_vec[ii] <-  update$ESS_elasticity_wrt_log_tau
+                                        ChEES_or_SNAPER_statistic_per_tau_chain_mean_vec[ii] <-  update$ChEES_or_SNAPER_statistic_per_tau_chain_mean
+                                        ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec[ii] <-  update$ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean
+                                        time_criterion_at_last_update$ESS_elasticity_wrt_log_tau <-  update$ESS_elasticity_wrt_log_tau
+                                        if (ii == gap) time_criterion_at_handover$ESS_elasticity_wrt_log_tau <-  update$ESS_elasticity_wrt_log_tau
+                                    }
+                                    ##
+                                    ## ---- lag_one_autocorrelation_rho = "adaptive": this update's criterion statistic at the trajectory start and at the ACCEPTED
+                                    ##      end, in the metric coordinates, centre and direction of the criterion, enters MALT's running moments AFTER the tau
+                                    ##      update, so the lag_one_autocorrelation_rho of the next update comes from the moments up to this one
+                                    ##      (R_fn_time_criterion.R). The resident joint block takes the criterion statistic from the worker's reductions of the
+                                    ##      accepted end (a second reductions call when the criterion's were of the proposed end), or from the joint states when
+                                    ##      they were copied to R (status 2 above):
+                                    ##
+                                    if (time_criterion_active && lag_one_autocorrelation_rho_is_adaptive && (is_main || is_joint)) {
+                                        lag_one_autocorrelation_rho_statistic <-  tryCatch({
+                                            if (use_resident_joint_block && is.null(joint_mean_initial)) {
+                                                joint_reductions_of_accepted_end <-  if (!use_proposals_joint) joint_reductions else
+                                                    resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
+                                                                                                                          projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time"),
+                                                                                                                          use_proposals_R = FALSE,
+                                                                                                                          initial_main = initial_main_metric,
+                                                                                                                          proposed_main = fn_apply_trajectory_metric(joint_metric_factor$main,
+                                                                                                                                                                     theta_main_vectors_all_chains_input_from_R - c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main)),
+                                                                                                                          velocity_main = fn_apply_trajectory_metric(joint_metric_factor$main,
+                                                                                                                                                                     velocity_main_vectors_all_chains_input_from_R),
+                                                                                                                          factor_us = joint_metric_factor$us)
+                                                fn_lag_one_autocorrelation_rho_statistic_from_reductions( algorithm                  = burnin_algorithm,
+                                                                                                          reductions_of_accepted_end = joint_reductions_of_accepted_end)
+                                            } else {
+                                                fn_lag_one_autocorrelation_rho_statistic_per_chain( algorithm      = burnin_algorithm,
+                                                                                                    theta_initial  = theta_initial,
+                                                                                                    theta_accepted = theta_accepted,
+                                                                                                    mean_initial   = if (use_resident_joint_block) joint_mean_initial else c(initial_mean),
+                                                                                                    metric_factor  = if (use_resident_joint_block) joint_metric_factor else trajectory_metric[[adapted_block]],
+                                                                                                    direction      = if (use_resident_joint_block) joint_direction else trajectory_direction[[adapted_block]])
+                                            }
+                                        }, error = function(error_object) {
+                                            message(colourise(paste0("lag_one_autocorrelation_rho = \"adaptive\" at iteration ", ii, ": the criterion statistic is not available (",
+                                                                     conditionMessage(error_object), "); the moments are not updated."), "red"))
+                                            NULL
+                                        })
+                                        if (!is.null(lag_one_autocorrelation_rho_statistic)) {
+                                            lag_one_autocorrelation_rho_moments <-  fn_lag_one_autocorrelation_rho_moments_update(
+                                                lag_one_autocorrelation_rho_moments                 = lag_one_autocorrelation_rho_moments,
+                                                criterion_statistic_at_trajectory_start             = lag_one_autocorrelation_rho_statistic$criterion_statistic_at_trajectory_start,
+                                                criterion_statistic_at_accepted_end                 = lag_one_autocorrelation_rho_statistic$criterion_statistic_at_accepted_end,
+                                                chain_is_valid                                      = is.finite(divergences) & divergences == 0,
+                                                lag_one_autocorrelation_rho_moment_averaging_offset = lag_one_autocorrelation_rho_moment_averaging_offset)
+                                            lag_one_autocorrelation_rho_n_valid_chains_vec[ii] <-  lag_one_autocorrelation_rho_moments$n_valid_chains_last_update
+                                        }
+                                        lag_one_autocorrelation_rho_estimate_after_update_vec[ii] <-  fn_lag_one_autocorrelation_rho_estimate(lag_one_autocorrelation_rho_moments)
+                                    }
+                                }
+                                ##
+                                ## ---- "probe_then_average", probe phase: the ADAM step computed above is discarded; its aggregated gradient goes into
+                                ##      the block sum, tau is set by the rung, and the ADAM moments stay as they are (fresh):
+                                if (tau_probe_probing_now && (is_main || is_joint)) {
+                                    tau_probe_aggregated_gradient <-  if (burnin_algorithm == "KE") attr(updated, "aggregated_gradient") else update$gradient
+                                    if (is.null(tau_probe_aggregated_gradient) || length(tau_probe_aggregated_gradient) != 1 ||
+                                        !is.finite(tau_probe_aggregated_gradient)) tau_probe_aggregated_gradient <-  0
+                                    tau_probe_state <-  fn_tau_probe_step( state = tau_probe_state,
+                                                                           aggregated_gradient = tau_probe_aggregated_gradient,
+                                                                           iteration = ii)
+                                    updated <-  c(exp(tau_probe_state$log_tau_start + tau_probe_state$rung * log(2)),
+                                                  EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
+                                                  EHMC_burnin_as_Rcpp_List[[adam_variance_name]])
+                                    tau_adam_update_performed <-  FALSE
+                                    tau_probe_tau_path_vec[ii] <-  updated[1]
+                                    if (!tau_probe_state$probing) {
+                                        # message(colourise(paste0("tau probe ended at iteration ", ii, ": tau = ", signif(updated[1], 5),
+                                        #                          " (tau_handover x 2^", tau_probe_state$rung, "); ADAM with constant LR from the next tau update."), "cyan"))
+                                        message(colourise(paste0("tau probe ended at iteration ", ii, ": tau = ", signif(updated[1], 5),
+                                                                 " (tau_handover x 2^", tau_probe_state$rung, "); ADAM with ",
+                                                                 if (tau_probe_fixed_length_decay) "LR decaying to LR^2" else "constant LR",
+                                                                 " from the next tau update."), "cyan"))
+                                        ## "fixed_length_probe_then_decay_and_average": the jitter (if any) resumes at the next iteration:
+                                        if (tau_probe_fixed_length_decay) EHMC_args_as_Rcpp_List$randomize_tau <-  randomize_tau_burnin
                                     }
                                 }
                                 EHMC_args_as_Rcpp_List[[tau_name]] <- updated[1]
@@ -3051,6 +4421,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 EHMC_args_as_Rcpp_List$tau_main <- min(max_tau_main, EHMC_args_as_Rcpp_List$tau_main)
                                 EHMC_args_as_Rcpp_List$tau_us <- if (isTRUE(partitioned_HMC))
                                     min(max_tau_us, EHMC_args_as_Rcpp_List$tau_us) else EHMC_args_as_Rcpp_List$tau_main
+                            }
+                            ## ---- "probe_then_average": log tau after the ceiling, averaged over the tau updates from iteration metric_adaptation_end_iter on:
+                            if (tau_probe_then_average && ii >= gap && ii < n_adapt && ii >= tau_average_start_iteration) {
+                                tau_average_sum_log_tau <-  tau_average_sum_log_tau + log(EHMC_args_as_Rcpp_List$tau_main)
+                                tau_average_n_updates <-  tau_average_n_updates + 1
                             }
                             ## //////////////////   --------------------------------  update tau for ALL PARAMS ------------------------------------------------------------------------------
                             ## n_refresh is the print INTERVAL, i.e. report every n_refresh
@@ -3093,6 +4468,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
       
                                         if (partitioned_HMC == TRUE) { # if NOT sampling all parameters at once
                                                   cat(colourise(    (paste("p_jump_main = ", round(p_jump_main, 3)))          , "green"), "\n")
+                                                  # if (identical(eps_acceptance_mean, "harmonic")) {
+                                                  #     cat(colourise(    (paste0("p_jump_main (harmonic mean, eps target) = ", round(p_jump_main_for_eps, 3)))          , "green"), "\n")
+                                                  # }
+                                                  if (eps_acceptance_mean %in% c("harmonic", "geometric")) {
+                                                      cat(colourise(    (paste0("p_jump_main (", eps_acceptance_mean, " mean, eps target) = ", round(p_jump_main_for_eps, 3)))          , "green"), "\n")
+                                                  }
                                                   cat(colourise(    (paste("eps_main = ", round(EHMC_args_as_Rcpp_List$eps_main, 3)))          , "blue"), "\n")
                                                   ##
                                                   message((paste("tau_main = ",  round(EHMC_args_as_Rcpp_List$tau_main, 3))))#
@@ -3101,18 +4482,43 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                   cat(colourise(    (paste("div_main = ", sum(div_main)))          , "red"), "\n")
                                         } else {
                                                   cat(colourise(    (paste("p_jump = ", round(p_jump_main, 3)))          , "green"), "\n")
+                                                  # if (identical(eps_acceptance_mean, "harmonic")) {
+                                                  #     cat(colourise(    (paste0("p_jump (harmonic mean, eps target) = ", round(p_jump_main_for_eps, 3)))          , "green"), "\n")
+                                                  # }
+                                                  if (eps_acceptance_mean %in% c("harmonic", "geometric")) {
+                                                      cat(colourise(    (paste0("p_jump (", eps_acceptance_mean, " mean, eps target) = ", round(p_jump_main_for_eps, 3)))          , "green"), "\n")
+                                                  }
                                                   cat(colourise(    (paste("eps = ", round(EHMC_args_as_Rcpp_List$eps_main, 3)))          , "blue"), "\n")
                                                   ##
                                                   message((paste("tau = ",  signif(EHMC_args_as_Rcpp_List$tau_main, 3))))
                                                   ##
                                                   message((paste("L = ",  round(ceiling(EHMC_args_as_Rcpp_List$tau_main/EHMC_args_as_Rcpp_List$eps_main), 0))))
                                                   cat(colourise(    (paste("div = ", sum(div_main)))          , "red"), "\n")
+                                                  if (time_criterion_active && ii >= gap && ii < n_adapt) {
+                                                      message(colourise(paste0("time criterion: time_per_leapfrog_step_burnin = ", signif(time_per_leapfrog_step_burnin_vec[ii], 4), " s",
+                                                                               " | tau_offset_from_sampling_overhead = ", signif(tau_offset_from_sampling_overhead_vec[ii], 4),
+                                                                               " | burnin_to_sampling_leapfrog_time_ratio = ", signif(burnin_to_sampling_leapfrog_time_ratio_vec[ii], 4),
+                                                                               " | time_to_target_ESS_tau_penalty (at tau) = ", signif(time_to_target_ESS_tau_penalty_at_tau_main_vec[ii], 4),
+                                                                               ## " | ESS_elasticity_wrt_log_tau (estimate) = ", signif(ESS_elasticity_wrt_log_tau_vec[ii], 4)),
+                                                                               " | ESS_elasticity_wrt_log_tau (estimate) = ", signif(ESS_elasticity_wrt_log_tau_vec[ii], 4),
+                                                                               if (time_criterion_messages_show_rho) paste0(
+                                                                                   " | lag_one_autocorrelation_rho = ", signif(lag_one_autocorrelation_rho_used_vec[ii], 4),
+                                                                                   if (lag_one_autocorrelation_rho_is_adaptive) paste0(" (adaptive; estimate after this update ",
+                                                                                                                                       signif(lag_one_autocorrelation_rho_estimate_after_update_vec[ii], 4), ")") else "") else ""),
+                                                                        "cyan"))
+                                                  }
                                         }
 
 
                                         if (partitioned_HMC == TRUE) { # if NOT sampling all parameters at once
                                             if     (sample_nuisance == TRUE)   {
                                                 cat(colourise(    (paste("p_jump_us = ", round(p_jump_us, 3)))          , "green"), "\n")
+                                                # if (identical(eps_acceptance_mean, "harmonic")) {
+                                                #     cat(colourise(    (paste0("p_jump_us (harmonic mean, eps target) = ", round(p_jump_us_for_eps, 3)))          , "green"), "\n")
+                                                # }
+                                                if (eps_acceptance_mean %in% c("harmonic", "geometric")) {
+                                                    cat(colourise(    (paste0("p_jump_us (", eps_acceptance_mean, " mean, eps target) = ", round(p_jump_us_for_eps, 3)))          , "green"), "\n")
+                                                }
                                                 cat(colourise(    (paste("eps_us = ", round(EHMC_args_as_Rcpp_List$eps_us, 3)))          , "blue"), "\n")
                                                 ##
                                                 message((paste("tau_us = ",  round(EHMC_args_as_Rcpp_List$tau_us, 3))))
@@ -3144,6 +4550,17 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         L_main_during_burnin_vec[ii] <- L_main_iter_ii
                         tau_main_during_burnin_vec[ii] <- EHMC_args_as_Rcpp_List$tau_main
                         eps_main_during_burnin_vec[ii] <- EHMC_args_as_Rcpp_List$eps_main
+                        if (ii <= n_burnin) {
+                            if (identical(dim(theta_main_vectors_all_chains_input_from_R), c(as.integer(n_params_main), as.integer(n_chains_burnin)))) {
+                                burnin_trace_main_all_chains[ii, , ] <-  theta_main_vectors_all_chains_input_from_R
+                            }
+                            burnin_metric_main_variance_history[ii, ] <-  if (identical(metric_shape_main, "dense")) diag(EHMC_Metric_as_Rcpp_List$M_inv_dense_main) else
+                                                                              c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
+                            if (isTRUE(sample_nuisance) && length(EHMC_Metric_as_Rcpp_List$M_inv_us_vec) > 0) {
+                                burnin_metric_nuisance_variance_quantiles_history[ii, ] <-  stats::quantile(c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec),
+                                                                                                           probs = c(0.05, 0.25, 0.50, 0.75, 0.95), names = FALSE)
+                            }
+                        }
                         if (isTRUE(partitioned_HMC) && isTRUE(sample_nuisance)) {
                             tau_us_during_burnin_vec[ii] <- EHMC_args_as_Rcpp_List$tau_us
                             eps_us_during_burnin_vec[ii] <- EHMC_args_as_Rcpp_List$eps_us
@@ -3157,6 +4574,21 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ##
     L_main_during_burnin <- if (length(x = L_main_during_burnin_vec) > 0L) mean(L_main_during_burnin_vec, na.rm = TRUE) else NA_real_
     L_us_during_burnin <-   if (length(x = L_us_during_burnin_vec) > 0L) mean(L_us_during_burnin_vec, na.rm = TRUE) else NA_real_
+    ##
+    ## ---- "probe_then_average": the tau handed to sampling is exp(mean log tau) over the averaged tau updates (before any tau_sampling_scale):
+    if (tau_probe_then_average) {
+          ## "fixed_length_probe_then_decay_and_average": randomize_tau back to randomize_tau_burnin (a probe that never ended left it FALSE):
+          if (tau_probe_fixed_length_decay) EHMC_args_as_Rcpp_List$randomize_tau <-  randomize_tau_burnin
+          tau_main_last_iterate <-  EHMC_args_as_Rcpp_List$tau_main
+          if (tau_average_n_updates > 0) {
+                tau_main_averaged <-  exp(tau_average_sum_log_tau / tau_average_n_updates)
+                EHMC_args_as_Rcpp_List$tau_main <-  tau_main_averaged
+                if (!isTRUE(partitioned_HMC)) EHMC_args_as_Rcpp_List$tau_us <-  tau_main_averaged
+          }
+          message(colourise(paste0("tau for sampling (probe_then_average): exp(mean log tau) over ", tau_average_n_updates, " tau updates = ",
+                                   signif(EHMC_args_as_Rcpp_List$tau_main, 5), " (last tau of the burn-in: ", signif(tau_main_last_iterate, 5),
+                                   "; probe ended at iteration ", tau_probe_state$end_iteration, ")"), "cyan"))
+    }
     ##
     cat("stage wall time:        ", stage_wall, "\n")
     cat("time inside C++ call:   ", t_cpp_total, "\n")
@@ -3194,6 +4626,110 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ##
     # Rprof(NULL)
     # summaryRprof("burnin_prof.out")$by.self[1:15, ]
+    ##
+    ## ---- CHESSR_time / SNAPER_time: the record of the time-to-target-ESS criterion (NULL for every other criterion):
+    ##
+    time_criterion_burnin_record <-  NULL
+    if (time_criterion_active) {
+        time_per_leapfrog_step_burnin_estimate_at_end <-  fn_time_per_leapfrog_step_burnin_fit_estimate(
+            time_per_leapfrog_step_burnin_fit_sums       = time_per_leapfrog_step_burnin_fit_sums,
+            time_per_leapfrog_step_burnin_min_iterations = time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_min_iterations)
+        ##
+        ## ---- at the end: the lag_one_autocorrelation_rho the next update would use (the setting, or the "adaptive" estimate from all the
+        ##      moment updates):
+        ##
+        lag_one_autocorrelation_rho_at_end <-  fn_lag_one_autocorrelation_rho_for_tau_update( lag_one_autocorrelation_rho_setting = lag_one_autocorrelation_rho_setting,
+                                                                                              lag_one_autocorrelation_rho_moments = lag_one_autocorrelation_rho_moments)
+        time_criterion_quantities_at_end <-  fn_time_criterion_quantities_at_tau_update(
+            time_criterion_sampling_quantities = time_criterion_sampling_quantities,
+            time_per_leapfrog_step_burnin      = if (is.finite(time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_user_supplied))
+                                                     time_criterion_sampling_quantities$time_per_leapfrog_step_burnin_user_supplied else
+                                                     time_per_leapfrog_step_burnin_estimate_at_end$time_per_leapfrog_step_burnin,
+            eps_used_for_iteration             = EHMC_args_as_Rcpp_List$eps_main,
+            n_iter_burnin                      = n_iter_burnin_at_adapted_tau)
+        ##
+        ## ---- ESS_elasticity_wrt_log_tau pooled over the second half of the tau updates (ratio of the summed chain means), next to the
+        ##      mean penalty over the same updates: where the criterion has converged the two agree:
+        ##
+        tau_update_iterations_with_elasticity <-  which(is.finite(ChEES_or_SNAPER_statistic_per_tau_chain_mean_vec) &
+                                                        is.finite(ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec))
+        tau_update_iterations_second_half <-  utils::tail(tau_update_iterations_with_elasticity, ceiling(length(tau_update_iterations_with_elasticity) / 2))
+        ChEES_or_SNAPER_statistic_per_tau_sum_second_half <-  sum(ChEES_or_SNAPER_statistic_per_tau_chain_mean_vec[tau_update_iterations_second_half])
+        ESS_elasticity_wrt_log_tau_pooled_over_second_half_of_tau_updates <-  if (length(tau_update_iterations_second_half) > 0 &&
+                                                                                  ChEES_or_SNAPER_statistic_per_tau_sum_second_half > 0) {
+            sum(ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec[tau_update_iterations_second_half]) /
+            ChEES_or_SNAPER_statistic_per_tau_sum_second_half
+        } else NA_real_
+        time_to_target_ESS_tau_penalty_mean_over_second_half_of_tau_updates <-  if (length(tau_update_iterations_second_half) > 0) {
+            mean(time_to_target_ESS_tau_penalty_at_tau_main_vec[tau_update_iterations_second_half], na.rm = TRUE)
+        } else NA_real_
+        ##
+        time_criterion_burnin_record <-  list(
+            burnin_algorithm                                   = burnin_algorithm,
+            n_iter_burnin                                      = n_iter_burnin_at_adapted_tau,
+            n_iter_burnin_definition                           = paste0("iterations clip_iter_tau + 1 to n_burnin (", clip_iter_tau + 1, " to ", n_burnin,
+                                                                        "), which run at the adapted tau; n_burnin - clip_iter_tau"),
+            n_burnin                                           = n_burnin,
+            clip_iter_tau                                      = clip_iter_tau,
+            time_criterion_sampling_quantities                 = time_criterion_sampling_quantities,
+            time_per_leapfrog_step_burnin_measurement          = paste0("wall time (Sys.time()) of each native burn-in iteration call, all burn-in chains in parallel, ",
+                                                                        "regressed on max(1, ceiling(max tau_ii / eps)) by running least squares over iterations ",
+                                                                        ">= clip_iter with no divergent chain; slope = time_per_leapfrog_step_burnin"),
+            time_per_leapfrog_step_burnin_at_end               = time_per_leapfrog_step_burnin_estimate_at_end,
+            time_per_leapfrog_step_burnin_fit_sums_at_end      = time_per_leapfrog_step_burnin_fit_sums,
+            at_handover                                        = time_criterion_at_handover,
+            at_last_update                                     = time_criterion_at_last_update,
+            at_end                                             = list( eps_main                               = EHMC_args_as_Rcpp_List$eps_main,
+                                                                       tau_main                               = EHMC_args_as_Rcpp_List$tau_main,
+                                                                       tau_offset_from_sampling_overhead      = time_criterion_quantities_at_end$tau_offset_from_sampling_overhead,
+                                                                       burnin_to_sampling_leapfrog_time_ratio = time_criterion_quantities_at_end$burnin_to_sampling_leapfrog_time_ratio,
+                                                                       time_to_target_ESS_tau_penalty_at_tau_main = fn_time_to_target_ESS_tau_penalty(
+                                                                           tau_values                             = EHMC_args_as_Rcpp_List$tau_main,
+                                                                           tau_offset_from_sampling_overhead      = time_criterion_quantities_at_end$tau_offset_from_sampling_overhead,
+                                                                           ## burnin_to_sampling_leapfrog_time_ratio = time_criterion_quantities_at_end$burnin_to_sampling_leapfrog_time_ratio),
+                                                                           burnin_to_sampling_leapfrog_time_ratio = time_criterion_quantities_at_end$burnin_to_sampling_leapfrog_time_ratio,
+                                                                           lag_one_autocorrelation_rho            = lag_one_autocorrelation_rho_at_end$value),
+                                                                       lag_one_autocorrelation_rho              = lag_one_autocorrelation_rho_at_end$value,
+                                                                       lag_one_autocorrelation_rho_source       = lag_one_autocorrelation_rho_at_end$source,
+                                                                       ESS_elasticity_wrt_log_tau_pooled_over_second_half_of_tau_updates   = ESS_elasticity_wrt_log_tau_pooled_over_second_half_of_tau_updates,
+                                                                       time_to_target_ESS_tau_penalty_mean_over_second_half_of_tau_updates = time_to_target_ESS_tau_penalty_mean_over_second_half_of_tau_updates,
+                                                                       n_tau_updates_in_second_half                                        = length(tau_update_iterations_second_half)),
+            iteration_of_no_interior_optimum_warning           = iteration_of_no_interior_optimum_warning,
+            time_per_iter_native_call_burnin_vec               = time_per_iter_native_call_burnin_vec,
+            n_leapfrog_steps_per_iter_burnin_vec               = n_leapfrog_steps_per_iter_burnin_vec,
+            used_in_time_per_leapfrog_step_burnin_fit_vec      = used_in_time_per_leapfrog_step_burnin_fit_vec,
+            time_per_leapfrog_step_burnin_vec                  = time_per_leapfrog_step_burnin_vec,
+            tau_offset_from_sampling_overhead_vec              = tau_offset_from_sampling_overhead_vec,
+            burnin_to_sampling_leapfrog_time_ratio_vec         = burnin_to_sampling_leapfrog_time_ratio_vec,
+            time_to_target_ESS_tau_penalty_at_tau_main_vec     = time_to_target_ESS_tau_penalty_at_tau_main_vec,
+            ESS_elasticity_wrt_log_tau_vec                     = ESS_elasticity_wrt_log_tau_vec,
+            ChEES_or_SNAPER_statistic_per_tau_chain_mean_vec   = ChEES_or_SNAPER_statistic_per_tau_chain_mean_vec,
+            ## ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec = ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec)
+            ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec = ChEES_or_SNAPER_statistic_log_tau_derivative_per_tau_chain_mean_vec,
+            ##
+            ## ---- MALT's exponent: the setting, the lag_one_autocorrelation_rho used at each tau update and ("adaptive") the estimate after
+            ##      each moment update, the valid chains of each update and the final running moments:
+            lag_one_autocorrelation_rho_setting                   = lag_one_autocorrelation_rho_setting,
+            lag_one_autocorrelation_rho_moment_averaging_offset   = lag_one_autocorrelation_rho_moment_averaging_offset,
+            lag_one_autocorrelation_rho_used_vec                  = lag_one_autocorrelation_rho_used_vec,
+            lag_one_autocorrelation_rho_estimate_after_update_vec = lag_one_autocorrelation_rho_estimate_after_update_vec,
+            lag_one_autocorrelation_rho_n_valid_chains_vec        = lag_one_autocorrelation_rho_n_valid_chains_vec,
+            lag_one_autocorrelation_rho_moments_at_end            = lag_one_autocorrelation_rho_moments)
+        message(colourise(paste0("time-to-target-ESS criterion at the end of the burn-in: time_per_leapfrog_step_burnin = ",
+                                 signif(time_per_leapfrog_step_burnin_estimate_at_end$time_per_leapfrog_step_burnin, 4), " s (",
+                                 time_per_leapfrog_step_burnin_estimate_at_end$status, ", ",
+                                 time_per_leapfrog_step_burnin_estimate_at_end$n_iterations_used, " iterations)",
+                                 " | tau_offset_from_sampling_overhead = ", signif(time_criterion_quantities_at_end$tau_offset_from_sampling_overhead, 4),
+                                 " | burnin_to_sampling_leapfrog_time_ratio = ", signif(time_criterion_quantities_at_end$burnin_to_sampling_leapfrog_time_ratio, 4),
+                                 " | over the second half of the tau updates: ESS_elasticity_wrt_log_tau (pooled estimate) = ",
+                                 signif(ESS_elasticity_wrt_log_tau_pooled_over_second_half_of_tau_updates, 4),
+                                 ## ", mean time_to_target_ESS_tau_penalty = ", signif(time_to_target_ESS_tau_penalty_mean_over_second_half_of_tau_updates, 4)),
+                                 ", mean time_to_target_ESS_tau_penalty = ", signif(time_to_target_ESS_tau_penalty_mean_over_second_half_of_tau_updates, 4),
+                                 if (time_criterion_messages_show_rho) paste0(
+                                     " | lag_one_autocorrelation_rho at the end = ", signif(lag_one_autocorrelation_rho_at_end$value, 4),
+                                     " (", lag_one_autocorrelation_rho_at_end$source, ")") else ""),
+                          "cyan"))
+    }
     ##
     if (use_resident_burnin) {
           ##
@@ -3253,8 +4789,24 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 tau_us =  EHMC_args_as_Rcpp_List$tau_us,
                 tau_main_during_burnin_vec = tau_main_during_burnin_vec,
                 eps_main_during_burnin_vec = eps_main_during_burnin_vec,
+                ## burn-in record for metric diagnosis (see its allocation):
+                burnin_trace_main_all_chains = burnin_trace_main_all_chains,
+                burnin_metric_main_variance_history = burnin_metric_main_variance_history,
+                burnin_metric_nuisance_variance_quantiles_history = burnin_metric_nuisance_variance_quantiles_history,
                 tau_us_during_burnin_vec = tau_us_during_burnin_vec,
                 eps_us_during_burnin_vec = eps_us_during_burnin_vec,
+                ## cross-chain mean acceptance for the eps update ("harmonic" | "arithmetic") and its per-iteration values:
+                eps_acceptance_mean = eps_acceptance_mean,
+                p_jump_main_during_burnin_vec = p_jump_main_during_burnin_vec,
+                p_jump_main_for_eps_during_burnin_vec = p_jump_main_for_eps_during_burnin_vec,
+                p_jump_us_during_burnin_vec = p_jump_us_during_burnin_vec,
+                p_jump_us_for_eps_during_burnin_vec = p_jump_us_for_eps_during_burnin_vec,
+                ## pooled metric estimator: window resets (as given, and the iterations r they resolve to; reset at the start
+                ## of iteration r + 1) and off-diagonal shrinkage. Read only when metric_estimator = "pooled":
+                metric_estimator                      = metric_estimator,
+                metric_pooled_window_resets           = metric_pooled_window_resets,
+                metric_pooled_window_reset_iterations = metric_window_resets,
+                metric_pooled_offdiagonal_shrinkage   = metric_pooled_offdiagonal_shrinkage,
                 ChEES_criterion_ema_vec = ChEES_criterion_ema_vec,
                 ChEES_per_tau_gradient_vec = ChEES_per_tau_gradient_vec,
                 tau_adaptation_version = 4,
@@ -3266,15 +4818,54 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 snaper_direction_joint = trajectory_direction$joint,
                 trajectory_metric_factor_main = trajectory_metric$main,
                 tau_adaptation_iteration_vec = tau_adaptation_iteration_vec,
+                ## tau_initial = "adaptive": the lambda_max estimates and the tau set at the handover (NULL for a numeric tau_initial):
+                tau_initial_adaptive = tau_initial_adaptive_record,
                 ## ADAM bias correction counts performed tau updates, not iterations (skipped updates excluded):
                 tau_adam_bias_correction = "performed_update_counter",
                 tau_adam_updates_main = tau_adam_updates_performed_by_block$main,
                 tau_adam_updates_us = tau_adam_updates_performed_by_block$us,
                 tau_adam_bias_correction_step_vec = tau_adam_bias_correction_step_vec,
+                ## tau-only ADAM beta1 (option NicoStan_tau_adam_beta1; NA = beta1_adam) and the beta1 the tau updates used; the tau
+                ## learning-rate restart at the metric freeze (option NicoStan_tau_learning_rate_restart_at_metric_end) and the
+                ## iteration from which the restarted schedule applied (NA = no restart):
+                tau_adam_beta1_option = if (is.null(tau_adam_beta1_option)) NA_real_ else as.numeric(tau_adam_beta1_option),
+                tau_adam_beta1_used = tau_adam_beta1,
+                tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
+                tau_learning_rate_restart_iteration = if (tau_learning_rate_restart_active) tau_learning_rate_restart_iter else NA_real_,
+                ## tau adaptation scheme (option NicoStan_tau_adaptation_scheme) and, for "probe_then_average", the probe (end iteration, rung
+                ## and tau after every probe update) and the averaged tau handed to sampling (NA for "adam_decay"):
+                tau_adaptation_scheme = tau_adaptation_scheme,
+                tau_probe_end_iteration = tau_probe_state$end_iteration,
+                tau_probe_end_rung = if (tau_probe_then_average) tau_probe_state$rung else NA_real_,
+                tau_probe_tau_path_vec = tau_probe_tau_path_vec,
+                tau_average_start_iteration = if (tau_probe_then_average) tau_average_start_iteration else NA_real_,
+                tau_average_n_updates = tau_average_n_updates,
+                tau_main_last_iterate = tau_main_last_iterate,
+                tau_main_averaged = tau_main_averaged,
+                ## the sampler arguments beta1_adam / beta2_adam / eps_adam (the defaults of the options below):
+                beta1_adam = beta1_adam,
+                beta2_adam = beta2_adam,
+                eps_adam = eps_adam,
+                ## ADAM settings the eps and the tau updates actually used (options NicoStan_eps_adam_* / NicoStan_tau_adam_*):
+                eps_adam_beta1_used = eps_adam_beta1,
+                eps_adam_beta2_used = eps_adam_beta2,
+                eps_adam_epsilon_used = eps_adam_epsilon,
+                tau_adam_beta2_used = tau_adam_beta2,
+                tau_adam_epsilon_used = tau_adam_epsilon,
                 L_main_during_burnin_vec = L_main_during_burnin_vec,
                 L_us_during_burnin_vec = L_us_during_burnin_vec,
                 L_main_during_burnin = L_main_during_burnin,
                 L_us_during_burnin = L_us_during_burnin,
+                ##
+                ## divergence-triggered tau shrink: settings, and the iterations at which it fired:
+                tau_shrink_on_divergence        = tau_shrink_on_divergence,
+                tau_shrink_factor               = tau_shrink_factor,
+                tau_shrink_min_divergent_chains = tau_shrink_min_divergent_chains,
+                tau_shrink_fired_vec            = tau_shrink_fired_vec,
+                tau_shrink_n_fired              = sum(tau_shrink_fired_vec),
+                ##
+                ## CHESSR_time / SNAPER_time: the record of the time-to-target-ESS criterion (NULL for every other criterion):
+                time_criterion = time_criterion_burnin_record,
                 ##
                 Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
                 EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
@@ -3294,6 +4885,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
               
    
+
+
+
+
+
 
 
 

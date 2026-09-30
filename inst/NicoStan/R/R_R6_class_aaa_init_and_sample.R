@@ -406,6 +406,7 @@ MVP_model <- R6Class("MVP_model",
                           #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from zero to twice the adapted scale (at least one integration step). Default TRUE.
                           #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an experimental unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
                           #'@param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in. FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in and skips that search; no effect when no pre-burnin runs.
+                          #'@param eps_acceptance_mean NULL/"harmonic" (default) adapts the burn-in step size so that the harmonic mean over the burn-in chains of the per-chain acceptance probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC (Hoffman, Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero acceptance (a divergent proposal, which includes |log ratio| > 1000 in either direction, or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic" uses the arithmetic mean, the rule used before this option existed. "geometric" uses exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between the harmonic and the arithmetic mean.
                           #'@param tau_adaptation_block "main" (default; unchanged behaviour): the trajectory-length criterion uses the main parameters only. "joint": main and nuisance parameters concatenated, still adapting the one joint tau. EXPERIMENTAL, for testing only; models without a sampled nuisance block fall back to "main".
                           #'@param manual_tau If \code{FALSE}, then the selected burnin_algorithm will be used to adapt \eqn{\tau} during the burnin phase. Otherwise if \code{TRUE}, \eqn{\tau} will be
                           #' fixed to the value given in the \code{tau_if_manual} argument. 
@@ -511,9 +512,48 @@ MVP_model <- R6Class("MVP_model",
                           #'
                           #'@param burnin_algorithm Trajectory-length adaptation: KE, ChEES, CHESSR, CHESSR_log or SNAPER.
                           #'"CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion; CHESSR_log selects the smoothed log-rate variant.
+                          #'"CHESSR_time" / "SNAPER_time" select the time-to-target-ESS variants of CHESSR / SNAPER (joint sampler only).
+                          #'@param time_criterion_settings For burnin_algorithm = "CHESSR_time" / "SNAPER_time": NULL (default) or a named list of the
+                          #'time-to-target-ESS criterion settings (sampling timing probe, previous saved run(s), user-supplied times, ESS target);
+                          #'see fn_default_time_criterion_settings(). Ignored by the other criteria.
+                          #'sampling_overhead_in_leapfrog_steps (the fixed per-iteration sampling cost, in leapfrog-step equivalents):
+                          #'NULL (default) = user-supplied times > previous saved run(s) > sampling timing probe; a number >= 0 = used as it
+                          #'is, with no probe; "auto" = a value for the sampling configuration (n_chains_sampling chains,
+                          #'n_threads_WCP_sampling threads per chain, the sampling chunk count): the built-in default for the model, that
+                          #'configuration and the machine's number of physical cores when one exists
+                          #'(fn_default_sampling_overhead_in_leapfrog_steps), otherwise the sampling timing probe in its "lite" mode; it is
+                          #'never taken from the burn-in's timings or a saved run (a time_criterion_previous_run_path that is supplied is
+                          #'still used for time_per_leapfrog_step_sampling and ESS_per_iter_sampling_expected only). With the built-in
+                          #'default, as with a number, no probe runs, and burnin_to_sampling_leapfrog_time_ratio uses a user-supplied or
+                          #'previous-run time_per_leapfrog_step_sampling (else 0, with a warning). The source used (built_in_default,
+                          #'probe_lite, probe_full, probe_lite_without_summaries, probe_full_without_summaries or user_supplied) and the two
+                          #'parts of the value are returned in time_criterion$time_criterion_sampling_quantities.
+                          #'sampling_timing_probe_mode: NULL (default; "lite" with "auto", else "full"), "full" or "lite" (the smallest and
+                          #'the largest sampling_timing_probe_L_values only, and the summaries timed once, less their fixed set-up, which is
+                          #'measured once per R session and cached; NicoStan:::fn_clear_sampling_timing_probe_summaries_set_up_cache()
+                          #'empties the cache). With the default sampling_timing_probe_L_values = c(2, 8) and no cached set-up (the first
+                          #'lite probe of a configuration in an R session, and always with run_in_fresh_R_process = TRUE), a lite probe
+                          #'makes exactly the full probe's calls.
+                          #'lag_one_autocorrelation_rho (MALT's exponent: the criterion's penalty times (1 + lag_one_autocorrelation_rho) / 2,
+                          #'i.e. the cost raised to the power (1 + lag_one_autocorrelation_rho) / 2): a number in [0, 1], 1 (default) = the
+                          #'criterion without it; or "adaptive" = estimated during the tau adaptation as the lag-one autocorrelation of the
+                          #'criterion's statistic across the burn-in chains (MALT's running moments, clipped to [0, 1]);
+                          #'lag_one_autocorrelation_rho_moment_averaging_offset is the offset in the running-moment weight
+                          #'n_earlier_moment_updates / (n_earlier_moment_updates + lag_one_autocorrelation_rho_moment_averaging_offset)
+                          #'(default 8, MALT's value). The values used are returned in time_criterion$burnin.
                           #'@param burnin_TBB_pool_equals_n_chains NULL defaults to TRUE for built-in models, which use OpenMP within chains.
                           #'External Stan models always force FALSE, even when TRUE is supplied, so nested TBB likelihood work can use
                           #'n_chains_burnin * n_threads_WCP_burnin threads. Built-in models can explicitly select FALSE.
+                          #'@param tau_shrink_on_divergence,tau_shrink_factor,tau_shrink_min_divergent_chains Divergence-triggered tau shrink in the
+                          #'burn-in. NULL/FALSE (default) = off. TRUE multiplies tau by tau_shrink_factor (NULL = 0.95) at each adaptation iteration
+                          #'in which at least tau_shrink_min_divergent_chains (NULL = 2) burn-in chains diverge (the rule used in earlier runs).
+                          #'@param metric_pooled_window_resets Pooled metric estimator (metric_estimator = "pooled") only: iterations r at which its
+                          #'Welford accumulators (main covariance and nuisance variances) are reset, at the start of iteration r + 1.
+                          #'NULL/"stan_style" (default) = round(c(0.30, 0.60) * n_adapt), the resets used before this option existed; "none" = one
+                          #'window from the first metric iteration to metric_adaptation_end_iter; or a numeric vector of whole numbers >= 0.
+                          #'@param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1] (NULL = 0, as before this option
+                          #'existed), applied once to each pooled covariance proposal of the dense main metric as (1 - s) * cov + s * diag(diag(cov)).
+                          #'0 keeps all off-diagonals unshrunk.
                           #'@param run_in_fresh_R_process TRUE (default) runs burn-in/sampling in a fresh R process and returns
                           #'the usual draws/diagnostics; native worker memory is released when it exits. FALSE uses this session.
                           sample = function(  force_recompile = FALSE,
@@ -585,6 +625,8 @@ MVP_model <- R6Class("MVP_model",
                                               interval_width_nuisance = NULL,
                                               ##
                                               metric_estimator = "pooled",
+                                              metric_pooled_window_resets = NULL,
+                                              metric_pooled_offdiagonal_shrinkage = NULL,
                                               ##
                                               M_decay_type = NULL,
                                               M_decay_power = NULL,
@@ -625,7 +667,12 @@ MVP_model <- R6Class("MVP_model",
                                               tau_weight_by_p_jump = NULL,
                                               tau_ramp = NULL,
                                               eps_reinit_at_ChEES_handover = NULL,
+                                              eps_acceptance_mean = NULL,
                                               eps_reinit_after_pre_burnin = NULL,
+                                              tau_shrink_on_divergence = NULL,
+                                              tau_shrink_factor = NULL,
+                                              tau_shrink_min_divergent_chains = NULL,
+                                              time_criterion_settings = NULL,
                                               theta_hat_us_rule = NULL,
                                               theta_hat_us_freeze_iter = NULL,
                                               burnin_schedule = "automatic",
@@ -633,7 +680,8 @@ MVP_model <- R6Class("MVP_model",
                                               pre_burnin_n_iter = NULL,
                                               pre_burnin_L = NULL,
                                               share_tau_ii_across_chains_in_burnin = NULL,
-                                              randomize_tau_burnin = FALSE,
+                                              # randomize_tau_burnin = FALSE,
+                                              randomize_tau_burnin = TRUE,           ## tau adapted under the sampling jitter U(0, 2 tau), as in ChEES and SNAPER
                                               randomize_tau_sampling = TRUE,
                                               tau_sampling_scale = "none",
                                               tau_adaptation_block = "main",
@@ -819,7 +867,12 @@ MVP_model <- R6Class("MVP_model",
                                                             tau_weight_by_p_jump = tau_weight_by_p_jump,
                                                             tau_ramp = tau_ramp,
                                                             eps_reinit_at_ChEES_handover = eps_reinit_at_ChEES_handover,
+                                                            eps_acceptance_mean = eps_acceptance_mean,
                                                             eps_reinit_after_pre_burnin = eps_reinit_after_pre_burnin,
+                                                            tau_shrink_on_divergence = tau_shrink_on_divergence,
+                                                            tau_shrink_factor = tau_shrink_factor,
+                                                            tau_shrink_min_divergent_chains = tau_shrink_min_divergent_chains,
+                                                            time_criterion_settings = time_criterion_settings,
                                                             theta_hat_us_rule = theta_hat_us_rule,
                                                             theta_hat_us_freeze_iter = theta_hat_us_freeze_iter,
                                                             burnin_schedule = burnin_schedule,
@@ -870,6 +923,8 @@ MVP_model <- R6Class("MVP_model",
                                                             interval_width_nuisance = interval_width_nuisance,
                                                             ##
                                                             metric_estimator = metric_estimator,
+                                                            metric_pooled_window_resets = metric_pooled_window_resets,
+                                                            metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
                                                             ##
                                                             M_decay_type = M_decay_type,
                                                             M_decay_power = M_decay_power,
