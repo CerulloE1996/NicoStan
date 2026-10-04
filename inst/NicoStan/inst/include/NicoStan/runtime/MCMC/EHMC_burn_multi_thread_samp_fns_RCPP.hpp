@@ -342,8 +342,11 @@ public:
                for (std::size_t i = begin; i < end; ++i) {
 
                             const int chain_id_int = static_cast<int>(i);
-                            const int seed_main_int_i =     global_seed_main_int +     n_iter*(1 + chain_id_int);
-                            const int seed_nuisance_int_i = global_seed_nuisance_int + n_iter*(1 + chain_id_int);
+                            // const int seed_main_int_i =     global_seed_main_int +     n_iter*(1 + chain_id_int);
+                            // const int seed_nuisance_int_i = global_seed_nuisance_int + n_iter*(1 + chain_id_int);
+                            // One hashed seed per (run seed, chain, block): the formula above gave chains of different runs the same seed.
+                            const int seed_main_int_i =     fn_chain_seed_int(static_cast<std::uint64_t>(global_seed), chain_id_int, 0);
+                            const int seed_nuisance_int_i = fn_chain_seed_int(static_cast<std::uint64_t>(global_seed), chain_id_int, 1);
 
                              #if RNG_TYPE_dqrng_xoshiro256plusplus == 1
                                          dqrng::xoshiro256plus rng_main_i; // (global_rng_main);      // make thread local copy of rng
@@ -906,7 +909,11 @@ public:
         //// All chains then take the same number of leapfrog steps, so an iteration no longer waits for whichever
         //// chain drew the longest trajectory (E[max of k draws of U(0, 2 tau)] = 2 tau k / (k + 1) grows with k).
         EHMC_args_copies[i].use_given_tau_main_ii = false;
-        if (EHMC_args_copies[i].randomize_tau && EHMC_args_copies[i].share_tau_ii_across_chains) {
+        if (EHMC_args_copies[i].randomize_tau && fn_burnin_tau_jitter_override().active) {
+              EHMC_args_copies[i].tau_main_ii = fn_burnin_tau_jitter_override().tau_main_ii;
+              EHMC_args_copies[i].tau_us_ii = fn_burnin_tau_jitter_override().tau_us_ii;
+              EHMC_args_copies[i].use_given_tau_main_ii = true;
+        } else if (EHMC_args_copies[i].randomize_tau && EHMC_args_copies[i].share_tau_ii_across_chains) {
               #if RNG_TYPE_dqrng_xoshiro256plusplus == 1
                   dqrng::xoshiro256plus rng_shared_tau_ii;
               #elif RNG_TYPE_CPP_STD == 1
@@ -978,6 +985,9 @@ public:
                                                          &lp_grad_cache[i].valid);
           
         }
+        if (fn_burnin_tau_jitter_override().active && !partitioned_HMC) {
+              EHMC_args_copies[i].tau_us_ii = EHMC_args_copies[i].tau_main_ii;
+        }
     
   }
   
@@ -1001,14 +1011,27 @@ public:
       const int current_iter;
       std::vector<BurninChainProfile> *chain_profiles;
       std::chrono::steady_clock::time_point parallel_start;
+      const std::vector<double> *tau_main_ii_overrides;
+      const std::vector<double> *tau_us_ii_overrides;
       
       BurninIterWorker(PersistentBurninState* st_, const int seed_, const int current_iter_,
                        std::vector<BurninChainProfile> *chain_profiles_ = nullptr,
                        std::chrono::steady_clock::time_point parallel_start_ = std::chrono::steady_clock::time_point())
-        : st(st_), seed(seed_), current_iter(current_iter_), chain_profiles(chain_profiles_), parallel_start(parallel_start_) {}
+        : BurninIterWorker(st_, seed_, current_iter_, chain_profiles_, parallel_start_, nullptr, nullptr) {}
+
+      BurninIterWorker(PersistentBurninState* st_, const int seed_, const int current_iter_,
+                       std::vector<BurninChainProfile> *chain_profiles_,
+                       std::chrono::steady_clock::time_point parallel_start_,
+                       const std::vector<double> *tau_main_ii_overrides_,
+                       const std::vector<double> *tau_us_ii_overrides_)
+        : st(st_), seed(seed_), current_iter(current_iter_), chain_profiles(chain_profiles_), parallel_start(parallel_start_),
+          tau_main_ii_overrides(tau_main_ii_overrides_), tau_us_ii_overrides(tau_us_ii_overrides_) {}
       
       void operator()(std::size_t begin, std::size_t end) {
         for (std::size_t i = begin; i < end; ++i) {
+          BurninTauJitterScope tau_jitter_scope(tau_main_ii_overrides != nullptr,
+                                                tau_main_ii_overrides == nullptr ? 0.0 : (*tau_main_ii_overrides)[i],
+                                                tau_us_ii_overrides == nullptr ? 0.0 : (*tau_us_ii_overrides)[i]);
           if (chain_profiles == nullptr) {
             st->run_chain(static_cast<int>(i), seed, current_iter);
           } else {

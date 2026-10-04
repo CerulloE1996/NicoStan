@@ -76,6 +76,9 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                                                                                     bool *persistent_lp_grad_valid = nullptr
 )  {
   
+         //// Burn-in tau overrides are never carried into production sampling.
+         if (!burnin_indicator) fn_clear_burnin_tau_jitter_override();
+
          const int N =  Model_args_as_cpp_struct.N;
          const int n_nuisance =  Model_args_as_cpp_struct.n_nuisance;
          const int n_params_main = Model_args_as_cpp_struct.n_params_main;
@@ -102,13 +105,16 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                          fn_seed_burnin_rng(rng_nuisance_i, seed_nuisance_chain_i, chain_id, current_iter + ii, 1);
                      } else {
                      // Preserve the existing post-burn-in streams; only the overlapping burn-in seeds change.
-                     #if RNG_TYPE_CPP_STD == 1
-                         rng_main_i.seed(seed_main_chain_i + (ii + 1));
-                         rng_nuisance_i.seed(1e6 + seed_nuisance_chain_i + (ii + 1));
-                     #elif RNG_TYPE_dqrng_xoshiro256plusplus == 1
-                         rng_main_i.seed(seed_main_chain_i + (ii + 1));
-                         rng_nuisance_i.seed(1e6 + seed_nuisance_chain_i + (ii + 1));
-                     #endif 
+                     // #if RNG_TYPE_CPP_STD == 1
+                     //     rng_main_i.seed(seed_main_chain_i + (ii + 1));
+                     //     rng_nuisance_i.seed(1e6 + seed_nuisance_chain_i + (ii + 1));
+                     // #elif RNG_TYPE_dqrng_xoshiro256plusplus == 1
+                     //     rng_main_i.seed(seed_main_chain_i + (ii + 1));
+                     //     rng_nuisance_i.seed(1e6 + seed_nuisance_chain_i + (ii + 1));
+                     // #endif 
+                     // Sampling streams from separate tuple fields (seed + iteration collided across chains and runs):
+                         fn_seed_sampling_rng(rng_main_i, seed_main_chain_i, chain_id, current_iter + ii, 0);
+                         fn_seed_sampling_rng(rng_nuisance_i, seed_nuisance_chain_i, chain_id, current_iter + ii, 1);
                      }
                      
                      if (partitioned_HMC == true) {

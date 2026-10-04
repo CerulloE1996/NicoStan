@@ -39,6 +39,9 @@ generate_summary_tibble <- function(n_threads = NULL,
                                             n_eff = NA,
                                             Rhat = NA,
                                             n_Rhat = NA,
+                                            n_eff_tail = NA,   ## tail ESS (Vehtari et al. 2021): the smaller of the 5% and 95% quantile ESS
+                                            n_eff_sd = NA,     ## ESS of the centred squared draws, (x - mean)^2: the ESS for estimating the posterior SD
+                                                               ## ("ESS(theta^2)"; the definition behind posterior::ess_sd; Enzo, 4 Oct 2026)
                                             check.names = FALSE)
               
               # # Effective Sample Size (ESS) and Rhat - using the fast custom RcppParallel fn "NicoStan::Rcpp_compute_MCMC_diagnostics()"
@@ -87,6 +90,19 @@ generate_summary_tibble <- function(n_threads = NULL,
                                                         n_threads = n_threads))
               ess_vec <- outs$diagnostics[, 1]
               # ess_tail_vec <- outs$diagnostics[, 2]
+              ess_tail_vec <- outs$diagnostics[, 2]   ## the tail ESS "split_ESS_rank" already returns (column 2), now kept
+              ##
+              ## ESS of the centred squared draws, (x - mean(x))^2 with ONE pooled mean over all chains and iterations: the ESS
+              ## for estimating the posterior SD (the definition of posterior::ess_sd), computed with the plain split-chain ESS
+              ## "split_ESS" of the same C++ routine. Anticorrelated draws inflate the bulk (and, less, the tail) ESS of x while
+              ## this one falls, so it is reported for every parameter alongside them (Enzo, 4 Oct 2026).
+              posterior_draws_centred_squared <- lapply(X = posterior_draws_as_std_vec_of_mats, FUN = function(draws_matrix) {
+                    (draws_matrix - mean(draws_matrix))^2
+              })
+              outs <-  (Rcpp_compute_MCMC_diagnostics(  posterior_draws_centred_squared,
+                                                        diagnostic = "split_ESS",
+                                                        n_threads = n_threads))
+              ess_sd_vec <- outs$diagnostics[, 1]
               ##
               outs <-  (Rcpp_compute_MCMC_diagnostics(  posterior_draws_as_std_vec_of_mats,
                                                         diagnostic = "split_rhat_rank",
@@ -109,6 +125,8 @@ generate_summary_tibble <- function(n_threads = NULL,
                             #### summary_df[i, c("2.5%", "50%", "97.5%")] <- quantiles_between_chains[, i]
                         })
                         summary_df$n_eff[i] <- round(ess_vec[i])
+                        summary_df$n_eff_tail[i] <- round(ess_tail_vec[i])
+                        summary_df$n_eff_sd[i] <- round(ess_sd_vec[i])
                         summary_df$Rhat[i] <- rhat_vec[i]
                 
               }

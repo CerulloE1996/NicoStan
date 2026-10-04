@@ -154,4 +154,11 @@ is frozen for the fit and returned as autodiff_fallback. For separate R worker
 processes, set the option in the process which calls this function.
 }
 
-\details{The development interface uses \code{burnin_algorithm} as its sole algorithm selector: \code{KE}, \code{ChEES}, \code{CHESSR}, \code{CHESSR_log}, or \code{SNAPER}. Historical \code{ChEESR}/\code{ChESSR} spellings select \code{CHESSR}. Both rate variants score the main parameters in mandatory mass-matrix coordinates. \code{CHESSR} uses the direct per-trajectory rate gradient; \code{CHESSR_log} uses the established smoothed log ratio of the expected numerator to mean trajectory length. These jitter-averaging conventions differ. \code{SNAPER} learns its direction in the same metric coordinates. Joint nuisance diffusion is supported. The existing warm-up schedule is retained; this is not a reproduction of every SGA-HMC adaptation rule in the 2022 paper. The frozen BayesMVPlegacy package retains the previous API and defaults.}
+\details{The development interface uses \code{burnin_algorithm} as its sole algorithm selector: \code{ChEES},
+\code{CHESSR}, \code{CHESSR_log}, or \code{SNAPER}. Historical \code{ChEESR}/\code{ChESSR} spellings select
+\code{CHESSR}. Both rate variants score the main parameters in mandatory mass-matrix coordinates.
+\code{CHESSR} uses the direct per-trajectory rate gradient; \code{CHESSR_log} uses the established smoothed
+log ratio of the expected numerator to mean trajectory length. These jitter-averaging conventions differ.
+\code{SNAPER} learns its direction in the same metric coordinates. Joint nuisance diffusion is supported. The
+existing warm-up schedule is retained; this is not a reproduction of every SGA-HMC adaptation rule in the 2022
+paper. The frozen BayesMVPlegacy package retains the previous API and defaults.}

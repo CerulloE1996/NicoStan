@@ -244,91 +244,18 @@ R_fn_compute_gradients_for_tau_using_ChEES_combined <- function( debug = FALSE,
 ## As with ChEES, this is an endpoint/pathwise surrogate at finite epsilon: rounding L and differentiating
 ## acceptance are not included. It is an energy-decorrelation criterion, not a direct ESS/sec objective.
 ##
-R_fn_compute_gradients_for_tau_using_KE <- function( velocity_initial,
-                                                     velocity_proposed,
-                                                     metric_shape,
-                                                     mass_matrix,
-                                                     kinetic_energy_rate_proposed,
-                                                     tau_ii,
-                                                     return_criterion = FALSE
-) {
-
-        if (length(velocity_initial) != length(velocity_proposed)) stop("KE velocities must have the same dimension.")
-        if (identical(metric_shape, "diag")) {
-            if (length(mass_matrix) != length(velocity_initial)) stop("KE diagonal mass must match the velocity dimension.")
-            kinetic_energy_initial <- 0.5 * sum(velocity_initial^2 * c(mass_matrix))
-            kinetic_energy_proposed <- 0.5 * sum(velocity_proposed^2 * c(mass_matrix))
-        } else {
-            kinetic_energy_initial <- 0.5 * sum(velocity_initial * c(mass_matrix %*% velocity_initial))
-            kinetic_energy_proposed <- 0.5 * sum(velocity_proposed * c(mass_matrix %*% velocity_proposed))
-        }
         ##
-        kinetic_energy_change <- kinetic_energy_proposed - kinetic_energy_initial
-        gradient <- tau_ii * kinetic_energy_change * kinetic_energy_rate_proposed
-        criterion <- 0.5 * kinetic_energy_change^2
-        if (length(gradient) != 1 || !is.finite(gradient) || !is.finite(criterion)) gradient <- NA_real_
-        if (isTRUE(return_criterion)) return(list(gradient = gradient, criterion = criterion))
-        return(gradient)
-
-}
-
 ## ---- KE criterion on the JOINT (main + nuisance) block: the kinetic energies and their rates add over the two blocks, the
 ##      gradient is tau * (dK_main + dK_us) * (rate_main + rate_us). EXPERIMENTAL (to test
 ##      tau_adaptation_block = "joint"); tau_adaptation_block = "main" never calls this.
 ##
-R_fn_kinetic_energy_change <- function( velocity_initial,
-                                        velocity_proposed,
-                                        metric_shape,
-                                        mass_matrix) {
-
-        if (length(velocity_initial) != length(velocity_proposed)) stop("KE velocities must have the same dimension.")
-        if (identical(metric_shape, "diag")) {
-            if (length(mass_matrix) != length(velocity_initial)) stop("KE diagonal mass must match the velocity dimension.")
-            return(0.5 * sum(velocity_proposed^2 * c(mass_matrix)) - 0.5 * sum(velocity_initial^2 * c(mass_matrix)))
-        }
-        return(0.5 * sum(velocity_proposed * c(mass_matrix %*% velocity_proposed)) -
-               0.5 * sum(velocity_initial * c(mass_matrix %*% velocity_initial)))
-
-}
-
-R_fn_compute_gradients_for_tau_using_KE_joint <- function( velocity_initial_main,
-                                                           velocity_proposed_main,
-                                                           metric_shape_main,
-                                                           mass_main,
-                                                           velocity_initial_us,
-                                                           velocity_proposed_us,
-                                                           mass_us_vec,
-                                                           kinetic_energy_rate_proposed_joint,
-                                                           tau_ii,
                                                            ##
                                                            ## ---- the nuisance kinetic-energy change, 0.5 * sum(velocity_proposed_us^2 * mass_us_vec) -
                                                            ##      0.5 * sum(velocity_initial_us^2 * mass_us_vec), when it is computed elsewhere (the resident burn-in
                                                            ##      interface computes it from the velocities inside the worker); NULL = computed here from
                                                            ##      velocity_initial_us, velocity_proposed_us and mass_us_vec.
                                                            ##
-                                                           kinetic_energy_change_us = NULL) {
-
-        if (!is.null(kinetic_energy_change_us)) {
-        kinetic_energy_change_joint <- R_fn_kinetic_energy_change(velocity_initial = velocity_initial_main,
-                                                                  velocity_proposed = velocity_proposed_main,
-                                                                  metric_shape = metric_shape_main,
-                                                                  mass_matrix = mass_main) +
-                                       kinetic_energy_change_us
-        } else {
-        kinetic_energy_change_joint <- R_fn_kinetic_energy_change(velocity_initial = velocity_initial_main,
-                                                                  velocity_proposed = velocity_proposed_main,
-                                                                  metric_shape = metric_shape_main,
-                                                                  mass_matrix = mass_main) +
-                                       R_fn_kinetic_energy_change(velocity_initial = velocity_initial_us,
-                                                                  velocity_proposed = velocity_proposed_us,
-                                                                  metric_shape = "diag",
-                                                                  mass_matrix = mass_us_vec)
-        }  ## end of: if (!is.null(kinetic_energy_change_us))
-        gradient <- tau_ii * kinetic_energy_change_joint * kinetic_energy_rate_proposed_joint
-        if (length(gradient) != 1 || !is.finite(gradient)) gradient <- NA_real_
-        return(gradient)
-
-}
+           ## end of: if (!is.null(kinetic_energy_change_us))
 
 #' R_fn_compute_gradients_for_tau_using_ChEES_position
 #'
@@ -527,6 +454,7 @@ fn_normalise_ChEES_per_tau <- function( gradients,
                   informative = TRUE))
     
 }
+
 
 
 

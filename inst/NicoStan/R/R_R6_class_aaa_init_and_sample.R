@@ -53,7 +53,7 @@ require(R6)
 #'                    n_chains_burnin = 8,
 #'                    n_chains_sampling = 16,
 #'                    model_args_list = model_args_list,
-#'                    adapt_delta = 0.80,
+#'                    adapt_delta = 0.70,
 #'                    learning_rate = 0.05)
 #'    
 #'    #### --- EXTRACT MODEL RESULTS SUMMARY + DIAGNOSTICS ---------------------------------------           
@@ -404,6 +404,10 @@ MVP_model <- R6Class("MVP_model",
                           #'@param N The sample size. See class documentation for details.
                           #'@param randomize_tau_burnin Randomise trajectory length during burn-in. Default FALSE; length can still adapt between iterations.
                           #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from zero to twice the adapted scale (at least one integration step). Default TRUE.
+                          #'@param tau_gradient_estimator Use the forward endpoint gradient (the default) or the two-ended time-reversal-averaged gradient for the trajectory-length criterion.
+                          #'@param tau_cost_exponent Exponent in [0, 1.5] applied to the trajectory-length cost in the trajectory criterion. Default 1.
+                          #'@param esjd_jump_power Power in {2, 3, 4} of the metric jump used by the ESJD criterion. Default 2.
+                          #'@param tau_jitter_burnin Burn-in trajectory-length jitter: "uniform" (default) or "halton".
                           #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an experimental unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
                           #'@param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in. FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in and skips that search; no effect when no pre-burnin runs.
                           #'@param eps_acceptance_mean NULL/"harmonic" (default) adapts the burn-in step size so that the harmonic mean over the burn-in chains of the per-chain acceptance probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC (Hoffman, Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero acceptance (a divergent proposal, which includes |log ratio| > 1000 in either direction, or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic" uses the arithmetic mean, the rule used before this option existed. "geometric" uses exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between the harmonic and the arithmetic mean.
@@ -513,6 +517,12 @@ MVP_model <- R6Class("MVP_model",
                           #'@param burnin_algorithm Trajectory-length adaptation: KE, ChEES, CHESSR, CHESSR_log or SNAPER.
                           #'"CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion; CHESSR_log selects the smoothed log-rate variant.
                           #'"CHESSR_time" / "SNAPER_time" select the time-to-target-ESS variants of CHESSR / SNAPER (joint sampler only).
+                          #'"ESJD" selects the expected squared jumped distance per unit trajectory length (Pasarica and Gelman, 2010), with the CHESSR
+                          #'estimator; "ESJD_CHESSR" selects the geometric mean of the ESJD and CHESSR criteria (equal weights).
+                          #'"ESJD_SNAPER" selects the experimental equal-weight geometric mean of the ESJD and SNAPER per-trajectory rates.
+                          #'"LQ_ESSR" selects the experimental soft minimum, over the monitored coordinates, of the lag-one ESS
+                          #'bounds of the linear and the centred squared statistics, per unit trajectory length (exact for Gaussian
+                          #'normal modes).
                           #'@param time_criterion_settings For burnin_algorithm = "CHESSR_time" / "SNAPER_time": NULL (default) or a named list of the
                           #'time-to-target-ESS criterion settings (sampling timing probe, previous saved run(s), user-supplied times, ESS target);
                           #'see fn_default_time_criterion_settings(). Ignored by the other criteria.
@@ -626,7 +636,7 @@ MVP_model <- R6Class("MVP_model",
                                               ##
                                               metric_estimator = "pooled",
                                               metric_pooled_window_resets = NULL,
-                                              metric_pooled_offdiagonal_shrinkage = NULL,
+                                              metric_pooled_offdiagonal_shrinkage = 0,
                                               ##
                                               M_decay_type = NULL,
                                               M_decay_power = NULL,
@@ -683,7 +693,15 @@ MVP_model <- R6Class("MVP_model",
                                               # randomize_tau_burnin = FALSE,
                                               randomize_tau_burnin = TRUE,           ## tau adapted under the sampling jitter U(0, 2 tau), as in ChEES and SNAPER
                                               randomize_tau_sampling = TRUE,
+                                              tau_gradient_estimator = "forward",
+                                              tau_cost_exponent = 1,
+                                              esjd_jump_power = 2,
+                                              ## burnin_algorithm = "LQ_ESSR" only: the parameter families (names before "[") whose ESS
+                                              ## the criterion targets, e.g. c("beta", "p_raw"); NULL = every row of the adapted block:
+                                              interest_only = NULL,
+                                              tau_jitter_burnin = "uniform",
                                               tau_sampling_scale = "none",
+                                              bulk_local_tuner = NULL,
                                               tau_adaptation_block = "main",
                                               burnin_TBB_pool_equals_n_chains = NULL,
                                               store_log_lik_trace = NULL,
@@ -692,6 +710,8 @@ MVP_model <- R6Class("MVP_model",
                                               run_in_fresh_R_process = TRUE
                                               ##
                                              ) {
+                            metric_pooled_offdiagonal_shrinkage <- if (is.null(metric_pooled_offdiagonal_shrinkage)) 0 else
+                                                                  metric_pooled_offdiagonal_shrinkage
                             ##
                             ## ---- vect_type / Phi_type / inv_Phi_type are not used for Stan models: stop BEFORE any (deferred)
                             ##      compilation if one was supplied (R_fn_sample_model repeats this for direct callers, and checks
@@ -882,7 +902,13 @@ MVP_model <- R6Class("MVP_model",
                                                             share_tau_ii_across_chains_in_burnin = share_tau_ii_across_chains_in_burnin,
                                                             randomize_tau_burnin = randomize_tau_burnin,
                                                             randomize_tau_sampling = randomize_tau_sampling,
+                                                            tau_gradient_estimator = tau_gradient_estimator,
+                                                            tau_cost_exponent = tau_cost_exponent,
+                                                            esjd_jump_power = esjd_jump_power,
+                                                            interest_only = interest_only,
+                                                            tau_jitter_burnin = tau_jitter_burnin,
                                                             tau_sampling_scale = tau_sampling_scale,
+                                                            bulk_local_tuner = bulk_local_tuner,
                                                             tau_adaptation_block = tau_adaptation_block,
                                                             burnin_TBB_pool_equals_n_chains = burnin_TBB_pool_equals_n_chains,
                                                             store_log_lik_trace = store_log_lik_trace,
@@ -1070,6 +1096,12 @@ MVP_model <- R6Class("MVP_model",
                           
             )
 )
+
+
+
+
+
+
 
 
 

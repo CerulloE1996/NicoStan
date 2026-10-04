@@ -132,6 +132,9 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                     #'   \item Min_ESS_per_sec_total: The minimum ESS per second for the total model run time, including any time spent computing
                                     #'   summaries and diagnostics. 
                                     #'   \item Min_ESS_per_grad_sampling:  The minimum ESS per gradient evaluation for the sampling phase. 
+                                    #'   \item Min_ESS_sd_main: The minimum, over the main model parameters, of the ESS of the centred squared draws
+                                    #'   (the ESS for estimating the posterior SD).
+                                    #'   \item Min_ESS_sd_per_grad_sampling: Min_ESS_sd_main per gradient evaluation for the sampling phase.
                                     #'   \item grad_evals_per_sec: The number of gradient evaluations performed per second. 
                                     #'   \item est_time_to_100_ESS_sampling: The estimated sampling time to reach a minimum ESS of 100.
                                     #'   \item est_time_to_1000_ESS_sampling: The estimated sampling time to reach a minimum ESS of 1000.
@@ -164,6 +167,8 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                         Min_ESS_per_sec_sampling = self$summary_object$summaries$efficiency_info$ESS_per_sec_samp,
                                         Min_ESS_per_sec_total = self$summary_object$summaries$efficiency_info$ESS_per_sec_total,
                                         Min_ESS_per_grad_sampling = self$summary_object$summaries$efficiency_info$Min_ess_per_grad_samp_weighted,
+                                        Min_ESS_sd_main = self$summary_object$summaries$efficiency_info$Min_ESS_sd_main,
+                                        Min_ESS_sd_per_grad_sampling = self$summary_object$summaries$efficiency_info$Min_ess_sd_per_grad_main_samp,
                                         grad_evals_per_sec = self$summary_object$summaries$efficiency_info$grad_evals_per_sec,
                                         ## extract the "time to X ESS" (for sampling time)
                                         est_time_to_100_ESS_sampling = self$summary_object$summaries$efficiency_info$sampling_time_to_100_ESS,

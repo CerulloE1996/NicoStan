@@ -1062,6 +1062,7 @@ create_summary_and_traces <- function(    model_results,
             # tictoc::tic("Timer 8")
             
             Min_ESS_main <- NULL
+            Min_ESS_sd_main <- NULL
             summary_tibble_main_params <- NULL
             names_main <- pars_names[index_params_main]
             
@@ -1088,6 +1089,10 @@ create_summary_and_traces <- function(    model_results,
                   main_rhat_values <- summary_tibble_main_params$Rhat[seq_len(length.out = n_params_main_constrained)]
                   Min_ESS_main <- if (length(x = main_ess_values) > 0 && all(is.finite(x = main_ess_values)))
                       min(main_ess_values) else NA_real_
+                  ## the same minimum for the ESS of the centred squared draws (n_eff_sd, the posterior SD's ESS; Enzo, 4 Oct 2026):
+                  main_ess_sd_values <- summary_tibble_main_params$n_eff_sd[seq_len(length.out = n_params_main_constrained)]
+                  Min_ESS_sd_main <- if (length(x = main_ess_sd_values) > 0 && all(is.finite(x = main_ess_sd_values)))
+                      min(main_ess_sd_values) else NA_real_
                   Max_rhat_main <- if (length(x = main_rhat_values) > 0 && !anyNA(x = main_rhat_values))
                       max(main_rhat_values) else NA_real_
                   Max_nested_rhat_main <- NULL
@@ -1252,6 +1257,9 @@ create_summary_and_traces <- function(    model_results,
       
          ESS_per_sec_samp <- Min_ESS_main / time_sampling
          ESS_per_sec_total <- Min_ESS_main / time_total
+         ESS_sd_per_sec_samp <- if (is.null(Min_ESS_sd_main)) NA_real_ else Min_ESS_sd_main / time_sampling
+         ESS_sd_per_sec_total <- if (is.null(Min_ESS_sd_main)) NA_real_ else Min_ESS_sd_main / time_total
+         Min_ess_sd_per_grad_main_samp <- NA_real_
         
          try({
             message(((paste("Max R-hat (parameters block, main only) = ", round(Max_rhat_main, 4)))))
@@ -1264,6 +1272,10 @@ create_summary_and_traces <- function(    model_results,
             ##
             message(((paste("Min ESS / sec [samp.] (parameters block, main only) = ", signif(ESS_per_sec_samp, 3)))))
             message(((paste("Min ESS / sec [overall] (parameters block, main only) = ", signif(ESS_per_sec_total, 3)))))
+         }, silent = TRUE)
+         try({
+            message(((paste("Min ESS(theta^2) [posterior SD's ESS] (parameters block, main only) = ", round(Min_ESS_sd_main, 0)))))
+            message(((paste("Min ESS(theta^2) / sec [samp.] (parameters block, main only) = ", signif(ESS_sd_per_sec_samp, 3)))))
          }, silent = TRUE)
          try({ 
             L_main_during_sampling <- (EHMC_args_as_Rcpp_List$tau_main / EHMC_args_as_Rcpp_List$eps_main)
@@ -1307,6 +1319,7 @@ create_summary_and_traces <- function(    model_results,
                                                                                    randomize_tau_sampling = randomize_tau_sampling_used)
             n_grad_evals_sampling_main <- ((L_main_expected_steps_sampling + endpoint_evaluations_per_iteration) * n_iter + start_of_call_evaluations_per_chain) * n_chains_sampling
             Min_ess_per_grad_main_samp <-  Min_ESS_main / n_grad_evals_sampling_main
+            Min_ess_sd_per_grad_main_samp <-  Min_ESS_sd_main / n_grad_evals_sampling_main
          }, silent = TRUE)
          try({
             L_us_during_sampling <- (EHMC_args_as_Rcpp_List$tau_us / EHMC_args_as_Rcpp_List$eps_us)
@@ -1337,6 +1350,9 @@ create_summary_and_traces <- function(    model_results,
                 }
                 
             message(((paste("Min ESS / grad [samp., weighted] (parameters block, main only) = ", signif(1000 *  Min_ess_per_grad_samp_weighted, 3)))))
+         }, silent = TRUE)
+         try({
+            message(((paste("Min ESS(theta^2) / grad [samp.] (parameters block, main only) = ", signif(1000 *  Min_ess_sd_per_grad_main_samp, 3)))))
          }, silent = TRUE)
          try({ 
             grad_evals_per_sec <- ESS_per_sec_samp / Min_ess_per_grad_samp_weighted
@@ -1437,6 +1453,9 @@ create_summary_and_traces <- function(    model_results,
           ## list to store efficiency information
           ##
           efficiency_info <- list(              n_iter = n_iter,
+                                                bulk_local_tuner = model_results$bulk_local_tuner,
+                                                bulk_local_tuner_metadata =
+                                                      model_results$bulk_local_tuner_metadata,
                                                 ##
                                                 Max_rhat_main = Max_rhat_main,
                                                 Max_nested_rhat_main = Max_nested_rhat_main,
@@ -1444,6 +1463,11 @@ create_summary_and_traces <- function(    model_results,
                                                 Min_ESS_main = Min_ESS_main, 
                                                 ESS_per_sec_samp = ESS_per_sec_samp, 
                                                 ESS_per_sec_total = ESS_per_sec_total,
+                                                ## the posterior SD's ESS (n_eff_sd) and its rates, alongside the bulk ones above (Enzo, 4 Oct 2026):
+                                                Min_ESS_sd_main = Min_ESS_sd_main,
+                                                ESS_sd_per_sec_samp = ESS_sd_per_sec_samp,
+                                                ESS_sd_per_sec_total = ESS_sd_per_sec_total,
+                                                Min_ess_sd_per_grad_main_samp = Min_ess_sd_per_grad_main_samp,
                                                 ##
                                                 time_burnin = time_burnin, 
                                                 time_sampling = time_sampling, 
@@ -1522,7 +1546,8 @@ create_summary_and_traces <- function(    model_results,
                                 adaptation = model_results[c("burnin_algorithm", "trajectory_adaptation_version",
                                                              "trajectory_criterion", "trajectory_coordinates",
                                                              "trajectory_parameter_block", "tau_adaptation_enabled",
-                                                             "randomize_tau_burnin", "randomize_tau_sampling")],
+                                                             "randomize_tau_burnin", "randomize_tau_sampling",
+                                                             "bulk_local_tuner", "bulk_local_tuner_metadata")],
                                 traces = traces      ### trace arrays + trace tibbles
                                 ## all_param_outs_trace = all_param_outs_trace
           )
@@ -1549,6 +1574,8 @@ create_summary_and_traces <- function(    model_results,
 
 # Call it with the data:
 # summary_table <- create_stan_summary(trace_vector, pars_names_wo_nuisance)
+
+
 
 
 

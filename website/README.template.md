@@ -19,6 +19,30 @@
 [Package citation and development](#package-citation-and-development)
 
 
+
+| φ(x): whose jump is measured | ρ = −1 (no length penalty)¹ | ρ = 0 (÷ √τ) | ρ = 1 (÷ τ)² | ρ adaptive³ |
+| --- | --- | --- | --- | --- |
+| x | ESJD (Pasarica & Gelman, 2010) | Wang, Mohamed & de Freitas (2013) | ESJD rate (NicoStan "ESJD") | - |
+| ‖x − m‖² | ChEES (Hoffman, Radul & Sountsov, 2021) | - | ChEES rate (NicoStan "CHESSR") | - |
+| (wᵀ(x − m))² | - | - | SNAPER (Sountsov & Hoffman, 2021) | Adaptive MALT (Riou-Durand et al., 2023) |
+
+The criterion family is Cρ(τ) = ESJDφ(τ) / τ^((1+ρ)/2) (Riou-Durand et al., 2023). m is the posterior mean and w is the leading principal direction.
+
+¹ Outside the range ρ ∈ [0, 1] that Riou-Durand et al. consider; included here as the criteria with no length penalty.
+² With jittered trajectory lengths, NicoStan divides each trajectory's squared jump by its own length.
+"CHESSR_log" instead divides the average by τ.
+Note that TensorFlow Probability's implementation divides by the length plus one step size,
+i.e., it charges the extra gradient evaluation of each iteration;
+NicoStan offers the same (and the exact expected gradient cost) via the R option `NicoStan_rate_criterion_cost_offset_steps`
+("auto", or the number of extra steps), but divides by the length alone by default,
+which was faster on our latent-class benchmarks
+(see the validation note in [Efficient burnin algorithms](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc)).
+³ ρ set to an estimate of the lag-1 autocorrelation of φ.
+
+NicoStan's "ESJD_CHESSR" and "ESJD_SNAPER" are geometric means of two ρ = 1 criteria with different φ, so they aren't members of this family.
+
+
+
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## What is NicoStan?
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -231,6 +255,13 @@ fit$model_fit_object$summaries$summary_tibbles$summary_tibble_main_params
 ## Other trajectory-length adaptation options:
 ## "CHEESR_log", "SNAPER", "ChEES"
 ```
+
+
+The summary tibbles report, for each parameter, the posterior mean, SD and quantiles,
+the bulk and tail ESS (`n_eff` and `n_eff_tail`; [Vehtari et al., 2021](https://doi.org/10.1214/20-BA1221)),
+the ESS of the centred squared draws (`n_eff_sd`, i.e., the ESS for estimating the posterior SD,
+which is also the quantity the ChEES-HMC and SNAPER-HMC papers use to score samplers),
+and the R-hat and nested R-hat convergence diagnostics (`Rhat` and `n_Rhat`).
 
 
 This example simulates data with 20 groups and 200 observations, with a standard normal latent vector 
@@ -567,8 +598,10 @@ and SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)
 
 More specifically, during burnin, NicoStan adapts:
 
-- The step size, targeting a mean acceptance probability of `adapt_delta` (0.80 by default),
-using an ADAM-type update ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980)).
+- The step size, targeting a mean acceptance probability of `adapt_delta` (0.70 by default),
+using an ADAM-type update ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980));
+the ADAM moments are reset, and the learning-rate schedule restarted, at the final metric update,
+so that the step size settles on the final metric rather than on the acceptance crashes of the earlier metric windows.
 - The mass matrix (i.e., metric) for the main parameters, 
 using either empirical covariance/variance estimates from the burnin chains (`metric_type_main = "Empirical"`)
 or a numerical Hessian (`metric_type_main = "Hessian"`); 
@@ -621,11 +654,28 @@ The position-based criteria use the main parameters in coordinates defined by th
 <!-- and SNAPER-HMC learns its direction in the same coordinates. -->
 
 
+We checked NicoStan's SNAPER and ChEES-R implementations against the authors' own JAX implementation
+(the SNAPER-HMC notebook accompanying [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3))
+on the German Credit logistic regression of the Inference Gym;
+more specifically, we compared the minimum (over parameters) ESS of the centred squared draws per gradient evaluation,
+i.e., the quantity their paper reports.
+NicoStan's SNAPER agrees with their implementation to within 5%,
+and their ChEES-R value is reproduced once two differences are accounted for:
+(i) their implementation divides the ChEES-R and SNAPER criteria by the trajectory length plus one step size
+(i.e., it charges the extra gradient evaluation of each iteration), which NicoStan offers via the R option
+`NicoStan_rate_criterion_cost_offset_steps`; and
+(ii) their sampling phase draws the jittered trajectory lengths from a Halton sequence rather than independently,
+which is worth around 15% ESS per gradient on this model.
+Note that on our latent-class benchmarks the first of these makes the adapted trajectories longer
+and the ESS per gradient lower; hence, NicoStan divides by the trajectory length alone by default.
+
+
 The default trajectory-length settings differ between burnin and sampling:
 
 
-- **Burn-in:** fixed trajectory length (`randomize_tau_burnin = FALSE`)
-for each burnin iteration at the current tuning setting. This saves burnin time compared to using a randomized $\tau$.
+- **Burn-in:** randomised trajectory length by default (`randomize_tau_burnin = TRUE`),
+drawn as in the sampling phase; setting `randomize_tau_burnin = FALSE` instead fixes the trajectory length
+for each burnin iteration at the current tuning setting, which saves burnin time compared to using a randomized $\tau$.
 - **Post-burnin (sampling phase):** randomised trajectory length (`randomize_tau_sampling = TRUE`) -
 drawn uniformly between zero and twice the adapted scale (i.e., $\tau \sim \text{uniform}(0, 2 \bar\tau)$) -
 with at least one integration step ($L \ge 1$).

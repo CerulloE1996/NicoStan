@@ -340,8 +340,11 @@ public:
                            }
                     
                            const int chain_id_int = static_cast<int>(i);
-                           const int seed_main_int_i =     global_seed_main_int +     n_iter*(1 + chain_id_int);
-                           const int seed_nuisance_int_i = global_seed_nuisance_int + n_iter*(1 + chain_id_int);
+                           // const int seed_main_int_i =     global_seed_main_int +     n_iter*(1 + chain_id_int);
+                           // const int seed_nuisance_int_i = global_seed_nuisance_int + n_iter*(1 + chain_id_int);
+                           // One hashed seed per (run seed, chain, block): the formula above gave chains of different runs the same seed.
+                           const int seed_main_int_i =     fn_chain_seed_int(static_cast<std::uint64_t>(global_seed), chain_id_int, 0);
+                           const int seed_nuisance_int_i = fn_chain_seed_int(static_cast<std::uint64_t>(global_seed), chain_id_int, 1);
                            
                            #if RNG_TYPE_dqrng_xoshiro256plusplus == 1
                                  dqrng::xoshiro256plus rng_main_i; //(global_rng_main);      // make thread local copy of rng 
