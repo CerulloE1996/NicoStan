@@ -78,6 +78,8 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
   
          //// Burn-in tau overrides are never carried into production sampling.
          if (!burnin_indicator) fn_clear_burnin_tau_jitter_override();
+         //// the Halton sampling jitter (if set from R) restarts its sequence for every chain's sampling call:
+         if (!burnin_indicator) fn_reset_sampling_tau_jitter_sequence();
 
          const int N =  Model_args_as_cpp_struct.N;
          const int n_nuisance =  Model_args_as_cpp_struct.n_nuisance;

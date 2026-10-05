@@ -25,6 +25,14 @@ Rcpp_fn_check_joint_trajectory <- function(EHMC_args_as_Rcpp_List) {
     .Call(`_NicoStan_Rcpp_fn_check_joint_trajectory`, EHMC_args_as_Rcpp_List)
 }
 
+fn_set_sampling_tau_jitter_halton <- function(halton) {
+    invisible(.Call(`_NicoStan_fn_set_sampling_tau_jitter_halton`, halton))
+}
+
+fn_get_sampling_tau_jitter_halton <- function() {
+    .Call(`_NicoStan_fn_get_sampling_tau_jitter_halton`)
+}
+
 Rcpp_wrapper_EIGEN_double_mat <- function(x, fn, vect_type, skip_checks) {
     .Call(`_NicoStan_Rcpp_wrapper_EIGEN_double_mat`, x, fn, vect_type, skip_checks)
 }

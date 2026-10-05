@@ -80,6 +80,26 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// fn_set_sampling_tau_jitter_halton
+void fn_set_sampling_tau_jitter_halton(bool halton);
+RcppExport SEXP _NicoStan_fn_set_sampling_tau_jitter_halton(SEXP haltonSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< bool >::type halton(haltonSEXP);
+    fn_set_sampling_tau_jitter_halton(halton);
+    return R_NilValue;
+END_RCPP
+}
+// fn_get_sampling_tau_jitter_halton
+bool fn_get_sampling_tau_jitter_halton();
+RcppExport SEXP _NicoStan_fn_get_sampling_tau_jitter_halton() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(fn_get_sampling_tau_jitter_halton());
+    return rcpp_result_gen;
+END_RCPP
+}
 // Rcpp_wrapper_EIGEN_double_mat
 Eigen::Matrix<double, -1, -1> Rcpp_wrapper_EIGEN_double_mat(const Eigen::Matrix<double, -1, -1> x, const std::string fn, const std::string vect_type, const bool skip_checks);
 RcppExport SEXP _NicoStan_Rcpp_wrapper_EIGEN_double_mat(SEXP xSEXP, SEXP fnSEXP, SEXP vect_typeSEXP, SEXP skip_checksSEXP) {
@@ -1110,6 +1130,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_NicoStan_fn_get_stan_load_count", (DL_FUNC) &_NicoStan_fn_get_stan_load_count, 0},
     {"_NicoStan_fn_reset_stan_load_timer", (DL_FUNC) &_NicoStan_fn_reset_stan_load_timer, 0},
     {"_NicoStan_Rcpp_fn_check_joint_trajectory", (DL_FUNC) &_NicoStan_Rcpp_fn_check_joint_trajectory, 1},
+    {"_NicoStan_fn_set_sampling_tau_jitter_halton", (DL_FUNC) &_NicoStan_fn_set_sampling_tau_jitter_halton, 1},
+    {"_NicoStan_fn_get_sampling_tau_jitter_halton", (DL_FUNC) &_NicoStan_fn_get_sampling_tau_jitter_halton, 0},
     {"_NicoStan_Rcpp_wrapper_EIGEN_double_mat", (DL_FUNC) &_NicoStan_Rcpp_wrapper_EIGEN_double_mat, 4},
     {"_NicoStan_Rcpp_wrapper_EIGEN_double_colvec", (DL_FUNC) &_NicoStan_Rcpp_wrapper_EIGEN_double_colvec, 4},
     {"_NicoStan_Rcpp_wrapper_fn_lp_grad", (DL_FUNC) &_NicoStan_Rcpp_wrapper_fn_lp_grad, 9},

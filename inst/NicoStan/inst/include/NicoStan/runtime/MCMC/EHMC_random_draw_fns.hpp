@@ -4,6 +4,7 @@
  
 
 
+#include <atomic>
 #include <random>
 #include <cstdint>
 
@@ -201,10 +202,61 @@ public:
     BurninTauJitterScope &operator=(const BurninTauJitterScope &) = delete;
 };
 
+//// ---- Sampling-phase trajectory-length jitter sequence (5 Oct 2026). With tau_jitter_sampling_type = "halton"
+////      (R), the post-burn-in trajectory lengths of a chain follow the base-2 van der Corput (Halton) sequence,
+////      t_i = 2 tau u_i, u_i = radical_inverse_2(i), i = 1, 2, ..., as in the SNAPER-HMC authors' implementation
+////      (fun_mc), instead of iid U(0, 2 tau): the same marginal distribution of lengths, but spread evenly over
+////      (0, 2 tau) within every short run of iterations (on the German Credit regression their sampler loses
+////      ~15% ESS per gradient when the sequence is replaced by iid draws). The flag is set from R around the
+////      sampling call only, so burn-in draws are unaffected; the per-thread counters restart at the start of
+////      every chain's sampling call (fn_reset_sampling_tau_jitter_sequence), one counter per block (main /
+////      nuisance). The flag is compiled into every package that includes these headers (NicoStan.so and
+////      BayesMVP.so). With GCC the two copies are gnu-unique symbols, which the dynamic linker merges into one
+////      once both are loaded, whilst other compilers keep them apart; hence each package exports its own
+////      fn_set_sampling_tau_jitter_halton() (native_api.cpp.in) and R_fn_sample() calls the one of the package
+////      whose sampling function runs the fit.
+inline std::atomic<bool> &fn_sampling_tau_jitter_halton_flag() {
+    static std::atomic<bool> flag{false};
+    return flag;
+}
+
+struct SamplingTauJitterSequence {
+    unsigned long long index_main = 0;
+    unsigned long long index_us = 0;
+};
+
+inline SamplingTauJitterSequence &fn_sampling_tau_jitter_sequence() {
+    static thread_local SamplingTauJitterSequence state;
+    return state;
+}
+
+inline void fn_reset_sampling_tau_jitter_sequence() {
+    fn_sampling_tau_jitter_sequence() = SamplingTauJitterSequence{};
+}
+
+//// the base-2 radical inverse of n >= 1 (0.5, 0.25, 0.75, 0.125, 0.625, ...): fun_mc's _halton(index) with
+//// n = index + 1
+ALWAYS_INLINE double fn_radical_inverse_base_2(unsigned long long n) {
+    double value = 0.0;
+    double digit_weight = 0.5;
+    while (n > 0ULL) {
+        if (n & 1ULL) value += digit_weight;
+        n >>= 1;
+        digit_weight *= 0.5;
+    }
+    return value;
+}
+
 template<typename T>
 ALWAYS_INLINE double fn_generate_burnin_tau_ii(const double tau, T &rng, const bool main_block) {
     const BurninTauJitterOverride &state = fn_burnin_tau_jitter_override();
     if (state.active) return main_block ? state.tau_main_ii : state.tau_us_ii;
+    if (fn_sampling_tau_jitter_halton_flag().load(std::memory_order_relaxed)) {
+        SamplingTauJitterSequence &sequence = fn_sampling_tau_jitter_sequence();
+        unsigned long long &index = main_block ? sequence.index_main : sequence.index_us;
+        ++index;
+        return 2.0 * tau * fn_radical_inverse_base_2(index);
+    }
     return generate_random_tau_ii(tau, rng);
 }
 

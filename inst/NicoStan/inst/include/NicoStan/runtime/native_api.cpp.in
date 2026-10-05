@@ -626,6 +626,20 @@ EHMC_burnin_struct convert_R_List_EHMC_burnin_struct(Rcpp::List R_List) {
 
 
 
+//// ---- Sampling-phase trajectory-length jitter: "halton" (the base-2 van der Corput sequence of fun_mc /
+////      SNAPER-HMC) or "uniform" (iid U(0, 2 tau)); set by R_fn_sample() around the sampling call only
+////      (EHMC_random_draw_fns.hpp). Every package compiled from this file (NicoStan, and BayesMVP, whose
+////      main.cpp is generated from it) has the flag in its own shared object and exports its own setter /
+////      getter; R_fn_sample() calls the setter of the package whose sampling function runs the fit. Defined
+////      after the MCMC includes above, which declare fn_sampling_tau_jitter_halton_flag().
+// [[Rcpp::export]]
+void fn_set_sampling_tau_jitter_halton(bool halton) { fn_sampling_tau_jitter_halton_flag().store(halton); }
+
+// [[Rcpp::export]]
+bool fn_get_sampling_tau_jitter_halton() { return fn_sampling_tau_jitter_halton_flag().load(); }
+
+
+
 
 
 

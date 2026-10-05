@@ -469,6 +469,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          analysis of Hoffman, Radul and Sountsov (2021) - NOT a published method.
                                         ##                                          See docs/adaptation-notes.md.
                                         tau_sampling_scale = "none",
+                                        ## sampling-phase jitter of the trajectory length: "uniform" (iid U(0, 2 tau)) or "halton" (the base-2
+                                        ## van der Corput sequence of the SNAPER-HMC authors' implementation; EHMC_random_draw_fns.hpp; 5 Oct 2026):
+                                        tau_jitter_sampling_type = "uniform",
                                         bulk_local_tuner = NULL,
                                         ##   tau_adaptation_block                 - "main" (default; the behaviour before this option existed): the
                                         ##                                          trajectory-length criterion uses the main block only. "joint":
@@ -856,17 +859,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 n_iter <- if_null_then_set_to(n_iter, 1000)
                 ##
-                ## adapt_delta default 0.80 -> 0.70 (4 Oct 2026): with the step-size ADAM reset and learning-rate
-                ## restart at the final metric update (R_fn_init_and_run_burnin_CHESS.R), 27 seeds on the LC-MVP
-                ## at
-                ## N = 10,000 gave at b125 time to the target min ESS 0.84 [0.74, 0.95] of the 0.80 default, bulk
-                ## ESS
-                ## per gradient 1.23 [1.06, 1.43] and tail 1.27 [1.07, 1.50]; b250 within-chain ESS per gradient
-                ## 1.11
-                ## [1.04, 1.18]; b500 unchanged. 0.65 (the HMC optimum of Beskos et al.) was no better than 0.70
-                ## at
-                ## 6 seeds; 0.80 is Stan's robustness choice.
-                adapt_delta <- if_null_then_set_to(adapt_delta, 0.70)
+                ## adapt_delta default 0.80 (Stan's robustness choice; the Paper 2 Stan benchmarks ran at 0.80, so the
+                ## package default stays matched to them, 5 Oct 2026). Between 4 and 5 Oct 2026 the default was 0.70:
+                ## with the step-size ADAM reset and learning-rate restart at the final metric update
+                ## (R_fn_init_and_run_burnin_CHESS.R), 27 seeds on the LC-MVP at N = 10,000 gave at b125 time to the
+                ## target min ESS 0.84 [0.74, 0.95] of the 0.80 default, bulk ESS per gradient 1.23 [1.06, 1.43] and
+                ## tail 1.27 [1.07, 1.50]; b250 within-chain ESS per gradient 1.11 [1.04, 1.18]; b500 unchanged. The
+                ## target alone gave time 0.90 [0.80, 1.01] at b125 and nothing significant at b250 / b500; 0.65 (the
+                ## HMC optimum of Beskos et al.) was no better than 0.70 at 6 seeds. 0.70 remains available as an
+                ## argument.
+                adapt_delta <- if_null_then_set_to(adapt_delta, 0.80)
                 ##
                 ## ---- learning_rate default: the pilot study 7 pairing (the same one encoded by
                 ## fn_sampler_settings_APMS_BayesMVP()), INTERPOLATED so that every burnin length
@@ -963,6 +965,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ## ---- tau_sampling_scale: "none", "gaussian_matched" or one positive finite number (see the argument note):
                 ##
                 tau_sampling_scale <- if_null_then_set_to(tau_sampling_scale, "none")
+                tau_jitter_sampling_type <- if_null_then_set_to(tau_jitter_sampling_type, "uniform")
+                if (!is.character(tau_jitter_sampling_type) || length(tau_jitter_sampling_type) != 1 || !tau_jitter_sampling_type %in% c("uniform", "halton")) {
+                      stop("tau_jitter_sampling_type must be \"uniform\" or \"halton\".")
+                }
                 if (!is.null(bulk_local_tuner)) {
                     bulk_local_tuner <-  fn_bulk_local_tuner_settings(bulk_local_tuner)
                     if (!identical(burnin_algorithm, "ESJD") || isTRUE(partitioned_HMC) ||
@@ -2940,6 +2946,33 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           
                            ### Call C++ parallel sampling function
                           print(paste("Start of sampling"))
+                          ## the Halton sampling jitter is switched on in the C++ runtime for this sampling call
+                          ## only (cleared after the call and on exit). The flag is a static of the runtime
+                          ## headers, compiled into each package's own shared object (NicoStan.so; BayesMVP.so,
+                          ## whose main.cpp is generated from the same native_api.cpp.in), so it is set through
+                          ## the setter of the package whose sampling function runs this fit, looked up in that
+                          ## function's namespace (for BayesMVP's backend: BayesMVP's, not NicoStan's); a build
+                          ## without the setter stops here:
+                          fn_set_sampler_halton_flag <-  NULL
+                          if (identical(tau_jitter_sampling_type, "halton")) {
+                                sampling_function_in_use <-  if (parallel_method == "OpenMP") {
+                                                                   Rcpp_fn_OpenMP_EHMC_sampling
+                                                             } else {
+                                                                   Rcpp_fn_RcppParallel_EHMC_sampling
+                                                             }
+                                sampler_package_namespace <-  environment(sampling_function_in_use)
+                                fn_set_sampler_halton_flag <-  get0( x = "fn_set_sampling_tau_jitter_halton",
+                                                                     envir = sampler_package_namespace,
+                                                                     mode = "function",
+                                                                     inherits = FALSE)
+                                if (is.null(fn_set_sampler_halton_flag)) {
+                                      stop(paste0("tau_jitter_sampling_type = \"halton\", but the installed ",
+                                                  environmentName(sampler_package_namespace), " build has no ",
+                                                  "fn_set_sampling_tau_jitter_halton(); rebuild it."))
+                                }
+                                fn_set_sampler_halton_flag(TRUE)
+                                on.exit(fn_set_sampler_halton_flag(FALSE), add = TRUE)
+                          }
                           if (parallel_method == "OpenMP") {
                              sampling_object <- Rcpp_fn_OpenMP_EHMC_sampling( n_threads_R = n_chains_sampling,
                                                                                             sample_nuisance_R = sample_nuisance,
@@ -2986,6 +3019,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                           n_threads_WCP = n_threads_WCP_sampling)
                           }
                           print(paste("End of sampling"))
+                          if (!is.null(fn_set_sampler_halton_flag)) fn_set_sampler_halton_flag(FALSE)
                            
                            # str(sampling_object)
                           
@@ -3059,6 +3093,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    interest_only = interest_only,
                    tau_jitter_burnin = tau_jitter_burnin,
                    tau_jitter_burnin_for_sampling = tau_jitter_burnin_for_sampling,
+                   tau_jitter_sampling_type = tau_jitter_sampling_type,
                    ## tau_sampling_scale: requested value, effective value / factor, and tau either side of the one-off rescaling:
                    tau_sampling_scale = tau_sampling_scale,
                    bulk_local_tuner = bulk_local_tuner,

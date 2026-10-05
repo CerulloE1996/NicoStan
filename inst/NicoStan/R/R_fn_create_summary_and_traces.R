@@ -1413,6 +1413,7 @@ create_summary_and_traces <- function(    model_results,
                                     trace_generated_quantities_tibble = trace_generated_quantities_tibble)
          ##
          HMC_info <- list(  tau_main = EHMC_args_as_Rcpp_List$tau_main,
+                            tau_jitter_sampling_type = if (is.null(model_results$tau_jitter_sampling_type)) "uniform" else model_results$tau_jitter_sampling_type,
                             eps_main = EHMC_args_as_Rcpp_List$eps_main,
                             tau_us = EHMC_args_as_Rcpp_List$tau_us,
                             eps_us = EHMC_args_as_Rcpp_List$eps_us,

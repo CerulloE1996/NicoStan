@@ -598,7 +598,7 @@ and SNAPER-HMC ([Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)
 
 More specifically, during burnin, NicoStan adapts:
 
-- The step size, targeting a mean acceptance probability of `adapt_delta` (0.70 by default),
+- The step size, targeting a mean acceptance probability of `adapt_delta` (0.80 by default),
 using an ADAM-type update ([Kingma and Ba, 2015](https://arxiv.org/abs/1412.6980));
 the ADAM moments are reset, and the learning-rate schedule restarted, at the final metric update,
 so that the step size settles on the final metric rather than on the acceptance crashes of the earlier metric windows.
@@ -607,6 +607,14 @@ using either empirical covariance/variance estimates from the burnin chains (`me
 or a numerical Hessian (`metric_type_main = "Hessian"`); 
 more specifically, the Hessian is computed by finite differences of the main-parameter gradients.
 Both methods support a diagonal or dense Euclidean metric (`metric_shape_main = "diag"` or `"dense"`).
+With the (default) empirical metric pooled across the burnin chains, NicoStan updates the metric
+once a metric window holds 8 draws, and rescales the step size and trajectory length at each metric update
+(i.e., multiplies them by $1/\sqrt{c}$, where $c$ is the geometric mean of the change in the diagonal of the inverse metric);
+more specifically, a few draws are enough to replace an initial (unit) metric which is far off (e.g., for our ordinal LC-MVOP models),
+whilst the rescaling means that these early updates do not disturb models whose initial metric is already close (e.g., our binary LC-MVP models).
+These can be changed via the R options `NicoStan_pooled_metric_warm_up`
+(`"hard"`, a number of draws, `"soft"`, `"first_window"`, `"n_over_n_plus_k"` or `"signal_to_noise"`)
+and `NicoStan_metric_update_rescales_eps_and_tau` (`TRUE` by default).
 The nuisance masses and centre are adapted separately (see [How NicoStan works](#how-nicostan-works)).
 - The trajectory length, using the criterion selected via `burnin_algorithm`
 (see [Trajectory-length adaptation algorithms](#hmc-trajectory-length-tau-adaptation-algorithms) below).
@@ -665,7 +673,7 @@ and their ChEES-R value is reproduced once two differences are accounted for:
 (i.e., it charges the extra gradient evaluation of each iteration), which NicoStan offers via the R option
 `NicoStan_rate_criterion_cost_offset_steps`; and
 (ii) their sampling phase draws the jittered trajectory lengths from a Halton sequence rather than independently,
-which is worth around 15% ESS per gradient on this model.
+which is worth around 15% ESS per gradient on this model (NicoStan offers this via `tau_jitter_sampling_type = "halton"`; see below).
 Note that on our latent-class benchmarks the first of these makes the adapted trajectories longer
 and the ESS per gradient lower; hence, NicoStan divides by the trajectory length alone by default.
 
@@ -679,6 +687,11 @@ for each burnin iteration at the current tuning setting, which saves burnin time
 - **Post-burnin (sampling phase):** randomised trajectory length (`randomize_tau_sampling = TRUE`) -
 drawn uniformly between zero and twice the adapted scale (i.e., $\tau \sim \text{uniform}(0, 2 \bar\tau)$) -
 with at least one integration step ($L \ge 1$).
+By default, these lengths are drawn independently (`tau_jitter_sampling_type = "uniform"`);
+alternatively, `tau_jitter_sampling_type = "halton"` takes them from a Halton (base-2 van der Corput) sequence over the same range,
+as in the SNAPER-HMC authors' implementation.
+In our testing, this gave about 10% more ESS of the posterior SD per gradient on the German Credit regression,
+and no measurable change on our binary LC-MVP models.
 
 
 Note that `manual_tau` separately controls whether the trajectory length is adapted at all -

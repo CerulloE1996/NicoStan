@@ -1986,7 +1986,258 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## unit metric (eps 0.005, 359 leapfrog steps per draw). Enzo, 4 Oct 2026: "this seems like a dumb rule to me.
   ## just delete it". Two draws are all a variance needs (the nuisance pooled estimator already uses 2); the dense
   ## covariance stays usable through the existing ridge (w = n / (n + 5) towards 1e-3 I) and the ratio_M blending.
-  wf_min_draws <- 2
+  ## wf_min_draws <- 2
+  ## 5 Oct 2026: with 2 the first metric of every window comes from 4-8 draws of noise, and on the binary LC-MVP
+  ## (N = 10,000, b125, 27 / 10 seeds) that sent CHESSR / SNAPER to 2-3x longer trajectories with half the tail ESS
+  ## and cost ESJD 15% of its ESS(theta^2) per gradient (criteria_headtohead_b125/analyse_costfix.R, pairing "gate").
+  ## Enzo's first rule (5 Oct, 00:00): wait for n_params_main + 1 draws as before, capped at 50 ("hard" below): the binary
+  ## LC-MVP keeps its minimum of 45 exactly (bit-identical), but the LC-MVOP at N = 1,000 (10 seeds) is then 34% slower
+  ## to the target ESS than with 2 draws (eps 0.069 vs 0.092): the ordinal model wants its metric updated from the
+  ## first draws, the binary wants to wait. Enzo's second rule (the default, "soft"): update from 2 draws, but blend
+  ## the pooled estimate into the metric with ratio_M x min(1, n / min(n_params_main + 1, 50)), so that the first draws
+  ## of a window move the metric a little (about 0.08 at 4 draws) and the full ratio_M applies once the window holds
+  ## n_params_main + 1 (capped at 50) draws. Option NicoStan_pooled_metric_warm_up: "soft" (default), "hard"
+  ## (the capped gate, full weight), or a number (a hard gate at that many draws; 2 = the 4 Oct 18:00-23:00 state).
+  ## "first_window" (5 Oct, 00:15; the soft rule still cost the binary model 15% of its ESS per gradient, because every
+  ## window reset restarted the metric from a few noisy draws): in the FIRST window update from 2 draws, so that the
+  ## initial metric is replaced as soon as any estimate exists (the ordinal model's initial unit metric is off by orders
+  ## of magnitude); after a reset wait for the capped n_params_main + 1 draws, since the metric being refined is already
+  ## adapted and noise then costs more than the delay (the binary model's windows 2 and 3 keep their 45-draw wait).
+  ## DEFAULT "hard" (5 Oct 2026, 00:35, after five rules on both models; criteria_headtohead_b125/analyse_costfix.R and
+  ## criteria_headtohead_LCMVOP_N1000/analyse_gate50.R): the binary LC-MVP (N = 10,000, b125, 27 seeds) is hurt by any early
+  ## update (2 draws: ESS(theta^2) per gradient 0.85, "soft" 0.84, "first_window" 0.78; CHESSR / SNAPER trajectories 2-3x
+  ## longer with half the tail ESS), whilst the LC-MVOP (N = 1,000, b125, 10 seeds) is hurt by any wait (time to target
+  ## ESS vs the 2-draw rule: "hard" 1.34, "soft" 1.10, "first_window" 1.14): its initial unit metric is off by orders of
+  ## magnitude, so even a 4-draw estimate helps, whereas the binary model's is nearly right and the early estimates only
+  ## disturb its step-size adaptation. "hard" keeps every existing LC-MVP result bit for bit and fixes the ordinal case
+  ## where the metric was never updated; set the option to 2 (or "soft") for ordinal-type models with few burn-in chains.
+  ## DEFAULT 8, with the eps and tau rescale at each metric update (option
+  ## NicoStan_metric_update_rescales_eps_and_tau = TRUE, below): "gate8_rescale" (5 Oct 2026, 04:15), from 1,090
+  ## fits of the warm-up rules on both models (metric_warmup_rule_search_b125/ and
+  ## metric_warmup_rule_search_LCMVOP_N1000/). Gradients to the target ESS relative to "hard" (95% seed-clustered
+  ## intervals; ESS per 1,000 gradients alongside):
+  ##   binary LC-MVP, N = 10,000 (27 seeds): b125 1.07 [0.95, 1.21], bulk ESS per gradient 0.91 [0.80, 1.03]; b500
+  ##   0.97 [0.86, 1.10], bulk 0.99; both within noise of "hard";
+  ##   LC-MVOP, N = 1,000 (16 seeds) and N = 5,000 (8 seeds), b125 and b500: 0.72-0.87 of "hard" in every cell
+  ##   ("hard" needs 1.14-1.17x the gradients of the 2-draw gate, and up to 1.9x its burn-in gradients); best or
+  ##   within noise of the best rule in every ordinal cell; burn-in gradients 0.43-0.61x those of the 2-draw gate
+  ##   at b500;
+  ##   both models (geometric mean): 0.90 of "hard" (next: "signal_to_noise" centred 0.94, the 2-draw gate 0.95,
+  ##   the 8-draw gate without the rescale 0.97).
+  ## 8 draws replace the LC-MVOP's initial unit metric (off by orders of magnitude) early in the first window,
+  ## and the rescale keeps the leapfrog steps per trajectory unchanged by the change of scale at each update (see
+  ## the rescale block below). "hard" with the rescale option FALSE keeps every result before 5 Oct bit for bit.
+  ## pooled_metric_warm_up <-  getOption("NicoStan_pooled_metric_warm_up", default = "hard")
+  pooled_metric_warm_up <-  getOption("NicoStan_pooled_metric_warm_up", default = 8)
+  pooled_metric_full_weight_draws <-  min(n_params_main + 1, 50)
+  ## if (identical(pooled_metric_warm_up, "soft") || identical(pooled_metric_warm_up, "first_window")) {
+  if (identical(pooled_metric_warm_up, "soft") || identical(pooled_metric_warm_up, "first_window") ||
+      identical(pooled_metric_warm_up, "n_over_n_plus_k") ||
+      identical(pooled_metric_warm_up, "signal_to_noise")) {
+        wf_min_draws <- 2
+  } else if (identical(pooled_metric_warm_up, "hard")) {
+        wf_min_draws <- pooled_metric_full_weight_draws
+  } else if (is.numeric(pooled_metric_warm_up) && length(pooled_metric_warm_up) == 1 && is.finite(pooled_metric_warm_up) &&
+             pooled_metric_warm_up >= 2) {
+        wf_min_draws <- pooled_metric_warm_up
+  } else {
+        ## stop("NicoStan_pooled_metric_warm_up must be \"first_window\", \"soft\", \"hard\" or one number >= 2.")
+        stop(paste0("NicoStan_pooled_metric_warm_up must be \"first_window\", \"soft\", \"n_over_n_plus_k\", ",
+                    "\"signal_to_noise\", \"hard\" or one number >= 2."))
+  }
+  ## the minimum draws of the pooled estimator at iteration ii ("first_window": 2 in the first window, the capped
+  ## n_params_main + 1 after a reset; every other mode: the fixed wf_min_draws above):
+  fn_pooled_wf_min_draws <-  function(ii) {
+        if (!identical(pooled_metric_warm_up, "first_window")) return(wf_min_draws)
+        if (length(metric_window_resets) > 0 && any(ii > metric_window_resets)) return(pooled_metric_full_weight_draws)
+        return(2)
+  }
+  ## the factor on ratio_M of the pooled estimator's metric updates (1 unless "soft"; recorded per iteration):
+  pooled_metric_weight_factor <-  1
+  pooled_metric_weight_factor_vec <-  rep(x = NA_real_, times = n_burnin)
+  ##
+  ## ---- Warm-up rule family (5 Oct 2026), to search for one rule for both the binary LC-MVP and the LC-MVOP.
+  ##      Every rule acts through pooled_metric_weight_factor (the factor on ratio_M of the pooled estimator's
+  ##      metric updates; n = wf_n, the draws pooled in the current window) and updates from 2 draws:
+  ##        "soft"             min(1, n / n_full), n_full = option NicoStan_pooled_metric_soft_full_weight_draws
+  ##                           (default NULL = pooled_metric_full_weight_draws, i.e. the rule as above);
+  ##        "n_over_n_plus_k"  n / (n + k), k = option NicoStan_pooled_metric_weight_k_draws (default 5): Stan's
+  ##                           own regularisation weight, applied towards the CURRENT metric instead of towards
+  ##                           1e-3 I, i.e. the blend r w P + (1 - r w) C (r = ratio_M, P = the proposal, C = the
+  ##                           current metric);
+  ##        "signal_to_noise"  max(0, 1 - s2 / mean(d^2)), d_j = log(P_j / C_j) over the parameters of the
+  ##                           block, P_j = the pooled variance that the blend uses, C_j = the current M_inv
+  ##                           diagonal, s2 = 2 / (n - 1), the noise variance of the log of a sample variance from
+  ##                           n Gaussian draws. Option NicoStan_pooled_metric_signal_to_noise_centred (default
+  ##                           FALSE): TRUE uses d_j - mean(d), a change of shape only (the common shift of scale
+  ##                           removed). n < 2 or a non-finite d gives 0. Computed at each metric update, for
+  ##                           each block (main and nuisance) from its own P and C.
+  ##      The factor applied at each metric update is recorded in pooled_metric_weight_factor_main_update_vec and
+  ##      pooled_metric_weight_factor_us_update_vec (pooled_metric_weight_factor_vec keeps the factor at each tau
+  ##      update).
+  ##
+  pooled_metric_soft_full_weight_draws_option <-
+        getOption("NicoStan_pooled_metric_soft_full_weight_draws", default = NULL)
+  if (!is.null(pooled_metric_soft_full_weight_draws_option) &&
+      (!is.numeric(pooled_metric_soft_full_weight_draws_option) ||
+       length(pooled_metric_soft_full_weight_draws_option) != 1 ||
+       !is.finite(pooled_metric_soft_full_weight_draws_option) ||
+       pooled_metric_soft_full_weight_draws_option <= 0)) {
+        stop("NicoStan_pooled_metric_soft_full_weight_draws must be NULL or one number > 0.")
+  }
+  pooled_metric_soft_full_weight_draws <-  if (is.null(pooled_metric_soft_full_weight_draws_option))
+                                               pooled_metric_full_weight_draws else
+                                               as.numeric(pooled_metric_soft_full_weight_draws_option)
+  pooled_metric_weight_k_draws <-  getOption("NicoStan_pooled_metric_weight_k_draws", default = 5)
+  if (!is.numeric(pooled_metric_weight_k_draws) || length(pooled_metric_weight_k_draws) != 1 ||
+      !is.finite(pooled_metric_weight_k_draws) || pooled_metric_weight_k_draws < 0) {
+        stop("NicoStan_pooled_metric_weight_k_draws must be one number >= 0.")
+  }
+  pooled_metric_signal_to_noise_centred <-
+        getOption("NicoStan_pooled_metric_signal_to_noise_centred", default = FALSE)
+  if (!is.logical(pooled_metric_signal_to_noise_centred) || length(pooled_metric_signal_to_noise_centred) != 1 ||
+      is.na(pooled_metric_signal_to_noise_centred)) {
+        stop("NicoStan_pooled_metric_signal_to_noise_centred must be TRUE or FALSE.")
+  }
+  ## the count rules set the factor where the pooled moments are formed ("soft" at its default keeps the code
+  ## of that rule there); "signal_to_noise" sets it at each metric update, from P and C:
+  pooled_metric_count_rule_extended <-  identical(pooled_metric_warm_up, "n_over_n_plus_k") ||
+                                        (identical(pooled_metric_warm_up, "soft") &&
+                                         !is.null(pooled_metric_soft_full_weight_draws_option))
+  pooled_metric_signal_to_noise_active <-  identical(pooled_metric_warm_up, "signal_to_noise") &&
+                                           identical(metric_estimator, "pooled")
+  pooled_metric_warm_up_rule_family_member <-  pooled_metric_count_rule_extended ||
+                                               identical(pooled_metric_warm_up, "signal_to_noise")
+  fn_pooled_metric_count_weight_factor <-  function(n_draws) {
+        if (identical(pooled_metric_warm_up, "soft")) {
+              return(min(1, n_draws / pooled_metric_soft_full_weight_draws))
+        }
+        if (identical(pooled_metric_warm_up, "n_over_n_plus_k")) {
+              return(n_draws / (n_draws + pooled_metric_weight_k_draws))
+        }
+        return(1)
+  }
+  fn_signal_to_noise_weight_factor <-  function( proposed_variance_vec,
+                                                 current_variance_vec,
+                                                 n_draws) {
+        proposed_variance_vec <-  c(proposed_variance_vec)
+        current_variance_vec  <-  c(current_variance_vec)
+        if (!isTRUE(n_draws >= 2) || length(proposed_variance_vec) == 0 ||
+            length(proposed_variance_vec) != length(current_variance_vec)) return(0)
+        log_variance_ratio <-  suppressWarnings(log(proposed_variance_vec / current_variance_vec))
+        if (!all(is.finite(log_variance_ratio))) return(0)
+        if (pooled_metric_signal_to_noise_centred) {
+              log_variance_ratio <-  log_variance_ratio - mean(log_variance_ratio)
+        }
+        noise_variance_of_log_variance <-  2 / (n_draws - 1)
+        mean_squared_log_variance_ratio <-  mean(log_variance_ratio^2)
+        if (!isTRUE(mean_squared_log_variance_ratio > 0)) return(0)
+        return(max(0, 1 - noise_variance_of_log_variance / mean_squared_log_variance_ratio))
+  }
+  ## if (metric_estimator == "pooled" && !isTRUE(manual_tau)) {
+  if (metric_estimator == "pooled" && !isTRUE(manual_tau) && !pooled_metric_warm_up_rule_family_member) {
+        message(colourise(paste0("pooled metric warm-up: ", if (identical(pooled_metric_warm_up, "soft"))
+                                 paste0("updates from 2 draws, blend weight ratio_M x min(1, n / ", pooled_metric_full_weight_draws, ")")
+                                 else if (identical(pooled_metric_warm_up, "first_window"))
+                                 paste0("first window updates from 2 draws, later windows from ", pooled_metric_full_weight_draws, " draws")
+                                 else paste0("no update until a window holds ", wf_min_draws, " draws, then the full ratio_M")), "cyan"))
+  }
+  if (metric_estimator == "pooled" && !isTRUE(manual_tau) && pooled_metric_warm_up_rule_family_member) {
+        pooled_metric_warm_up_weight_description <-
+              if (identical(pooled_metric_warm_up, "soft"))
+                    paste0("min(1, n / ", pooled_metric_soft_full_weight_draws, ")") else
+              if (identical(pooled_metric_warm_up, "n_over_n_plus_k"))
+                    paste0("n / (n + ", pooled_metric_weight_k_draws, ")") else
+              paste0("max(0, 1 - (2 / (n - 1)) / mean(d^2)), d = log(proposed / current M_inv)",
+                     if (pooled_metric_signal_to_noise_centred) " - mean(d)" else "",
+                     ", per block at each metric update")
+        message(colourise(paste0("pooled metric warm-up \"", pooled_metric_warm_up, "\": updates from 2 draws, ",
+                                 "blend weight ratio_M x ", pooled_metric_warm_up_weight_description,
+                                 " (n = draws pooled in the window)"), "cyan"))
+  }
+  ##
+  ## ---- eps and tau rescale at metric updates (5 Oct 2026). Option NicoStan_metric_update_rescales_eps_and_tau
+  ##      (default FALSE). TRUE: immediately after each metric update of the main burn-in (manual_tau = FALSE, as
+  ##      for the step-size ADAM reset; the pre-burn-in stage is left as it was), eps and tau of the updated block
+  ##      are multiplied by 1 / sqrt(c), c = exp(mean(log(M_inv_new / M_inv_old))) over the block's M_inv
+  ##      diagonal, within their bounds (eps <= max_eps, tau <= max_tau), and the stored values that the
+  ##      adaptation restarts from move with them (the log tau of the "probe_then_average" probe, the averaged
+  ##      log tau and the eps that the eps warm start hands back to); the ADAM moments of the gradients are kept.
+  ##      For a Gaussian target the leapfrog stability limit and the oscillation period both scale with
+  ##      1 / sqrt(c) when M_inv is multiplied by c, so the number of leapfrog steps per trajectory is invariant
+  ##      and the acceptance rate is unchanged by a pure change of scale of the metric.
+  ##      Blocks: the main block always (with the joint sampler, partitioned_HMC = FALSE, its c sets the one eps
+  ##      and tau); the nuisance block only with partitioned_HMC = TRUE (its own eps_us and tau_us). No rescale
+  ##      when the update is skipped (metric_ready FALSE), when its weight factor is 0, when the diagonal is
+  ##      unchanged, or when an entry of either diagonal is not finite and positive. During the tau ramp
+  ##      (clip_iter to gap) tau is set afresh at the start of every iteration, so there the rescaled tau holds
+  ##      for the iteration of the update only.
+  ##
+  ## DEFAULT TRUE (5 Oct 2026, 04:15), together with the 8-draw pooled-metric warm-up ("gate8_rescale"; the
+  ## evidence is in the DEFAULT 8 block above the option NicoStan_pooled_metric_warm_up). FALSE, with the warm-up
+  ## "hard", keeps every result before 5 Oct bit for bit.
+  ## metric_update_rescales_eps_and_tau <-  getOption("NicoStan_metric_update_rescales_eps_and_tau",
+  ##                                                  default = FALSE)
+  metric_update_rescales_eps_and_tau <-  getOption("NicoStan_metric_update_rescales_eps_and_tau", default = TRUE)
+  if (!is.logical(metric_update_rescales_eps_and_tau) || length(metric_update_rescales_eps_and_tau) != 1 ||
+      is.na(metric_update_rescales_eps_and_tau)) {
+        stop("NicoStan_metric_update_rescales_eps_and_tau must be TRUE or FALSE.")
+  }
+  metric_update_rescale_active <-  metric_update_rescales_eps_and_tau && !isTRUE(manual_tau)
+  metric_update_rescale_us_active <-  metric_update_rescale_active && isTRUE(partitioned_HMC) &&
+                                      isTRUE(sample_nuisance)
+  ## the factor that eps and tau were multiplied by at each metric update (1 / sqrt(c), before the bounds;
+  ## NA = no rescale), main and nuisance block:
+  metric_update_eps_tau_rescale_factor_vec    <-  rep(x = NA_real_, times = n_burnin)
+  metric_update_eps_tau_rescale_factor_us_vec <-  rep(x = NA_real_, times = n_burnin)
+  ## the factor on ratio_M applied at each metric update, main and nuisance block (NA = no update):
+  pooled_metric_weight_factor_main_update_vec <-  rep(x = NA_real_, times = n_burnin)
+  pooled_metric_weight_factor_us_update_vec   <-  rep(x = NA_real_, times = n_burnin)
+  if (metric_update_rescale_active) {
+        message(colourise(paste0("metric update rescale: eps and tau x 1 / sqrt(c) after every metric update, ",
+                                 "c = the geometric mean of M_inv_new / M_inv_old over the block's diagonal",
+                                 if (isTRUE(partitioned_HMC)) " (main and nuisance block)" else
+                                                              " (the main block's c sets the one eps and tau)"),
+                          "cyan"))
+  }
+  ## the main block's M_inv diagonal (dense: of M_inv_dense_main; diag: M_inv_main_vec, the dense matrices
+  ## being placeholders then):
+  fn_M_inv_main_diagonal <-  function(EHMC_Metric_as_Rcpp_List) {
+        if (identical(metric_shape_main, "dense")) return(diag(EHMC_Metric_as_Rcpp_List$M_inv_dense_main))
+        return(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec))
+  }
+  ## 1 / sqrt(c) of one metric update, or NA (no rescale):
+  fn_metric_update_eps_tau_rescale_factor <-  function( M_inv_diagonal_before,
+                                                        M_inv_diagonal_after,
+                                                        metric_update_weight_factor) {
+        M_inv_diagonal_before <-  c(M_inv_diagonal_before)
+        M_inv_diagonal_after  <-  c(M_inv_diagonal_after)
+        if (!isTRUE(metric_update_weight_factor > 0)) return(NA_real_)
+        if (length(M_inv_diagonal_before) == 0 || length(M_inv_diagonal_before) != length(M_inv_diagonal_after)) {
+              return(NA_real_)
+        }
+        if (identical(M_inv_diagonal_before, M_inv_diagonal_after)) return(NA_real_)
+        if (!all(is.finite(M_inv_diagonal_before) & (M_inv_diagonal_before > 0) &
+                 is.finite(M_inv_diagonal_after) & (M_inv_diagonal_after > 0))) return(NA_real_)
+        inverse_metric_scale_change <-  exp(mean(log(M_inv_diagonal_after / M_inv_diagonal_before)))
+        rescale_factor <-  1 / sqrt(inverse_metric_scale_change)
+        if (!is.finite(rescale_factor) || !(rescale_factor > 0)) return(NA_real_)
+        return(rescale_factor)
+  }
+  ## eps and tau of one block ("main" or "us") x the factor, within their bounds:
+  fn_rescale_eps_and_tau_of_block <-  function( EHMC_args_as_Rcpp_List,
+                                                block_name,
+                                                rescale_factor) {
+        max_eps_block <-  if (identical(block_name, "main")) max_eps_main else max_eps_us
+        max_tau_block <-  if (identical(block_name, "main")) max_tau_main else max_tau_us
+        eps_name <-  paste0("eps_", block_name)
+        tau_name <-  paste0("tau_", block_name)
+        rescaled_eps <-  EHMC_args_as_Rcpp_List[[eps_name]] * rescale_factor
+        rescaled_tau <-  EHMC_args_as_Rcpp_List[[tau_name]] * rescale_factor
+        EHMC_args_as_Rcpp_List[[eps_name]] <-  min(max_eps_block, max(.Machine$double.xmin, rescaled_eps))
+        EHMC_args_as_Rcpp_List[[tau_name]] <-  min(max_tau_block, max(.Machine$double.xmin, rescaled_tau))
+        return(EHMC_args_as_Rcpp_List)
+  }
   ##
   wf_n  <- 0
   wf_m  <- rep(0, n_params)
@@ -2732,6 +2983,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            n_window_updates = adaptive_metric_shrinkage_window_updates(ii))
                                }
                          }
+                         wf_min_draws <-  fn_pooled_wf_min_draws(ii)
                          wf_n_before_update <-  wf_n
                          ##
                          X_main <- theta_main_vectors_all_chains_input_from_R
@@ -2782,12 +3034,20 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                              }
                              empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                              metric_ready <- TRUE
+                             pooled_metric_weight_factor <-  if (identical(pooled_metric_warm_up, "soft"))
+                                                                 min(1, wf_n / pooled_metric_full_weight_draws) else 1
+                             ## the count rules of the warm-up rule family ("n_over_n_plus_k"; "soft" with its own
+                             ## full-weight draws):
+                             if (pooled_metric_count_rule_extended) {
+                                   pooled_metric_weight_factor <-  fn_pooled_metric_count_weight_factor(wf_n)
+                             }
                          }
                     }
                } else {
                if ((metric_estimator == "pooled") && (ii >= metric_start_iter) && (ii <= metric_adaptation_end_iter)) {
                     ## if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
                     ## after a window reset the metric is held (no blending towards the previous window's proposal) until the new window has wf_min_draws draws:
+                    wf_min_draws <-  fn_pooled_wf_min_draws(ii)
                     if (ii %in% (metric_window_resets + 1)) {
                           wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE
                           if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
@@ -2842,6 +3102,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                         }
                         empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                         metric_ready <- TRUE
+                        pooled_metric_weight_factor <-  if (identical(pooled_metric_warm_up, "soft"))
+                                                            min(1, wf_n / pooled_metric_full_weight_draws) else 1
+                        ## the count rules of the warm-up rule family ("n_over_n_plus_k"; "soft" with its own
+                        ## full-weight draws):
+                        if (pooled_metric_count_rule_extended) {
+                              pooled_metric_weight_factor <-  fn_pooled_metric_count_weight_factor(wf_n)
+                        }
                     }
                }
                }  ## end of: if (use_resident_burnin)
@@ -3257,6 +3524,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                    if ((ii <= metric_adaptation_end_iter) && (ii > ii_min) &&
                        ((ii %% interval_width_main == 0) || (burnin_schedule == "automatic" && ii == metric_adaptation_end_iter)) &&
                        (ii < ii_max) && metric_ready)  {
+                         ## NicoStan_metric_update_rescales_eps_and_tau: the main M_inv diagonal before the
+                         ## update:
+                         if (metric_update_rescale_active) {
+                               M_inv_main_diagonal_before_update <-
+                                     fn_M_inv_main_diagonal(EHMC_Metric_as_Rcpp_List)
+                         }
                                    
                          if (metric_type_main == "unit") { 
                            
@@ -3363,6 +3636,19 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            
                            } else if (metric_type_main == "Empirical") {
                              
+                             ## the warm-up rule "signal_to_noise" (pooled estimator): this update's factor on
+                             ## ratio_M_main, from the pooled variances that the blend uses (the diagonal of
+                             ## empicical_cov_main; dense: x metric_variance_scale) and the current M_inv
+                             ## diagonal; the factor applied is recorded at every update:
+                             if (pooled_metric_signal_to_noise_active) {
+                                   proposed_variance_vec_main_for_weight <-  diag(empicical_cov_main) *
+                                         (if (identical(metric_shape_main, "dense")) metric_variance_scale else 1)
+                                   pooled_metric_weight_factor <-  fn_signal_to_noise_weight_factor(
+                                         proposed_variance_vec = proposed_variance_vec_main_for_weight,
+                                         current_variance_vec  = fn_M_inv_main_diagonal(EHMC_Metric_as_Rcpp_List),
+                                         n_draws               = wf_n)
+                             }
+                             pooled_metric_weight_factor_main_update_vec[ii] <-  pooled_metric_weight_factor
                              if (metric_shape_main == "dense") {
                                ##### dense metric handled by the windowed scheme (EDIT B) - do nothing here
                                outs <- update_M_Empirical_main(  debug = debug,
@@ -3370,7 +3656,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
                                                                  EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
                                                                  empicical_cov_main = empicical_cov_main,   ## reverted (diag path ignores it anyway)
-                                                                 ratio_M_main = ratio_M_main,
+                                                                 ratio_M_main = ratio_M_main * pooled_metric_weight_factor,   ## pooled warm-up (1 unless "soft")
                                                                  ii = ii, n_adapt = n_adapt,
                                                                  M_decay_type = M_decay_type,
                                                                  M_decay_power = M_decay_power,
@@ -3398,7 +3684,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
                                                                  EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
                                                                  empicical_cov_main = empicical_cov_main,   ## reverted (diag path ignores it anyway)
-                                                                 ratio_M_main = ratio_M_main,
+                                                                 ratio_M_main = ratio_M_main * pooled_metric_weight_factor,   ## pooled warm-up (1 unless "soft")
                                                                  ii = ii, n_adapt = n_adapt,
                                                                  M_decay_type = M_decay_type,
                                                                  M_decay_power = M_decay_power,
@@ -3422,6 +3708,35 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       
                            
                          }
+                         ## ---- NicoStan_metric_update_rescales_eps_and_tau, main block: eps and tau x
+                         ##      1 / sqrt(c) after this update (the one eps and tau of the joint sampler
+                         ##      included), and with them the log tau of the probe, the averaged log tau and
+                         ##      the eps of the warm start:
+                         if (metric_update_rescale_active) {
+                               rescale_factor_main <-  fn_metric_update_eps_tau_rescale_factor(
+                                     M_inv_main_diagonal_before_update,
+                                     fn_M_inv_main_diagonal(EHMC_Metric_as_Rcpp_List),
+                                     if (identical(metric_type_main, "Empirical"))
+                                           pooled_metric_weight_factor else 1)
+                               if (is.finite(rescale_factor_main)) {
+                                     EHMC_args_as_Rcpp_List <-  fn_rescale_eps_and_tau_of_block(
+                                           EHMC_args_as_Rcpp_List, "main", rescale_factor_main)
+                                     if (!isTRUE(partitioned_HMC)) {
+                                           EHMC_args_as_Rcpp_List$tau_us <-  EHMC_args_as_Rcpp_List$tau_main
+                                     }
+                                     if (tau_probe_then_average && isTRUE(tau_probe_state$probing)) {
+                                           tau_probe_state$log_tau_start <-  tau_probe_state$log_tau_start +
+                                                                             log(rescale_factor_main)
+                                     }
+                                     tau_average_sum_log_tau <-  tau_average_sum_log_tau +
+                                                                 tau_average_n_updates * log(rescale_factor_main)
+                                     if (use_eps_warm_start && ii <= eps_initial_iter) {
+                                           eps_main_after_warm_start <-  eps_main_after_warm_start *
+                                                                         rescale_factor_main
+                                     }
+                                     metric_update_eps_tau_rescale_factor_vec[ii] <-  rescale_factor_main
+                               }
+                         }
                            
                            if (sample_nuisance == TRUE)  {
                              
@@ -3431,6 +3746,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                  ((ii %% interval_width_nuisance == 0) || (burnin_schedule == "automatic" && ii == metric_adaptation_end_iter)) &&
                                  (ii < ii_max) && metric_ready)  {
                                
+                                     ## the main block's factor on ratio_M, restored after the nuisance update
+                                     ## ("signal_to_noise" puts the nuisance block's own there), and the nuisance
+                                     ## M_inv diagonal before the update (the rescale with partitioned HMC):
+                                     pooled_metric_weight_factor_main_block <-  pooled_metric_weight_factor
+                                     if (metric_update_rescale_us_active) {
+                                           M_inv_us_diagonal_before_update <-
+                                                 c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec)
+                                     }
                                      try({
                                        
                                        if (use_resident_burnin && (metric_type_nuisance %in% c("Empirical", "uniform_diag"))) {
@@ -3442,6 +3765,20 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                } else {
                                                     EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical <-  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_s_vec_us_empirical")
                                                }
+                                       }
+                                       ## "signal_to_noise": the nuisance block's own factor, from its pooled
+                                       ## variances (the proposal of both nuisance metric types below) and its
+                                       ## current M_inv_us_vec, both available here on every path:
+                                       if (pooled_metric_signal_to_noise_active &&
+                                           (metric_type_nuisance %in% c("Empirical", "uniform_diag"))) {
+                                             pooled_metric_weight_factor <-  fn_signal_to_noise_weight_factor(
+                                                   proposed_variance_vec = var_draws_all[index_nuisance],
+                                                   current_variance_vec  = EHMC_Metric_as_Rcpp_List$M_inv_us_vec,
+                                                   n_draws               = wf_n)
+                                       }
+                                       if (metric_type_nuisance %in% c("Empirical", "uniform_diag")) {
+                                             pooled_metric_weight_factor_us_update_vec[ii] <-
+                                                   pooled_metric_weight_factor
                                        }
                                        if (metric_type_nuisance == "unit") { 
                                          
@@ -3466,7 +3803,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                                           ##
                                                                                           proposed_variance_vec = proposed_variance_vec_us,
                                                                                           ##
-                                                                                          ratio = ratio_M_us,
+                                                                                          ratio = ratio_M_us * pooled_metric_weight_factor,   ## pooled warm-up (1 unless "soft")
                                                                                           ##
                                                                                           ii = ii,
                                                                                           n_adapt = n_adapt,
@@ -3499,7 +3836,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                                            ##
                                                                                            proposed_variance_vec = proposed_variance_vec_us,
                                                                                            ##
-                                                                                           ratio = ratio_M_us,
+                                                                                           ratio = ratio_M_us * pooled_metric_weight_factor,   ## pooled warm-up (1 unless "soft")
                                                                                            ##
                                                                                            ii = ii,
                                                                                            n_adapt = n_adapt,
@@ -3523,6 +3860,27 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                        }
                                        
                                      })
+                                     ## the main block's factor again (see above):
+                                     pooled_metric_weight_factor_us_used <-  pooled_metric_weight_factor
+                                     pooled_metric_weight_factor <-  pooled_metric_weight_factor_main_block
+                                     ## NicoStan_metric_update_rescales_eps_and_tau, nuisance block
+                                     ## (partitioned_HMC = TRUE: its own eps_us and tau_us):
+                                     if (metric_update_rescale_us_active) {
+                                           rescale_factor_us <-  fn_metric_update_eps_tau_rescale_factor(
+                                                 M_inv_us_diagonal_before_update,
+                                                 EHMC_Metric_as_Rcpp_List$M_inv_us_vec,
+                                                 pooled_metric_weight_factor_us_used)
+                                           if (is.finite(rescale_factor_us)) {
+                                                 EHMC_args_as_Rcpp_List <-  fn_rescale_eps_and_tau_of_block(
+                                                       EHMC_args_as_Rcpp_List, "us", rescale_factor_us)
+                                                 if (use_eps_warm_start && ii <= eps_initial_iter) {
+                                                       eps_us_after_warm_start <-  eps_us_after_warm_start *
+                                                                                   rescale_factor_us
+                                                 }
+                                                 metric_update_eps_tau_rescale_factor_us_vec[ii] <-
+                                                       rescale_factor_us
+                                           }
+                                     }
                                
                              }
                              
@@ -4630,6 +4988,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 ## the trajectory cost offset of this update's block (eps_<block> x c; see its definition):
                                 tau_cost_offset_at_update <-  EHMC_args_as_Rcpp_List[[paste0("eps_", block_name)]] * rate_criterion_cost_offset_steps
                                 tau_cost_offset_vec[ii] <-  tau_cost_offset_at_update
+                                pooled_metric_weight_factor_vec[ii] <-  pooled_metric_weight_factor
                                 adam_mean_name <- paste0("tau_m_adam_", block_name)
                                 adam_variance_name <- paste0("tau_v_adam_", block_name)
                                 ## this update would be number (performed so far + 1) on these moments:
@@ -5174,6 +5533,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
 
     }
+    ## NicoStan_metric_update_rescales_eps_and_tau: the rescales of this burn-in, in one line:
+    if (metric_update_rescale_active) {
+          rescale_factors_main <-  Filter(f = is.finite, x = metric_update_eps_tau_rescale_factor_vec)
+          message(colourise(paste0("metric update rescale of eps and tau: ", length(rescale_factors_main),
+                                   " main-block rescales",
+                                   if (length(rescale_factors_main) > 0)
+                                       paste0(" (factors ", signif(min(rescale_factors_main), 4), " to ",
+                                              signif(max(rescale_factors_main), 4), ")") else ""),
+                            "cyan"))
+    }
     ##
     stage_wall <- time_burnin                      # wall time of THIS stage only
     time_burnin <- time_burnin + time_pre_burnin   # cumulative (returned, leave as-is)
@@ -5432,6 +5801,23 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 ## the rate criteria's trajectory cost offset (4 Oct 2026): eps x c per tau update, and c:
                 rate_criterion_cost_offset_steps = rate_criterion_cost_offset_steps,
                 tau_cost_offset_vec = tau_cost_offset_vec,
+                ## the pooled metric warm-up (5 Oct 2026): the setting and the blend-weight factor at each tau update:
+                pooled_metric_warm_up = pooled_metric_warm_up,
+                pooled_metric_weight_factor_vec = pooled_metric_weight_factor_vec,
+                ## the warm-up rule family (5 Oct 2026): the factor applied at each main and nuisance metric
+                ## update (NA = no update), and the options of the rules:
+                pooled_metric_weight_factor_main_update_vec = pooled_metric_weight_factor_main_update_vec,
+                pooled_metric_weight_factor_us_update_vec = pooled_metric_weight_factor_us_update_vec,
+                pooled_metric_soft_full_weight_draws = pooled_metric_soft_full_weight_draws,
+                pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
+                pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
+                ## eps and tau rescale at metric updates (option NicoStan_metric_update_rescales_eps_and_tau,
+                ## active in the main burn-in only): the option, whether it was active, and the factor that eps
+                ## and tau were multiplied by at each update of the main / nuisance block (NA = no rescale):
+                metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                metric_update_rescales_eps_and_tau_active = metric_update_rescale_active,
+                metric_update_eps_tau_rescale_factor_vec = metric_update_eps_tau_rescale_factor_vec,
+                metric_update_eps_tau_rescale_factor_us_vec = metric_update_eps_tau_rescale_factor_us_vec,
                 ## burn-in record for metric diagnosis (see its allocation):
                 burnin_trace_main_all_chains = burnin_trace_main_all_chains,
                 burnin_metric_main_variance_history = burnin_metric_main_variance_history,
