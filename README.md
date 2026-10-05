@@ -12,6 +12,7 @@
 [Models with nuisance parameters (diffusion-pathspace HMC)](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
 [How NicoStan works](#how-nicostan-works) ·
 [NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) ·
+[LQ_ESSR trajectory-length criterion](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) ·
 [Custom AVX2 and AVX-512 functions](#custom-avx2-and-avx-512-functions) ·
 [How to cite NicoStan](#how-to-cite-nicostan) ·
 [How to cite BayesMVP](#how-to-cite-bayesmvp) ·
@@ -644,6 +645,9 @@ Proposed by [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
 - `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
 without dividing by trajectory length.
 Proposed by [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html).
+- `LQ_ESSR` (**LQ_ESSR**): Experimental; the soft minimum, over the monitored parameters,
+of the lag-one ESS bounds of the linear and quadratic statistics, per unit trajectory length
+(see [LQ_ESSR](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) below).
 
 
 ChEES measures squared changes in the centred squared radius of the parameter vector
@@ -697,6 +701,60 @@ and no measurable change on our binary LC-MVP models.
 Note that `manual_tau` separately controls whether the trajectory length is adapted at all -
 you can instead set $\tau$ manually, by specifying `manual_tau = TRUE`, and it's fixed value by specifying
 `tau_if_manual = 3.0` (if one wishes to fix $\tau = 3$).
+
+
+### LQ_ESSR: a linear/quadratic ESS-rate trajectory-length criterion
+
+
+NicoStan also offers an experimental criterion, `burnin_algorithm = "LQ_ESSR"` (the linear/quadratic ESS rate),
+which targets the **worst**-mixing parameter, rather than a single summary of the whole parameter vector
+(as ESJD, ChEES-R and SNAPER do):
+
+- For each monitored parameter (in the coordinates defined by the current mass matrix),
+LQ_ESSR estimates the lag-one autocorrelation, ρ, of both the parameter (the linear statistic)
+and its squared deviation (the quadratic statistic), using the acceptance-weighted jumps of the burnin chains.
+- Each ρ is then converted into an upper bound on the ESS per draw, $(1 - \rho)/(1 + \rho)$
+(see [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3)
+and [Riou-Durand et al., 2023](https://proceedings.mlr.press/v206/riou-durand23a.html));
+the bound is exact along the normal modes of a Gaussian target with exact dynamics, and an upper bound otherwise.
+- The criterion is the soft minimum of all of these bounds (i.e., of two bounds per parameter),
+divided by the mean trajectory length; hence, good mixing of the posterior means cannot compensate
+for poor mixing of the squared deviations, and the best-mixing parameters cannot hide the worst ones.
+- By default, every parameter of the adapted block is monitored;
+alternatively, `interest_only` (e.g., `interest_only = c("beta", "p_raw")`) restricts the criterion
+to the named main-parameter families (with `tau_adaptation_block = "main"`).
+- On our binary LC-MVP model (N = 10,000; 3 seeds per configuration), with a 125-iteration burnin,
+LQ_ESSR needed fewer gradients than ESJD to reach a minimum ESS of 1,000
+(0.87 [95% CI: 0.82, 0.92] times, averaged over the grid) and had a higher minimum ESS per 1,000 gradients
+(1.17 [1.10, 1.25] times); however, the single best configuration was an ESJD one
+(72.2 vs. 81.4 thousand gradients, and 15.68 vs. 14.03 minimum ESS per 1,000 gradients, for the best
+ESJD and LQ_ESSR configurations; within seed noise).
+With a 500-iteration burnin, LQ_ESSR was level with ESJD on average
+(1.00 [0.93, 1.07] times the gradients; 0.99 [0.92, 1.07] times the minimum ESS per 1,000 gradients),
+whilst its best configuration was the best of all on both endpoints
+(85.3 thousand gradients; 16.34 minimum ESS per 1,000 gradients),
+although the best configuration of every other criterion was within seed noise of it.
+
+
+The table below compares LQ_ESSR with the other trajectory-length criteria in NicoStan.
+Note that z denotes the parameters in the coordinates defined by the current mass matrix, z₀ and z′ the start
+and end of a trajectory, m the running estimate of the posterior mean and t the (jittered) length of a trajectory;
+by default, every criterion weights each chain's proposal by its acceptance probability.
+
+
+| `burnin_algorithm` | What it maximises | Per unit trajectory length? | Statistic used | Means (bulk) vs. second moments (tail)¹ | τ gradient estimator | Cost normalisation |
+| --- | --- | --- | --- | --- | --- | --- |
+| `"ESJD"` | Expected squared jumped distance rate | Yes (each trajectory's jump ÷ its own t) | Jump distance, ‖z′ − z₀‖², over all coordinates | Means (linear), averaged over all coordinates | End-point (default) or both ends (`tau_gradient_estimator = "two_ended"`) | ÷ t (optional step offset² and `tau_cost_exponent`) |
+| `"ChEES"` | Expected squared change in the centred squared radius, ½‖z − m‖² | No (per iteration) | Squared radius of all coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | None |
+| `"CHESSR"` (ChEES-R) | ChEES per unit trajectory length | Yes (÷ its own t) | Squared radius of all coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
+| `"SNAPER"` | Expected squared change in (wᵀ(z − m))² per unit trajectory length | Yes (÷ its own t) | Squared projection onto a learned leading principal direction, w | Second moments (quadratic), along one direction | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
+| `"LQ_ESSR"` | Soft minimum of the lag-one ESS bounds, (1 − ρ)/(1 + ρ), per unit trajectory length | Yes (÷ the mean t over the chains) | Per-coordinate jumps of z and of its squared deviation, converted into ESS bounds | Both (linear and quadratic), for the worst coordinate | End-point only | ÷ mean t (optional step offset² and `tau_cost_exponent`) |
+
+
+¹ "Second moments" refers to the squared (quadratic) statistics, which are closer to the tail ESS than the means;
+however, they are not the same as the quantile-based tail ESS.
+
+² Via the R option `NicoStan_rate_criterion_cost_offset_steps` (0, i.e., no offset, by default).
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
