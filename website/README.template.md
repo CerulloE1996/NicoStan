@@ -645,6 +645,10 @@ Proposed by [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
 - `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
 without dividing by trajectory length.
 Proposed by [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html).
+- `ESJD` (**ESJD rate**): Uses the squared jumped distance of the adapted parameters
+(in the coordinates defined by the current mass matrix) per unit trajectory length,
+i.e., each trajectory's squared jump divided by its own length.
+Based on the expected squared jumped distance of Pasarica and Gelman, 2010.
 - `LQ_ESSR` (**LQ_ESSR**): Experimental; the soft minimum, over the monitored parameters,
 of the lag-one ESS bounds of the linear and quadratic statistics, per unit trajectory length
 (see [LQ_ESSR](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) below).
