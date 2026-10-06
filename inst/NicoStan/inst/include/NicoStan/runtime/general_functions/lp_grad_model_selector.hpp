@@ -78,6 +78,8 @@ inline void  fn_lp_grad_InPlace(         Eigen::Ref<Eigen::Matrix<double, -1, 1>
                      
                         if ((Model_type == "LC_MVP") || (Model_type == "MVP")) {
                           
+                                          //// force_autodiff / force_PartialLog are passed on and honoured there
+                                          //// (they used to stop here, so the multi-attempt chain ignored them):
                                           fn_lp_grad_MVP_multi_attempts_InPlace_process(lp_and_grad_outs,
                                                                                         theta_main_vec_ref,
                                                                                         theta_us_vec_ref,
@@ -87,7 +89,9 @@ inline void  fn_lp_grad_InPlace(         Eigen::Ref<Eigen::Matrix<double, -1, 1>
                                                                                         LC_MVP_ws_structs,
                                                                                         n_threads_WCP,
                                                                                         Model_args_as_cpp_struct.autodiff_fallback,
-                                                                                        Model_type == "MVP");
+                                                                                        Model_type == "MVP",
+                                                                                        force_autodiff,
+                                                                                        force_PartialLog);
                           
                         } else if (Model_type == "latent_trait") {
                           
@@ -104,6 +108,8 @@ inline void  fn_lp_grad_InPlace(         Eigen::Ref<Eigen::Matrix<double, -1, 1>
                                          
                         } else if ((Model_type == "LC_MVOP") || (Model_type == "MVOP")) {
                           
+                                          //// force_autodiff / force_PartialLog are passed on and honoured there
+                                          //// (they used to stop here, so the multi-attempt chain ignored them):
                                           fn_lp_grad_MVOP_multi_attempts_InPlace_process(lp_and_grad_outs,
                                                                                          theta_main_vec_ref,
                                                                                          theta_us_vec_ref,
@@ -112,7 +118,10 @@ inline void  fn_lp_grad_InPlace(         Eigen::Ref<Eigen::Matrix<double, -1, 1>
                                                                                          Model_args_as_cpp_struct,
                                                                                          LC_MVP_ws_structs,
                                                                                          n_threads_WCP,
-                                                                                         Model_args_as_cpp_struct.autodiff_fallback);
+                                                                                         Model_args_as_cpp_struct.
+                                                                                               autodiff_fallback,
+                                                                                         force_autodiff,
+                                                                                         force_PartialLog);
                           
                         }
            
@@ -174,14 +183,29 @@ inline void  fn_lp_grad_InPlace(         Eigen::Ref<Eigen::Matrix<double, -1, 1>
                                        
                                  } else if ((Model_type == "LC_MVOP") || (Model_type == "MVOP")) {
                                    
-                                       fn_lp_grad_MVOP_LC_Pinkney_NoLog_MD_and_AD_Inplace_process( lp_and_grad_outs, 
-                                                                                                   theta_main_vec_ref,
-                                                                                                   theta_us_vec_ref,
-                                                                                                   y_ref, 
-                                                                                                   grad_option, 
-                                                                                                   Model_args_as_cpp_struct,
-                                                                                                   LC_MVP_ws_structs,
-                                                                                                   n_threads_WCP);
+                                       // fn_lp_grad_MVOP_LC_Pinkney_NoLog_MD_and_AD_Inplace_process(
+                                       //       lp_and_grad_outs, theta_main_vec_ref, theta_us_vec_ref, y_ref,
+                                       //       grad_option, Model_args_as_cpp_struct, LC_MVP_ws_structs,
+                                       //       n_threads_WCP);
+                                       ////
+                                       //// force_PartialLog = TRUE runs the PartialLog path, as for LC_MVP / MVP
+                                       //// above (the call above ran NoLog whatever force_PartialLog was):
+                                       ////
+                                       if (force_PartialLog == true) {
+                                         
+                                              fn_lp_grad_MVOP_LC_Pinkney_PartialLog_MD_and_AD_Inplace_process(
+                                                    lp_and_grad_outs, theta_main_vec_ref, theta_us_vec_ref,
+                                                    y_ref, grad_option, Model_args_as_cpp_struct,
+                                                    LC_MVP_ws_structs, n_threads_WCP);
+                                         
+                                       } else {
+                                         
+                                              fn_lp_grad_MVOP_LC_Pinkney_NoLog_MD_and_AD_Inplace_process(
+                                                    lp_and_grad_outs, theta_main_vec_ref, theta_us_vec_ref,
+                                                    y_ref, grad_option, Model_args_as_cpp_struct,
+                                                    LC_MVP_ws_structs, n_threads_WCP);
+                                         
+                                       }
                                    
                                  }
                            

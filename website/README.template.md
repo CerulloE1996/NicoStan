@@ -8,6 +8,7 @@
 [Installation](#installation) ·
 [Examples](#examples) ·
 [BayesMVP: multivariate probit models](#bayesmvp-multivariate-probit-models) ·
+[Automatic test (column) reordering](#automatic-test-column-reordering) ·
 [Benchmarks](#benchmarks) ·
 [Models with nuisance parameters (diffusion-pathspace HMC)](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
 [How NicoStan works](#how-nicostan-works) ·
@@ -347,6 +348,31 @@ in a comprehensive simulation study, in which the models were fitted using [Baye
 <!-- whilst the five models above also have native BayesMVP implementations.  -->
 <!-- Development and applications of 4LC-MVOP are covered in separate papers,  -->
 <!-- whilst the model also provides a larger example for the general NicoStan sampler. -->
+
+
+### Automatic test (column) reordering
+
+
+For the latent class models (LC-MVP and LC-MVOP), BayesMVP chooses the order of the tests
+(i.e., the columns of `y`) automatically, before the main burnin (`reorder_cols_MVP = TRUE` by default).
+The model itself does not depend on the order of the tests;
+however, the unconstrained parameters which HMC samples do - and hence so does the efficiency of HMC.
+
+- A short pre-burnin gives rough estimates of the correlations, intercepts and (for ordinal tests) cutpoints;
+the most nearly deterministic test is then placed last,
+and the other tests follow the greedy correlation order (the most strongly correlated tests first).
+- This is because, in the GHK construction, each test's truncation bounds depend on the tests placed before it,
+and a nearly deterministic test has steep tail values which would otherwise propagate to every later test;
+the order also sets the order of the correlation parameterisation
+([Pinkney, 2024](https://arxiv.org/abs/2405.07286)).
+- On our binary LC-MVP model (N = 10,000), the slower order of the old greedy-only rule needed 1.60× the
+gradient evaluations to reach the target min ESS (0.59× the min ESS per 1000 gradient evaluations);
+on our ordinal LC-MVOP model (N = 5,000), placing the binary test last needed 0.67-0.75× the gradient evaluations
+of the input order.
+- The summaries and traces are returned in the original test order.
+
+See the [BayesMVP README](https://github.com/CerulloE1996/BayesMVP#automatic-test-column-reordering)
+for more details.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->

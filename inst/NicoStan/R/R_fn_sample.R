@@ -256,7 +256,10 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   columns permuted into the Dissmann (2013) pair-first order of the estimated
 #'   correlation matrix. Supported for Model_type = "LC_MVP" and for USER-SUPPLIED
 #'   Stan models (Model_type = "Stan") through the BayesMVP provider.
+#'   (Model_type = "LC_MVOP" is supported as well, with binary and ordinal tests in any positions.)
 #' NicoStan alone does not supply model-specific column reordering.
+#'   Default (NULL, or not given): TRUE for Model_type = "LC_MVP" and "LC_MVOP", FALSE for every
+#'   other model.
 #'
 #'   For Model_type = "Stan" only \code{y} is permuted - BayesMVP cannot know which of
 #'   an external model's other data objects are test-indexed - so the option is REFUSED
@@ -271,7 +274,41 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   to original test \code{test_perm[j]}; the permutation and its inverse are returned as
 #'   \code{test_perm} / \code{test_inv_perm}), and that user-supplied test-indexed initial
 #'   values are left alone. This has only been tested to work and/or be beneficial for
-#'   multivariate probit-based models.
+#'   multivariate probit-based models. For Model_type = "LC_MVP" (y, the coefficient priors, the
+#'   correlation bounds, priors and known values, the covariates and the beta initial values are permuted
+#'   with the tests) the summaries and traces are returned in the ORIGINAL test order: beta, Omega and
+#'   L_Omega are re-indexed from the fitted order by create_summary_and_traces(), and Omega_orig,
+#'   L_Omega_orig, Xbeta_baseline_nd / _d and Se / Sp / Fp_baseline are computed in the original order by
+#'   the model; Omega_unconstrained_vec, the raw sampler draws, the burn-in draws and the metric stay in
+#'   the sampler's coordinates of the fitted order (HMC_info$parameter_families_left_in_fitted_test_order).
+#'   For Model_type = "LC_MVOP" the same holds (the ordinal metadata, the Dirichlet priors and the cutpoint
+#'   initial values are permuted with the tests as well), and the cutpoints C_unc_vec, C_raw_vec and C_vec
+#'   are also re-indexed into the original order of the ordinal tests (HMC_info lists every re-indexed family).
+#' @param test_order_rule_for_reorder_cols_MVP The rule that sets the test (column) order after the pre-burnin
+#'   of reorder_cols_MVP = TRUE (unused when reorder_cols_MVP = FALSE or when test_perm_override is given).
+#'   \code{"most_nearly_deterministic_test_last_then_greedy_correlation_order"} places last the test whose
+#'   class-conditional latent means sit furthest in the tails at the pre-burnin estimate (the sum over classes of
+#'   the mean absolute probit linear predictor; BayesMVP's compute_tail_extremeness_per_test_LC_MVP()), and orders
+#'   the other tests by the greedy pair-first rule of compute_optimal_test_order() on their own estimated
+#'   correlations. \code{"greedy_correlation_order"} orders all tests by compute_optimal_test_order(), the rule
+#'   used before this option existed. NULL (default, not set): the first rule for Model_type = "LC_MVP" and
+#'   "greedy_correlation_order" for USER-SUPPLIED Stan models, whose intercepts are not known here; the first
+#'   rule set explicitly for a Stan model stops with an error. The rule used is returned as
+#'   \code{test_order_rule_for_reorder_cols_MVP}.
+#'   \code{"test_with_largest_tail_category_distance_from_latent_mean_last_then_greedy_correlation_order"}
+#'   (binary and ordinal tests; the default for Model_type = "LC_MVOP") places last the test whose tail
+#'   categories sit furthest from the class-conditional latent mean at the pre-burnin estimate (BayesMVP's
+#'   compute_tail_category_distance_from_latent_mean_per_test(), from the cutpoints and category probabilities;
+#'   for a binary test it equals the measure of the first rule), and orders the other tests by the greedy rule.
+#'   The first rule is for binary tests only (it stops for LC_MVOP); neither is available for a Stan model.
+#' @param n_chunks_multiplier_for_PartialLog_log_scale_evaluation A positive whole number (default 3): every
+#'   PartialLog (log-scale) evaluation of the built-in LC_MVP / MVP and LC_MVOP / MVOP models (the fallback of
+#'   multi_attempts when the standard evaluation fails, and the evaluation forced by force_PartialLog = TRUE)
+#'   uses this many times the number of chunks of the fit (capped at N / SIMD width chunks), so that each
+#'   PartialLog chunk, which needs about 3 times more memory per individual than a standard one, stays about the
+#'   same size in memory. The nuisance values and their gradient are re-laid out exactly between the two chunk
+#'   layouts. 1 = the number of chunks of the fit. Returned as
+#'   \code{n_chunks_multiplier_for_PartialLog_log_scale_evaluation} and in HMC_info.
 #' @param burnin_TBB_pool_equals_n_chains NULL selects TRUE for built-in models, whose within-chain work uses OpenMP.
 #'   External Stan models always use FALSE, including when TRUE is supplied, so their nested TBB work can use
 #'   n_chains_burnin * n_threads_WCP_burnin threads. An explicit FALSE remains available for built-in models.
@@ -565,6 +602,17 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## runs (so a run is otherwise identical), only its estimated order is replaced.
                                         test_perm_override = NULL,
                                         ##
+                                        ## The rule that sets the test order after the pre-burnin when
+                                        ## reorder_cols_MVP = TRUE (see the roxygen entry):
+                                        ## "most_nearly_deterministic_test_last_then_greedy_correlation_order" or
+                                        ## "greedy_correlation_order"; NULL (not set) = the first rule for the
+                                        ## built-in LC_MVP model and the greedy rule for external Stan models:
+                                        test_order_rule_for_reorder_cols_MVP = NULL,
+                                        ##
+                                        ## The number-of-chunks multiplier of every PartialLog (log-scale)
+                                        ## evaluation (see the roxygen entry):
+                                        n_chunks_multiplier_for_PartialLog_log_scale_evaluation = 3,
+                                        ##
                                         num_chunks_burnin = NULL,
                                         num_chunks_sampling = NULL,
                                         diffusion_HMC_integrator = "kick_flow_kick",
@@ -602,6 +650,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         if (is.null(get(metric_pooled_argument_name, envir = environment(), inherits = FALSE))) {
                             argument_names <-  setdiff(argument_names, metric_pooled_argument_name)
                         }
+                    }
+                    ## and for a NULL test_order_rule_for_reorder_cols_MVP (the default, not set):
+                    if (is.null(test_order_rule_for_reorder_cols_MVP)) {
+                        argument_names <-  setdiff(argument_names, "test_order_rule_for_reorder_cols_MVP")
                     }
                     fit_frame <-  environment()
                     fit_arguments <-  setNames(lapply(argument_names, function(argument_name) {
@@ -1091,6 +1143,35 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         " (same position; no trajectory retry).\n", sep = "")
                 }
                 ##
+                ## ---- the lp / gradient evaluation path, named when force_autodiff or force_PartialLog is TRUE
+                ##      (the evaluation selector and the LC_MVP / MVP / LC_MVOP / MVOP multi-attempt functions
+                ##      honour both; force_autodiff wins over force_PartialLog):
+                ##
+                if (isTRUE(force_autodiff) || isTRUE(force_PartialLog)) {
+                      Model_type_of_this_fit <-  init_object$Model_type
+                      is_latent_trait_with_multi_attempts <-  identical(Model_type_of_this_fit, "latent_trait") &&
+                                                              isTRUE(multi_attempts)
+                      forced_evaluation_path_text <-
+                            if (identical(Model_type_of_this_fit, "Stan")) {
+                                  paste0("force_autodiff / force_PartialLog have no effect for ",
+                                         "Model_type = 'Stan': the Stan model's own autodiff gradient is used.")
+                            } else if (is_latent_trait_with_multi_attempts) {
+                                  paste0("force_autodiff / force_PartialLog have no effect for latent_trait ",
+                                         "with multi_attempts = TRUE (its multi-attempt chain does not read ",
+                                         "them).")
+                            } else if (isTRUE(force_autodiff)) {
+                                  paste0("Evaluation path forced (force_autodiff = TRUE): autodiff ",
+                                         "(stan::math::var, log scale) only; NoLog and PartialLog are skipped; ",
+                                         "a failed evaluation is flagged, with no further attempt.")
+                            } else {
+                                  paste0("Evaluation path forced (force_PartialLog = TRUE): PartialLog ",
+                                         "(log scale) first; NoLog is skipped; ",
+                                         if (isTRUE(autodiff_fallback)) "autodiff if it fails." else
+                                               "a failed evaluation is flagged.")
+                            }
+                      message(colourise(forced_evaluation_path_text, "cyan"))
+                }
+                ##
                 force_autodiff_for_metric <- if_null_then_set_to(force_autodiff_for_metric, TRUE)
                 force_PartialLog_for_metric <- if_null_then_set_to(force_PartialLog_for_metric, FALSE)
                 force_multi_attempts_for_metric <- if_null_then_set_to(force_multi_attempts_for_metric, FALSE)
@@ -1188,7 +1269,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##      If it is missing, reordering is REFUSED (loudly) instead of being
                 ##      applied to something arbitrary:
                 ##
-                reorder_cols_MVP <- if (missing(reorder_cols_MVP)) FALSE else if_null_then_set_to(reorder_cols_MVP, FALSE)
+                # reorder_cols_MVP <- if (missing(reorder_cols_MVP)) FALSE else
+                #                     if_null_then_set_to(reorder_cols_MVP, FALSE)
+                ## A reorder_cols_MVP that is NULL or not given is TRUE for the latent class probit models
+                ## (LC_MVP, LC_MVOP) and FALSE for every other model (a value given explicitly is used as it is):
+                reorder_cols_MVP_when_not_given <-  Model_type %in% c("LC_MVP", "LC_MVOP")
+                reorder_cols_MVP <-  if (missing(reorder_cols_MVP)) reorder_cols_MVP_when_not_given else
+                                     if_null_then_set_to(reorder_cols_MVP, reorder_cols_MVP_when_not_given)
                 ##
                 if (isTRUE(reorder_cols_MVP) && (Model_type == "Stan")) {
                       if (!exists("check_reorder_cols_MVP_for_Stan", mode = "function")) {
@@ -1203,6 +1290,77 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     stop("test_perm_override is only used when reorder_cols_MVP = TRUE (Model_type LC_MVP or Stan); ",
                          "here it would be silently ignored.")
                 }
+                ##
+                ## ---- test_order_rule_for_reorder_cols_MVP: NULL (not set) = the first rule for the built-in
+                ##      models and "greedy_correlation_order" for external Stan models, whose intercepts are not
+                ##      known here; a rule set explicitly is the rule that runs, or the fit stops:
+                ##
+                # test_order_rules_for_reorder_cols_MVP_allowed <-
+                #       c("most_nearly_deterministic_test_last_then_greedy_correlation_order",
+                #         "greedy_correlation_order")
+                # if (is.null(test_order_rule_for_reorder_cols_MVP)) {
+                #     test_order_rule_for_reorder_cols_MVP <-
+                #           if (Model_type == "Stan") "greedy_correlation_order" else
+                #                                     test_order_rules_for_reorder_cols_MVP_allowed[1]
+                # } else
+                ##
+                ## ---- the third rule measures binary AND ordinal tests (tail categories from the cutpoints);
+                ##      it is the default for LC_MVOP, whose ordinal tests the first rule (intercepts only)
+                ##      cannot measure:
+                ##
+                test_order_rules_for_reorder_cols_MVP_allowed <-
+                      c("most_nearly_deterministic_test_last_then_greedy_correlation_order",
+                        "greedy_correlation_order",
+                        paste0("test_with_largest_tail_category_distance_from_latent_mean_last_then_greedy_",
+                               "correlation_order"))
+                if (is.null(test_order_rule_for_reorder_cols_MVP)) {
+                    test_order_rule_for_reorder_cols_MVP <-
+                          if (Model_type == "Stan") "greedy_correlation_order" else
+                          if (Model_type == "LC_MVOP") test_order_rules_for_reorder_cols_MVP_allowed[3] else
+                                                    test_order_rules_for_reorder_cols_MVP_allowed[1]
+                } else if ((Model_type == "LC_MVOP") &&
+                           identical(test_order_rule_for_reorder_cols_MVP,
+                                     test_order_rules_for_reorder_cols_MVP_allowed[1])) {
+                    stop(paste0("test_order_rule_for_reorder_cols_MVP = \"",
+                                test_order_rules_for_reorder_cols_MVP_allowed[1], "\" reads the intercepts ",
+                                "only, which do not measure an ordinal test; use \"",
+                                test_order_rules_for_reorder_cols_MVP_allowed[3], "\" for LC_MVOP."))
+                } else if ((Model_type == "Stan") &&
+                           identical(test_order_rule_for_reorder_cols_MVP,
+                                     test_order_rules_for_reorder_cols_MVP_allowed[3])) {
+                    stop(paste0("test_order_rule_for_reorder_cols_MVP = \"",
+                                test_order_rules_for_reorder_cols_MVP_allowed[3], "\" needs the cutpoints ",
+                                "and intercepts of a built-in model; use \"greedy_correlation_order\" for an ",
+                                "external Stan model."))
+                } else if (!is.character(test_order_rule_for_reorder_cols_MVP) ||
+                           (length(test_order_rule_for_reorder_cols_MVP) != 1) ||
+                           !(test_order_rule_for_reorder_cols_MVP %in%
+                             test_order_rules_for_reorder_cols_MVP_allowed)) {
+                    stop(paste0("test_order_rule_for_reorder_cols_MVP must be NULL or one of \"",
+                                paste(test_order_rules_for_reorder_cols_MVP_allowed, collapse = "\", \""),
+                                "\"."))
+                } else if ((Model_type == "Stan") &&
+                           (test_order_rule_for_reorder_cols_MVP ==
+                            test_order_rules_for_reorder_cols_MVP_allowed[1])) {
+                    stop(paste0("test_order_rule_for_reorder_cols_MVP = \"",
+                                test_order_rules_for_reorder_cols_MVP_allowed[1], "\" needs the intercepts ",
+                                "of the built-in LC_MVP model; use \"greedy_correlation_order\" for an ",
+                                "external Stan model."))
+                }
+                ##
+                ## ---- n_chunks_multiplier_for_PartialLog_log_scale_evaluation: a single positive whole number:
+                ##
+                if (!is.numeric(n_chunks_multiplier_for_PartialLog_log_scale_evaluation) ||
+                    (length(n_chunks_multiplier_for_PartialLog_log_scale_evaluation) != 1) ||
+                    !is.finite(n_chunks_multiplier_for_PartialLog_log_scale_evaluation) ||
+                    (n_chunks_multiplier_for_PartialLog_log_scale_evaluation < 1) ||
+                    (n_chunks_multiplier_for_PartialLog_log_scale_evaluation !=
+                     round(n_chunks_multiplier_for_PartialLog_log_scale_evaluation))) {
+                    stop(paste0("n_chunks_multiplier_for_PartialLog_log_scale_evaluation must be a single ",
+                                "positive whole number (default 3)."))
+                }
+                n_chunks_multiplier_for_PartialLog_log_scale_evaluation <-
+                      as.numeric(n_chunks_multiplier_for_PartialLog_log_scale_evaluation)
                 ##
                 # if (is.null(Stan_data_list$test_perm))      Stan_data_list$test_perm      <- 1:model_args_list$n_tests
                 # if (is.null(Stan_data_list$n_cat_per_test)) Stan_data_list$n_cat_per_test <- model_args_list$n_cat_per_test
@@ -1369,6 +1527,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 Model_args_as_Rcpp_List <- init_object$Model_args_as_Rcpp_List ; Model_args_as_Rcpp_List
                 Model_args_as_Rcpp_List$autodiff_fallback <-  autodiff_fallback
+                Model_args_as_Rcpp_List$n_chunks_multiplier_for_PartialLog_log_scale_evaluation <-
+                      n_chunks_multiplier_for_PartialLog_log_scale_evaluation
                 model_args_list         <- init_object$model_args_list
                 ##
                 # Model_args_as_Rcpp_List$Model_args_ints[4, 1] <- 4
@@ -1446,6 +1606,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 ## ---- Process initial values BEFORE burnin:
                 ##
+                ## ---- the chunk layout of the nuisance vector in the burn-in (built-in models): the
+                ##      burn-in's number of chunks and vectorisation, as the C++ reads them:
+                chunk_layout_of_nuisance_vector_in_burnin <-  NULL
+                if (Model_type != "Stan") {
+                      chunk_layout_of_nuisance_vector_in_burnin <-
+                            list( N = nrow(y),
+                                  n_tests = ncol(y),
+                                  n_chunks = Model_args_as_Rcpp_List$Model_args_ints[4],
+                                  vect_type = Model_args_as_Rcpp_List$Model_args_strings[1])
+                }
                 outs <- R_fn_init_initial_values( Model_type = Model_type,
                                                   bs_model = bs_model,
                                                   ##
@@ -1454,7 +1624,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                   ##
                                                   sample_nuisance = sample_nuisance,
                                                   n_nuisance = n_nuisance,
-                                                  n_params_main = n_params_main)
+                                                  n_params_main = n_params_main,
+                                                  ##
+                                                  chunk_layout_of_nuisance_vector_in_burnin =
+                                                        chunk_layout_of_nuisance_vector_in_burnin)
                 ##
                 inits_unconstrained_vec_per_chain <- outs$inits_unconstrained_vec_per_chain
                 ##
@@ -1560,7 +1733,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 # reorder_cols_MVP <- TRUE
                 ##
-                if ((Model_type %in% c("LC_MVP", "Stan")) &&
+                # if ((Model_type %in% c("LC_MVP", "Stan")) &&
+                #     (reorder_cols_MVP == TRUE)) {
+                ##
+                ## ---- LC_MVOP too: its re-layout block and its outputs (create_summary_and_traces) handle any
+                ##      test order:
+                ##
+                if ((Model_type %in% c("LC_MVP", "LC_MVOP", "Stan")) &&
                     (reorder_cols_MVP == TRUE)) {
 
                     ## ---- Number of tests + number of latent classes: known from
@@ -1828,7 +2007,76 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ## Omega unavailable (external Stan model only - see above): identity order.
                         test_perm <- seq_len(n_tests)
                       } else {
-                        test_perm <- compute_optimal_test_order(Omega_hat_list)
+                        # test_perm <- compute_optimal_test_order(Omega_hat_list)
+                        ##
+                        ## ---- test_order_rule_for_reorder_cols_MVP (resolved above; the first rule is
+                        ##      never resolved for an external Stan model).
+                        ##      "most_nearly_deterministic_test_last_then_greedy_correlation_order": the
+                        ##      test whose class-conditional latent means sit furthest in the tails (the
+                        ##      most nearly deterministic test) is placed last, so that no other test's
+                        ##      truncation bound depends on its steep-tail nuisance values; the other tests
+                        ##      keep the greedy C-vine order. Both use the same pre-burnin estimate
+                        ##      (theta_main_median). "greedy_correlation_order": the greedy C-vine order of
+                        ##      all tests, the rule used before the option existed:
+                        ##
+                        if (identical(test_order_rule_for_reorder_cols_MVP,
+                                      "most_nearly_deterministic_test_last_then_greedy_correlation_order")) {
+                              tail_extremeness_per_test <-  compute_tail_extremeness_per_test_LC_MVP(
+                                    theta_main                   = theta_main_median,
+                                    n_tests                      = n_tests,
+                                    n_class                      = n_class_for_reorder,
+                                    n_covariates_per_outcome_mat = model_args_list$n_covariates_per_outcome_mat,
+                                    X                            = model_args_list$X)
+                              test_perm <-  compute_test_order_with_most_nearly_deterministic_test_last(
+                                    Omega_hat_list            = Omega_hat_list,
+                                    tail_extremeness_per_test = tail_extremeness_per_test)
+                              message(colourise(paste0("Test tail extremeness (sum over classes of ",
+                                                       "|probit linear predictor|): ",
+                                                       paste(formatC(tail_extremeness_per_test, digits = 2,
+                                                                     format = "f"), collapse = " "),
+                                                       "; most nearly deterministic test placed last: ",
+                                                       test_perm[n_tests]), "cyan"))
+                        } else if (identical(test_order_rule_for_reorder_cols_MVP,
+                                             paste0("test_with_largest_tail_category_distance_from_latent_mean_",
+                                                    "last_then_greedy_correlation_order"))) {
+                              ##
+                              ## ---- binary and ordinal tests: the probability-weighted distance of the tail
+                              ##      categories from the class-conditional latent mean (cutpoints from the
+                              ##      skeleton's C_vec at the pre-burnin estimate; 0 = the cut of a binary test):
+                              ##
+                              n_cat_per_test_for_reorder <-  if (is.null(model_args_list$n_cat_per_test)) {
+                                    rep(2, n_tests)
+                              } else {
+                                    as.numeric(model_args_list$n_cat_per_test)
+                              }
+                              cutpoints_per_class_and_test <-
+                                    extract_cutpoints_per_class_and_test_via_bridgestan(
+                                    bs_model           = bs_model,
+                                    theta_main         = theta_main_median,
+                                    n_tests            = n_tests,
+                                    n_class            = n_class_for_reorder,
+                                    n_cat_per_test     = n_cat_per_test_for_reorder,
+                                    n_thr_per_ord_test = model_args_list$n_thr_per_ord_test)
+                              tail_category_distance_per_test <-
+                                    compute_tail_category_distance_from_latent_mean_per_test(
+                                    theta_main                   = theta_main_median,
+                                    n_tests                      = n_tests,
+                                    n_class                      = n_class_for_reorder,
+                                    n_covariates_per_outcome_mat = model_args_list$n_covariates_per_outcome_mat,
+                                    X                            = model_args_list$X,
+                                    cutpoints_per_class_and_test = cutpoints_per_class_and_test)
+                              test_perm <-  compute_test_order_with_most_nearly_deterministic_test_last(
+                                    Omega_hat_list            = Omega_hat_list,
+                                    tail_extremeness_per_test = tail_category_distance_per_test)
+                              message(colourise(paste0("Test tail-category distance from the latent mean (sum ",
+                                                       "over classes): ",
+                                                       paste(formatC(tail_category_distance_per_test, digits = 2,
+                                                                     format = "f"), collapse = " "),
+                                                       "; test with the largest distance placed last: ",
+                                                       test_perm[n_tests]), "cyan"))
+                        } else {
+                              test_perm <- compute_optimal_test_order(Omega_hat_list)
+                        }
                       }
                       test_inv_perm <- order(test_perm)
                       cat(if (!is.null(test_perm_override)) "Test order (test_perm_override):" else "Optimal test order:", test_perm, "\n")
@@ -1864,6 +2112,17 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ##
                       } else {
                         ##
+                        ## ---- The correlation bounds and known correlation values in the ORIGINAL test
+                        ##      order, kept for the re-layout of the Omega_unconstrained_vec initial values
+                        ##      below (made after the bounds and known values have been permuted, so that the
+                        ##      fitted-order ones are those the model reads):
+                        ##
+                        correlation_bounds_and_known_values_in_original_test_order <-
+                              list( lb_corr = model_args_list$lb_corr,
+                                    ub_corr = model_args_list$ub_corr,
+                                    known_values_indicator_list = model_args_list$known_values_indicator_list,
+                                    known_values_list = model_args_list$known_values_list)
+                        ##
                         ## ---- Permute y:
                         ##
                         y_swapped <- model_args_list$y[, test_perm]
@@ -1873,15 +2132,43 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ##
                         ## ---- Permute correlation bounds / known corrs (existing):
                         ##
-                        perm_data <- permute_corr_data( model_args_list$lb_corr,
-                                                        model_args_list$ub_corr,
-                                                        model_args_list$known_values_indicator,
-                                                        model_args_list$known_values,
-                                                        test_perm)
-                        model_args_list$lb_corr <- perm_data$lb_corr
-                        model_args_list$ub_corr <- perm_data$ub_corr
-                        model_args_list$known_values_indicator <- perm_data$known_values_indicator
-                        model_args_list$known_values <- perm_data$known_values
+                        # perm_data <- permute_corr_data( model_args_list$lb_corr,
+                        #                                 model_args_list$ub_corr,
+                        #                                 model_args_list$known_values_indicator,
+                        #                                 model_args_list$known_values,
+                        #                                 test_perm)
+                        # model_args_list$lb_corr <- perm_data$lb_corr
+                        # model_args_list$ub_corr <- perm_data$ub_corr
+                        # model_args_list$known_values_indicator <- perm_data$known_values_indicator
+                        # model_args_list$known_values <- perm_data$known_values
+                        ##
+                        ## ---- The built-in models (C++ and Stan skeletons) read the known correlations
+                        ##      from known_values_indicator_list / known_values_list
+                        ##      (init_hard_coded_model_args), so these are the fields permuted here (the
+                        ##      lines above permuted known_values_indicator / known_values, which no model
+                        ##      reads). The correlation priors prior_for_corr_a / prior_for_corr_b are
+                        ##      indexed by test pair in the same way. permute_corr_data() reads each matrix
+                        ##      through its lower triangle, the triangle the models read:
+                        ##
+                        perm_data <-  permute_corr_data( lb_corr = model_args_list$lb_corr,
+                                                         ub_corr = model_args_list$ub_corr,
+                                                         known_values_indicator =
+                                                               model_args_list$known_values_indicator_list,
+                                                         known_values = model_args_list$known_values_list,
+                                                         perm = test_perm)
+                        model_args_list$lb_corr                     <-  perm_data$lb_corr
+                        model_args_list$ub_corr                     <-  perm_data$ub_corr
+                        model_args_list$known_values_indicator_list <-  perm_data$known_values_indicator
+                        model_args_list$known_values_list           <-  perm_data$known_values
+                        ##
+                        for (prior_for_corr_name in c("prior_for_corr_a", "prior_for_corr_b")) {
+                              if (!is.null(model_args_list[[prior_for_corr_name]])) {
+                                    model_args_list[[prior_for_corr_name]] <-
+                                          lapply( model_args_list[[prior_for_corr_name]],
+                                                  fn_permute_test_pair_matrix_reading_its_lower_triangle,
+                                                  test_perm = test_perm)
+                              }
+                        }
                         ##
                         ## ---- Permute coefficient priors, X, covariate counts, baseline cases:
                         ##
@@ -1901,6 +2188,51 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             init_lists_per_chain[[kk]]$beta[[c]][,] <- init_lists_per_chain[[kk]]$beta[[c]][, test_perm, drop = FALSE]
                           }
                         }
+                        ##
+                        ## ---- Permute the u_raw (nuisance) initial values with the tests: u_raw holds one
+                        ##      column per test (N x n_tests), so fitted slot j takes the column of ORIGINAL
+                        ##      test test_perm[j]:
+                        ##
+                        for (kk in 1:n_chains_burnin) {
+                          if (!is.null(init_lists_per_chain[[kk]]$u_raw)) {
+                            init_lists_per_chain[[kk]]$u_raw <-
+                                  fn_u_raw_initial_values_in_fitted_test_order(
+                                        u_raw = init_lists_per_chain[[kk]]$u_raw,
+                                        test_perm = test_perm,
+                                        N = nrow(y_swapped))
+                          }
+                        }
+                        ##
+                        ## ---- Map the Omega_unconstrained_vec initial values into the fitted test order: each
+                        ##      class's raw vector holds the bounded LDL ("Pinkney") coordinates of its
+                        ##      correlation matrix in the ORIGINAL order; it is mapped through the correlation
+                        ##      matrix itself, raw (original order, original-order bounds / known values) ->
+                        ##      Omega -> Omega[test_perm, test_perm] -> raw (fitted order, with the bounds /
+                        ##      known values the model now reads):
+                        ##
+                        correlation_bounds_and_known_values_in_fitted_test_order <-
+                              list( lb_corr = model_args_list$lb_corr,
+                                    ub_corr = model_args_list$ub_corr,
+                                    known_values_indicator_list = model_args_list$known_values_indicator_list,
+                                    known_values_list = model_args_list$known_values_list)
+                        for (kk in 1:n_chains_burnin) {
+                          if (!is.null(init_lists_per_chain[[kk]]$Omega_unconstrained_vec)) {
+                            init_lists_per_chain[[kk]]$Omega_unconstrained_vec <-
+                                  fn_Omega_unconstrained_vec_initial_values_in_fitted_test_order(
+                                        Omega_unconstrained_vec =
+                                              init_lists_per_chain[[kk]]$Omega_unconstrained_vec,
+                                        test_perm = test_perm,
+                                        n_class = n_class,
+                                        bounds_and_known_values_in_original_test_order =
+                                              correlation_bounds_and_known_values_in_original_test_order,
+                                        bounds_and_known_values_in_fitted_test_order =
+                                              correlation_bounds_and_known_values_in_fitted_test_order,
+                                        corr_force_positive = isTRUE(model_args_list$corr_force_positive))
+                          }
+                        }
+                        message(colourise(paste0("reorder_cols_MVP: u_raw and Omega_unconstrained_vec initial ",
+                                                 "values re-laid out into the fitted test order [",
+                                                 paste(test_perm, collapse = ", "), "]"), "cyan"))
                         ##
                         ## ================================================================
                         ## vvvvvvvvvvvv  NEW BLOCK - PASTE ALL OF THIS HERE  vvvvvvvvvvvv
@@ -1985,7 +2317,29 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                     ##
                                     model_args_list$n_cat_per_ord_test    <- model_args_list$n_cat_per_ord_test[ord_of_fitted]
                                     model_args_list$n_thr_per_ord_test    <- model_args_list$n_thr_per_ord_test[ord_of_fitted]
-                                    model_args_list$prior_dirichlet_alpha <- model_args_list$prior_dirichlet_alpha[, ord_of_fitted, drop = FALSE]
+                                    # model_args_list$prior_dirichlet_alpha <-
+                                    #       model_args_list$prior_dirichlet_alpha[, ord_of_fitted, drop = FALSE]
+                                    ##
+                                    ## ---- prior_dirichlet_alpha is a LIST: one matrix
+                                    ##      (max(n_cat_per_ord_test) x n_ordinal_tests) per latent class
+                                    ##      (init_hard_coded_model_args). Each class's columns go into
+                                    ##      fitted ordinal-slot order (the line above indexed the list as a
+                                    ##      matrix):
+                                    ##
+                                    fn_dirichlet_alpha_columns_in_fitted_ordinal_slot_order <-
+                                          function(prior_dirichlet_alpha_matrix) {
+                                                return(prior_dirichlet_alpha_matrix[, ord_of_fitted,
+                                                                                    drop = FALSE])
+                                          }
+                                    if (is.list(model_args_list$prior_dirichlet_alpha)) {
+                                          model_args_list$prior_dirichlet_alpha <-
+                                                lapply( model_args_list$prior_dirichlet_alpha,
+                                                        fn_dirichlet_alpha_columns_in_fitted_ordinal_slot_order)
+                                    } else {
+                                          model_args_list$prior_dirichlet_alpha <-
+                                                fn_dirichlet_alpha_columns_in_fitted_ordinal_slot_order(
+                                                      model_args_list$prior_dirichlet_alpha)
+                                    }
                                     ##
                                     ## ---- Ragged C_raw init blocks: whole-block permutation (blocks are
                                     ##      independent per test -- 1st elem is the first cutpoint, rest are
@@ -1994,15 +2348,56 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                     end_old   <- cumsum(n_thr_old)
                                     start_old <- c(1, head(end_old, -1) + 1)
                                     ##
+                                    # for (kk in 1:n_chains_burnin) {
+                                    #       if (is.null(init_lists_per_chain[[kk]]$C_raw_vec)) {
+                                    #         stop("permute block: init_lists_per_chain[[kk]]$C_raw_vec not ",
+                                    #              "found -- check the init field name!")
+                                    #       }
+                                    #       for (c in 1:2) {
+                                    #         C_raw  <- init_lists_per_chain[[kk]]$C_raw_vec[[c]]
+                                    #         blocks <- lapply(seq_along(n_thr_old),
+                                    #                          function(tt) C_raw[start_old[tt]:end_old[tt]])
+                                    #         init_lists_per_chain[[kk]]$C_raw_vec[[c]] <-
+                                    #               unlist(blocks[ord_of_fitted])
+                                    #       }
+                                    # }
+                                    ##
+                                    ## ---- The cutpoint PARAMETER of the LC_MVOP / MVOP skeletons, i.e. the
+                                    ##      initial-value field, is C_unc_vec: one vector of length
+                                    ##      sum(n_thr_per_ord_test) per latent class (C_raw_vec is a transformed
+                                    ##      parameter there). Its per-test blocks have different lengths and
+                                    ##      move as whole blocks, in every latent class:
+                                    ##
+                                    fn_C_unc_vec_blocks_in_fitted_ordinal_slot_order <-
+                                          function(C_unc_vec_of_one_class) {
+                                                block_of_ordinal_slot <-  function(tt) {
+                                                      C_unc_vec_of_one_class[start_old[tt]:end_old[tt]]
+                                                }
+                                                blocks <-  lapply(seq_along(n_thr_old), block_of_ordinal_slot)
+                                                return(unlist(blocks[ord_of_fitted]))
+                                          }
+                                    ##
                                     for (kk in 1:n_chains_burnin) {
-                                          if (is.null(init_lists_per_chain[[kk]]$C_raw_vec)) {
-                                            stop("permute block: init_lists_per_chain[[kk]]$C_raw_vec not found -- check the init field name!")
+                                          C_unc_vec_initial_values <-  init_lists_per_chain[[kk]]$C_unc_vec
+                                          if (is.null(C_unc_vec_initial_values)) {
+                                                stop(paste0("test re-ordering: init_lists_per_chain[[", kk,
+                                                            "]] has no C_unc_vec (the cutpoint parameter of ",
+                                                            "the ", Model_type, " model)."))
                                           }
-                                          for (c in 1:2) {
-                                            C_raw  <- init_lists_per_chain[[kk]]$C_raw_vec[[c]]
-                                            blocks <- lapply(seq_along(n_thr_old), function(tt) C_raw[start_old[tt]:end_old[tt]])
-                                            init_lists_per_chain[[kk]]$C_raw_vec[[c]] <- unlist(blocks[ord_of_fitted])
+                                          if (is.matrix(C_unc_vec_initial_values)) {   ## one row per class
+                                                for (c in seq_len(nrow(C_unc_vec_initial_values))) {
+                                                      C_unc_vec_initial_values[c, ] <-
+                                                            fn_C_unc_vec_blocks_in_fitted_ordinal_slot_order(
+                                                                  C_unc_vec_initial_values[c, ])
+                                                }
+                                          } else {   ## a list: one vector per latent class
+                                                for (c in seq_along(C_unc_vec_initial_values)) {
+                                                      C_unc_vec_initial_values[[c]] <-
+                                                            fn_C_unc_vec_blocks_in_fitted_ordinal_slot_order(
+                                                                  C_unc_vec_initial_values[[c]])
+                                                }
                                           }
+                                          init_lists_per_chain[[kk]]$C_unc_vec <-  C_unc_vec_initial_values
                                     }
                                 
                               }
@@ -2134,6 +2529,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             ##
                             Model_args_as_Rcpp_List <- init_object$Model_args_as_Rcpp_List
                             Model_args_as_Rcpp_List$autodiff_fallback <-  autodiff_fallback
+                            Model_args_as_Rcpp_List$n_chunks_multiplier_for_PartialLog_log_scale_evaluation <-
+                                  n_chunks_multiplier_for_PartialLog_log_scale_evaluation
                             model_args_list         <- init_object$model_args_list 
                             ##
                             n_nuisance <- init_object$n_nuisance ; n_nuisance
@@ -2189,6 +2586,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             ##
                             ## ---- Process initial values BEFORE burnin:
                             ##
+                            ## ---- the chunk layout of the nuisance vector in the burn-in (built-in models): the
+                            ##      burn-in's number of chunks and vectorisation, as the C++ reads them:
+                            chunk_layout_of_nuisance_vector_in_burnin <-  NULL
+                            if (Model_type != "Stan") {
+                                  chunk_layout_of_nuisance_vector_in_burnin <-
+                                        list( N = nrow(y),
+                                              n_tests = ncol(y),
+                                              n_chunks = Model_args_as_Rcpp_List$Model_args_ints[4],
+                                              vect_type = Model_args_as_Rcpp_List$Model_args_strings[1])
+                            }
                             outs <- R_fn_init_initial_values( Model_type = Model_type,
                                                               bs_model = bs_model,
                                                               ##
@@ -2197,7 +2604,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                               ##
                                                               sample_nuisance = sample_nuisance,
                                                               n_nuisance = n_nuisance,
-                                                              n_params_main = n_params_main)
+                                                              n_params_main = n_params_main,
+                                                              ##
+                                                              chunk_layout_of_nuisance_vector_in_burnin =
+                                                                    chunk_layout_of_nuisance_vector_in_burnin)
                             ##
                             inits_unconstrained_vec_per_chain <- outs$inits_unconstrained_vec_per_chain
                             ##
@@ -3047,6 +3457,37 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    print(paste("time_total = ",  time_total))
                 })
 
+                ##
+                ## ---- Names on every per-coordinate object of the returned burn-in record (draws, adapted
+                ##      metric, theta_hat_us, snaper / eigen vectors, final states), each the name of its
+                ##      coordinate of the sampler's vector in the sampler's own layout
+                ##      (R_fn_name_burnin_record_by_sampler_coordinate.R). Values are unchanged, and sampling has
+                ##      finished, so nothing handed to the sampler is touched. A failure here leaves the record
+                ##      without names, with a warning:
+                ##
+                burnin_object <-  tryCatch(
+                      fn_burnin_record_with_names_of_sampler_coordinates(
+                            burnin_object    = burnin_object,
+                            coordinate_names = fn_names_of_sampler_coordinates_in_sampler_layout(
+                                  init_object                          = init_object,
+                                  Model_type                           = Model_type,
+                                  test_perm                            = test_perm,
+                                  num_chunks_of_burnin_nuisance_layout =
+                                        if (exists("num_chunks_used_in_burnin", inherits = FALSE))
+                                              num_chunks_used_in_burnin else NULL,
+                                  vect_type_of_burnin_nuisance_layout  =
+                                        if (Model_type != "Stan") Model_args_as_Rcpp_List$Model_args_strings[1]
+                                        else NULL,
+                                  fn_nuisance_chunk_layout_positions   =
+                                        if (exists("fn_nuisance_chunk_layout_positions", mode = "function"))
+                                              get("fn_nuisance_chunk_layout_positions", mode = "function") else
+                                              NULL)),
+                      error = function(error_object) {
+                            warning(paste0("burn-in record left without coordinate names: ",
+                                           conditionMessage(error_object)))
+                            return(burnin_object)
+                      })
+
   out_list <- list(init_object = init_object,
                    burnin_object = burnin_object,
                    burnin_schedule = burnin_object$burnin_schedule,
@@ -3057,6 +3498,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    ##
                    test_perm = test_perm,
                    test_inv_perm = test_inv_perm,
+                   ## the rule that sets test_perm after the reorder_cols_MVP pre-burnin, as resolved:
+                   test_order_rule_for_reorder_cols_MVP = test_order_rule_for_reorder_cols_MVP,
+                   ## the number-of-chunks multiplier of every PartialLog (log-scale) evaluation:
+                   n_chunks_multiplier_for_PartialLog_log_scale_evaluation =
+                         n_chunks_multiplier_for_PartialLog_log_scale_evaluation,
                    ##
                    LR_main = LR_main, 
                    LR_us = LR_us, 

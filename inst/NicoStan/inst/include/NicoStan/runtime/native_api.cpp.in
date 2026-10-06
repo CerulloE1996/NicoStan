@@ -357,6 +357,25 @@ bool fn_read_autodiff_fallback_option(const Rcpp::List &R_List) {
 
 }
 
+//// The PartialLog chunk multiplier (list entry n_chunks_multiplier_for_PartialLog_log_scale_evaluation, set by
+//// sample()): a single positive whole number; 1 for a list without that entry.
+int fn_read_PartialLog_n_chunks_multiplier(const Rcpp::List &R_List) {
+
+     const std::string entry_name = "n_chunks_multiplier_for_PartialLog_log_scale_evaluation";
+     if (!R_List.containsElementNamed(entry_name.c_str())) return 1;
+     SEXP multiplier_value = R_List[entry_name];
+     const bool is_single_number = ( (TYPEOF(multiplier_value) == REALSXP) ||
+                                     (TYPEOF(multiplier_value) == INTSXP) ) &&
+                                   (Rf_xlength(multiplier_value) == 1);
+     const double multiplier = is_single_number ? Rf_asReal(multiplier_value) : NA_REAL;
+     if (!is_single_number || !std::isfinite(multiplier) || (multiplier < 1.0) ||
+         (multiplier != std::floor(multiplier)) || (multiplier > 1.0e6)) {
+          Rcpp::stop(entry_name + " must be a single positive whole number.");
+     }
+     return static_cast<int>(multiplier);
+
+}
+
 Model_fn_args_struct   convert_R_List_to_Model_fn_args_struct(Rcpp::List R_List) {
 
      // handles empty fields by using defaults
@@ -419,6 +438,9 @@ Model_fn_args_struct   convert_R_List_to_Model_fn_args_struct(Rcpp::List R_List)
      model_arguments.autodiff_fallback = fn_read_autodiff_fallback_option(R_List);
      model_arguments.autodiff_fallback_option_is_set = R_List.containsElementNamed("autodiff_fallback") ||
          Rf_GetOption1(Rf_install("BayesMVP_autodiff_fallback")) != R_NilValue;
+     model_arguments.PartialLog_n_chunks_multiplier = fn_read_PartialLog_n_chunks_multiplier(R_List);
+     model_arguments.PartialLog_n_chunks_multiplier_option_is_set =
+         R_List.containsElementNamed("n_chunks_multiplier_for_PartialLog_log_scale_evaluation");
      return model_arguments;
 
 }

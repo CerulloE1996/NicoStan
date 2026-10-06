@@ -12,7 +12,11 @@ R_fn_init_initial_values <- function( Model_type,
                                       ##
                                       sample_nuisance,
                                       n_nuisance,
-                                      n_params_main
+                                      n_params_main,
+                                      ##
+                                      ## built-in models: list(N, n_tests, n_chunks, vect_type) of the
+                                      ## burn-in, the chunk layout of the nuisance vector the C++ reads:
+                                      chunk_layout_of_nuisance_vector_in_burnin = NULL
 ) {
   
         if (is.null(init_lists_per_chain)) { 
@@ -185,10 +189,35 @@ R_fn_init_initial_values <- function( Model_type,
                     theta_nuisance_vectors_all_chains_input_from_R    <- array(0, dim = c(n_nuisance, n_chains_burnin))
                     theta_main_vectors_all_chains_input_from_R  <- array(0, dim = c(n_params_main, n_chains_burnin))
                     ##
+                    ##
+                    ## ---- the built-in C++ log densities store the nuisance vector CHUNK BY CHUNK (chunk k
+                    ##      is a column-major (chunk_size x n_tests) block, fn_nuisance_chunk_layout_positions),
+                    ##      so each (observation, test) entry of u_raw (N x n_tests, or a vector read column by
+                    ##      column) goes to its position in that layout, with the burn-in's number of chunks
+                    ##      and vectorisation (with one chunk, the layout is column by column):
+                    ##
+                    chunk_layout_in_burnin <-  chunk_layout_of_nuisance_vector_in_burnin
+                    if (is.null(chunk_layout_in_burnin)) {
+                      stop(paste0("R_fn_init_initial_values: chunk_layout_of_nuisance_vector_in_burnin ",
+                                  "(list(N, n_tests, n_chunks, vect_type)) is needed to lay out the u_raw ",
+                                  "initial values of a built-in model."))
+                    }
+                    position_in_nuisance_vector <-
+                          fn_nuisance_chunk_layout_positions( N = chunk_layout_in_burnin$N,
+                                                              n_tests = chunk_layout_in_burnin$n_tests,
+                                                              n_chunks = chunk_layout_in_burnin$n_chunks,
+                                                              vect_type = chunk_layout_in_burnin$vect_type)
+                    position_in_nuisance_vector <-  as.vector(position_in_nuisance_vector)
+                    stopifnot(length(position_in_nuisance_vector) == n_nuisance)
+                    ##
                     for (kk in 1:n_chains_burnin) {
                       u_raw_kk <- init_lists_per_chain[[kk]]$u_raw
+                      stopifnot(length(u_raw_kk) == n_nuisance)
                       theta_main_vectors_all_chains_input_from_R[, kk] <-     inits_unconstrained_vec_per_chain[[kk]] ## [index_main]
-                      theta_nuisance_vectors_all_chains_input_from_R[, kk] <-   u_raw_kk ##   inits_unconstrained_vec_per_chain[[kk]][index_nuisance]
+                      # theta_nuisance_vectors_all_chains_input_from_R[, kk] <-   u_raw_kk ##
+                      #   inits_unconstrained_vec_per_chain[[kk]][index_nuisance]
+                      theta_nuisance_vectors_all_chains_input_from_R[position_in_nuisance_vector, kk] <-
+                            as.vector(u_raw_kk)
                     }
                 
               }

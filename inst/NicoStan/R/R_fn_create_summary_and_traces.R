@@ -1010,6 +1010,8 @@ create_summary_and_traces <- function(    model_results,
         
         ## ---- Un-permuting is done in the SKELETON gq (test_perm passed as data).
         ##      Raw main params + tp remain in FITTED order by design (per-fit coords).
+        ##      (beta, Omega and L_Omega are re-indexed into the ORIGINAL test order for LC_MVP in the block
+        ##      after the commented-out un-permutation code below.)
         test_perm <- model_results$test_perm
         if (is.null(test_perm) && (Model_type %in% c("LC_MVP", "LC_MVOP"))) {
           warning("create_summary_and_traces: no test_perm in model_results for an LC model -- old run or R_fn_sample.R not updated.")
@@ -1054,6 +1056,166 @@ create_summary_and_traces <- function(    model_results,
         #         }
         #   
         # }
+        ##
+        ## ---- Test-indexed parameters returned in the ORIGINAL test order (Model_type = "LC_MVP",
+        ##      reorder_cols_MVP = TRUE). The sampler works in the fitted test order: fitted slot j holds
+        ##      original test test_perm[j], so original test t sits in fitted slot order(test_perm)[t]. The
+        ##      skeleton returns Omega_orig, L_Omega_orig, Xbeta_baseline_nd / _d and the generated quantities
+        ##      (Se / Sp / Fp_baseline, p) in the original order, but beta (parameters block) and Omega / L_Omega
+        ##      (transformed parameters) come back in the fitted order under the same names. Here, draw by draw:
+        ##        beta[c,k,t]     <-  beta[c,k,order(test_perm)[t]] of the sampler (the same draws, re-indexed);
+        ##        Omega[c,i,j]    <-  Omega_orig[c,i,j]   (= Omega[c,order(test_perm)[i],order(test_perm)[j]]);
+        ##        L_Omega[c,i,j]  <-  L_Omega_orig[c,i,j] (the Cholesky factor of Omega_orig, which is not a
+        ##                            re-indexing of the fitted-order Cholesky factor).
+        ##      Omega_unconstrained_vec stays in the sampler's coordinates of the fitted order: the bounded LDL
+        ##      parameterisation of the correlations depends on the test order, so it has no original-order
+        ##      counterpart. The raw sampler draws (sampling_object), the burn-in draws and the metric are the
+        ##      sampler's own coordinates and stay in the fitted order too. HMC_info records both lists:
+        ##
+        parameter_families_re_indexed_into_original_test_order <-  character(0)
+        parameter_families_left_in_fitted_test_order            <-  character(0)
+        ##
+        test_order_of_fit_is_not_original_order <-  !is.null(test_perm) &&
+                                                    !identical(as.integer(test_perm), seq_along(test_perm))
+        ##
+        if (test_order_of_fit_is_not_original_order && (Model_type == "Stan")) {
+          
+              ## (external Stan models: only y is permuted and NicoStan cannot identify the model's test-indexed
+              ##  parameters, see the reorder_cols_MVP documentation)
+              parameter_families_left_in_fitted_test_order <-
+                    "every test-indexed parameter of the external Stan model (not identified by NicoStan)"
+          
+        } else if (test_order_of_fit_is_not_original_order) {
+          
+              # if (Model_type != "LC_MVP") {
+              ##
+              ## ---- LC_MVOP too (beta, Omega and L_Omega as for LC_MVP; the cutpoint families below):
+              ##
+              if (!(Model_type %in% c("LC_MVP", "LC_MVOP"))) {
+                    stop(paste0("create_summary_and_traces: the fit used test_perm = ",
+                                paste(test_perm, collapse = " "), " for Model_type = '", Model_type,
+                                "', but returning the test-indexed parameters in the original test order is ",
+                                # "implemented for LC_MVP only."))
+                                "implemented for LC_MVP and LC_MVOP only."))
+              }
+              ##
+              fitted_slot_of_original_test <-  order(test_perm)
+              ##
+              ## ---- beta[c,k,t] (parameters block): the row of original test t takes the draws of fitted slot
+              ##      fitted_slot_of_original_test[t]:
+              ##
+              names_of_main_trace_rows <-  pars_names[index_params_main]
+              beta_rows <-  grep("^beta\\[[0-9]+,[0-9]+,[0-9]+\\]$", names_of_main_trace_rows)
+              if (length(beta_rows) > 0) {
+                    beta_indices <-  do.call(rbind,
+                                             lapply(strsplit(sub("^beta\\[(.*)\\]$", "\\1",
+                                                                 names_of_main_trace_rows[beta_rows]), ","),
+                                                    as.integer))
+                    names_of_fitted_rows_holding_the_original_tests <-
+                          paste0("beta[", beta_indices[, 1], ",", beta_indices[, 2], ",",
+                                 fitted_slot_of_original_test[beta_indices[, 3]], "]")
+                    rows_holding_the_original_tests <-  match(names_of_fitted_rows_holding_the_original_tests,
+                                                              names_of_main_trace_rows)
+                    if (anyNA(rows_holding_the_original_tests)) {
+                          stop("create_summary_and_traces: a beta row of the fitted test order is missing.")
+                    }
+                    trace_params_main[beta_rows, , ] <-  trace_params_main[rows_holding_the_original_tests, , ,
+                                                                           drop = FALSE]
+                    parameter_families_re_indexed_into_original_test_order <-  "beta"
+              }
+              ##
+              ## ---- Omega and L_Omega (transformed parameters) <- the skeleton's Omega_orig and L_Omega_orig:
+              ##
+              if (!is.null(trace_tp) && (length(names_tp_wo_log_lik) > 0)) {
+                    for (family_name in c("Omega", "L_Omega")) {
+                          family_rows <-  grep(paste0("^", family_name, "\\["), names_tp_wo_log_lik)
+                          if (length(family_rows) == 0) next
+                          names_of_original_order_rows <-  sub(paste0("^", family_name, "\\["),
+                                                              paste0(family_name, "_orig["),
+                                                              names_tp_wo_log_lik[family_rows])
+                          original_order_rows <-  match(names_of_original_order_rows, names_tp_wo_log_lik)
+                          if (anyNA(original_order_rows)) {
+                                stop(paste0("create_summary_and_traces: the skeleton returns ", family_name,
+                                            " but not ", family_name, "_orig for every entry."))
+                          }
+                          trace_tp[family_rows, , ] <-  trace_tp[original_order_rows, , , drop = FALSE]
+                          parameter_families_re_indexed_into_original_test_order <-
+                                c(parameter_families_re_indexed_into_original_test_order, family_name)
+                    }
+              }
+              ##
+              ##
+              ## ---- LC_MVOP cutpoints: C_unc_vec[c,j] (parameters) and C_raw_vec[c,j], C_vec[c,j] (transformed
+              ##      parameters) hold, for each class, the cutpoints of the ordinal tests concatenated in the
+              ##      ordinal slot order of the fit. Returned concatenated in the ORIGINAL order of the ordinal
+              ##      tests: the block of original ordinal test o is the block of the fitted ordinal slot that
+              ##      holds it (each test's cutpoint transform reads its own block only, so the blocks are the
+              ##      same draws, re-indexed):
+              ##
+              if (Model_type == "LC_MVOP") {
+                    n_cat_per_test_in_fitted_order <-  as.numeric(init_object$model_args_list$n_cat_per_test)
+                    n_thr_per_fitted_ordinal_slot <-  as.numeric(init_object$model_args_list$n_thr_per_ord_test)
+                    fitted_positions_of_ordinal_slots <-  which(n_cat_per_test_in_fitted_order > 2)
+                    original_test_of_fitted_ordinal_slot <-  test_perm[fitted_positions_of_ordinal_slots]
+                    fitted_ordinal_slot_of_original_ordinal_test <-
+                          match(sort(original_test_of_fitted_ordinal_slot), original_test_of_fitted_ordinal_slot)
+                    end_of_fitted_slot <-  cumsum(n_thr_per_fitted_ordinal_slot)
+                    start_of_fitted_slot <-  end_of_fitted_slot - n_thr_per_fitted_ordinal_slot + 1
+                    ## fitted_position_of_original_position[j] = the position, in the fitted concatenation, of
+                    ## the j-th cutpoint of the original concatenation:
+                    fitted_position_of_original_position <-
+                          unlist(lapply(fitted_ordinal_slot_of_original_ordinal_test,
+                                        function(k) start_of_fitted_slot[k]:end_of_fitted_slot[k]))
+                    fn_re_index_cutpoint_rows <-  function(trace_array, row_names, family_name) {
+                          family_rows <-  grep(paste0("^", family_name, "\\[[0-9]+,[0-9]+\\]$"), row_names)
+                          if (length(family_rows) == 0) return(list(trace_array = trace_array, done = FALSE))
+                          indices <-  do.call(rbind, lapply(strsplit(sub(paste0("^", family_name, "\\[(.*)\\]$"),
+                                                                         "\\1", row_names[family_rows]), ","),
+                                                            as.integer))
+                          names_of_fitted_rows <-  paste0(family_name, "[", indices[, 1], ",",
+                                                          fitted_position_of_original_position[indices[, 2]], "]")
+                          fitted_rows <-  match(names_of_fitted_rows, row_names)
+                          if (anyNA(fitted_rows)) {
+                                stop(paste0("create_summary_and_traces: a ", family_name, " row of the fitted ",
+                                            "cutpoint layout is missing."))
+                          }
+                          trace_array[family_rows, , ] <-  trace_array[fitted_rows, , , drop = FALSE]
+                          return(list(trace_array = trace_array, done = TRUE))
+                    }
+                    re_indexed <-  fn_re_index_cutpoint_rows( trace_params_main, names_of_main_trace_rows,
+                                                              "C_unc_vec")
+                    trace_params_main <-  re_indexed$trace_array
+                    if (re_indexed$done) {
+                          parameter_families_re_indexed_into_original_test_order <-
+                                c(parameter_families_re_indexed_into_original_test_order, "C_unc_vec")
+                    }
+                    if (!is.null(trace_tp) && (length(names_tp_wo_log_lik) > 0)) {
+                          for (family_name in c("C_raw_vec", "C_vec")) {
+                                re_indexed <-  fn_re_index_cutpoint_rows( trace_tp, names_tp_wo_log_lik,
+                                                                          family_name)
+                                trace_tp <-  re_indexed$trace_array
+                                if (re_indexed$done) {
+                                      parameter_families_re_indexed_into_original_test_order <-
+                                            c(parameter_families_re_indexed_into_original_test_order, family_name)
+                                }
+                          }
+                    }
+              }
+              ##
+              parameter_families_left_in_fitted_test_order <-
+                    intersect("Omega_unconstrained_vec", sub("\\[.*$", "", names_of_main_trace_rows))
+              ##
+              message(colourise(paste0("test order of the fit (fitted slot j holds original test test_perm[j]): ",
+                                       paste(test_perm, collapse = " "),
+                                       " | returned in the ORIGINAL test order: ",
+                                       paste(parameter_families_re_indexed_into_original_test_order,
+                                             collapse = ", "),
+                                       " (Omega_orig, L_Omega_orig, Xbeta_baseline, Se / Sp / Fp_baseline ",
+                                       "already were) | left in the fitted order (the sampler's coordinates): ",
+                                       paste(parameter_families_left_in_fitted_test_order, collapse = ", ")),
+                                "cyan"))
+          
+        }
         
         ### --------- MAIN PARAMETERS / "PARAMETERS" BLOCK IN STAN  ----------------------------------------
         
@@ -1085,19 +1247,69 @@ create_summary_and_traces <- function(    model_results,
                             
                             
                   ## Missing parameter diagnostics must not silently become infinite efficiency or apparent convergence.
-                  main_ess_values <- summary_tibble_main_params$n_eff[seq_len(length.out = n_params_main_constrained)]
-                  main_rhat_values <- summary_tibble_main_params$Rhat[seq_len(length.out = n_params_main_constrained)]
+                  ##
+                  ## ---- LC_MVP / LC_MVOP with known (fixed) correlations: the raw coordinate of a known
+                  ##      correlation (its Omega_unconstrained_vec entry) is not a model parameter (the
+                  ##      transform never reads it; it has an independent standard normal density), so it is
+                  ##      left out of the main diagnostics (Min_ESS_main, Min_ESS_sd_main, Max_rhat_main,
+                  ##      Max_nested_rhat_main):
+                  ##
+                  rows_of_main_parameters_in_diagnostics <-  seq_len(length.out = n_params_main_constrained)
+                  known_values_indicator_list_of_fit <-
+                        model_results$init_object$model_args_list$known_values_indicator_list
+                  if ((Model_type %in% c("LC_MVP", "MVP", "LC_MVOP", "MVOP")) &&
+                      is.list(known_values_indicator_list_of_fit)) {
+                        names_of_raw_coordinates_of_known_correlations <-  c()
+                        for (c in seq_along(known_values_indicator_list_of_fit)) {
+                              known_indicator_of_class <-  known_values_indicator_list_of_fit[[c]]
+                              for (i in seq_len(nrow(known_indicator_of_class))[-1]) {
+                                    for (j in seq_len(i - 1)) {
+                                          if (known_indicator_of_class[i, j] == 1) {
+                                                position_in_class_raw_vector <-  (i - 1) * (i - 2) / 2 + j
+                                                names_of_raw_coordinates_of_known_correlations <-
+                                                      c(names_of_raw_coordinates_of_known_correlations,
+                                                        paste0("Omega_unconstrained_vec[", c, ",",
+                                                               position_in_class_raw_vector, "]"))
+                                          }
+                                    }
+                              }
+                        }
+                        parameter_names_in_diagnostics <-
+                              summary_tibble_main_params$parameter[rows_of_main_parameters_in_diagnostics]
+                        rows_left_out <-  which(parameter_names_in_diagnostics %in%
+                                                names_of_raw_coordinates_of_known_correlations)
+                        if (length(rows_left_out) > 0) {
+                              message(colourise(paste0("Raw coordinates of known correlations left out of ",
+                                                       "the main diagnostics (Min ESS / R-hat): ",
+                                                       paste(parameter_names_in_diagnostics[rows_left_out],
+                                                             collapse = ", ")), "cyan"))
+                              rows_of_main_parameters_in_diagnostics <-
+                                    rows_of_main_parameters_in_diagnostics[-rows_left_out]
+                        }
+                  }
+                  # main_ess_values <- summary_tibble_main_params$n_eff[seq_len(length.out =
+                  #                                                       n_params_main_constrained)]
+                  # main_rhat_values <- summary_tibble_main_params$Rhat[seq_len(length.out =
+                  #                                                       n_params_main_constrained)]
+                  main_ess_values <- summary_tibble_main_params$n_eff[rows_of_main_parameters_in_diagnostics]
+                  main_rhat_values <- summary_tibble_main_params$Rhat[rows_of_main_parameters_in_diagnostics]
                   Min_ESS_main <- if (length(x = main_ess_values) > 0 && all(is.finite(x = main_ess_values)))
                       min(main_ess_values) else NA_real_
                   ## the same minimum for the ESS of the centred squared draws (n_eff_sd, the posterior SD's ESS; Enzo, 4 Oct 2026):
-                  main_ess_sd_values <- summary_tibble_main_params$n_eff_sd[seq_len(length.out = n_params_main_constrained)]
+                  # main_ess_sd_values <- summary_tibble_main_params$n_eff_sd[seq_len(length.out =
+                  #                                                             n_params_main_constrained)]
+                  main_ess_sd_values <-
+                        summary_tibble_main_params$n_eff_sd[rows_of_main_parameters_in_diagnostics]
                   Min_ESS_sd_main <- if (length(x = main_ess_sd_values) > 0 && all(is.finite(x = main_ess_sd_values)))
                       min(main_ess_sd_values) else NA_real_
                   Max_rhat_main <- if (length(x = main_rhat_values) > 0 && !anyNA(x = main_rhat_values))
                       max(main_rhat_values) else NA_real_
                   Max_nested_rhat_main <- NULL
                   if (compute_nested_rhat == TRUE) {
-                     main_nested_rhat_values <- summary_tibble_main_params$n_Rhat[seq_len(length.out = n_params_main_constrained)]
+                     # main_nested_rhat_values <- summary_tibble_main_params$n_Rhat[seq_len(length.out =
+                     #                                                               n_params_main_constrained)]
+                     main_nested_rhat_values <-
+                           summary_tibble_main_params$n_Rhat[rows_of_main_parameters_in_diagnostics]
                      Max_nested_rhat_main <- if (length(x = main_nested_rhat_values) > 0 && !anyNA(x = main_nested_rhat_values))
                          max(main_nested_rhat_values) else NA_real_
                   } 
@@ -1449,7 +1661,23 @@ create_summary_and_traces <- function(    model_results,
                             force_PartialLog = force_PartialLog,
                             multi_attempts = multi_attempts,
                             ##
-                            test_perm = model_results$test_perm)
+                            # test_perm = model_results$test_perm)
+                            test_perm = model_results$test_perm,
+                            ## the rule that set test_perm (NULL for a run made before the option existed):
+                            test_order_rule_for_reorder_cols_MVP =
+                                  model_results$test_order_rule_for_reorder_cols_MVP,
+                            ## the number-of-chunks multiplier of every PartialLog (log-scale) evaluation
+                            ## (NULL for a run made before the option existed):
+                            n_chunks_multiplier_for_PartialLog_log_scale_evaluation =
+                                  # model_results$n_chunks_multiplier_for_PartialLog_log_scale_evaluation)
+                                  model_results$n_chunks_multiplier_for_PartialLog_log_scale_evaluation,
+                            ## the parameter families of the traces and summaries re-indexed from the fitted
+                            ## into the ORIGINAL test order, and those left in the fitted test order (the
+                            ## sampler's coordinates); both empty when the fit used the original order:
+                            parameter_families_re_indexed_into_original_test_order =
+                                  parameter_families_re_indexed_into_original_test_order,
+                            parameter_families_left_in_fitted_test_order =
+                                  parameter_families_left_in_fitted_test_order)
           ##
           ## list to store efficiency information
           ##

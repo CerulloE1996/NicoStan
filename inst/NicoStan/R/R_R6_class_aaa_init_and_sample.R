@@ -564,6 +564,20 @@ MVP_model <- R6Class("MVP_model",
                           #'@param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1] (NULL = 0, as before this option
                           #'existed), applied once to each pooled covariance proposal of the dense main metric as (1 - s) * cov + s * diag(diag(cov)).
                           #'0 keeps all off-diagonals unshrunk.
+                          #'@param test_order_rule_for_reorder_cols_MVP The rule that sets the test order after
+                          #'the pre-burnin when reorder_cols_MVP = TRUE:
+                          #'"most_nearly_deterministic_test_last_then_greedy_correlation_order" (the most nearly
+                          #'deterministic test last, the greedy correlation order for the other tests) or
+                          #'"greedy_correlation_order" (the rule used before this option existed). NULL (default,
+                          #'not set): the first rule for LC_MVP, the greedy rule for external Stan models. See
+                          #'R_fn_sample_model().
+                          #'The rule "test_with_largest_tail_category_distance_from_latent_mean_last_then_
+                          #'greedy_correlation_order" (binary and ordinal tests) is the default for LC_MVOP.
+                          #'@param n_chunks_multiplier_for_PartialLog_log_scale_evaluation A positive whole
+                          #'number (default 3): every PartialLog (log-scale) evaluation of the built-in models
+                          #'(the multi_attempts fallback and force_PartialLog = TRUE) uses this many times the
+                          #'number of chunks of the fit, with the nuisance values re-laid out exactly. See
+                          #'R_fn_sample_model().
                           #'@param run_in_fresh_R_process TRUE (default) runs burn-in/sampling in a fresh R process and returns
                           #'the usual draws/diagnostics; native worker memory is released when it exits. FALSE uses this session.
                           sample = function(  force_recompile = FALSE,
@@ -665,7 +679,9 @@ MVP_model <- R6Class("MVP_model",
                                               num_chunks_burnin = NULL,
                                               num_chunks_sampling = NULL,
                                               ##
-                                              reorder_cols_MVP = FALSE,
+                                              # reorder_cols_MVP = FALSE,
+                                              ## NULL: TRUE for LC_MVP and LC_MVOP, FALSE for other models:
+                                              reorder_cols_MVP = NULL,
                                               diffusion_HMC_integrator = "kick_flow_kick",
                                               debug_burnin_timing = FALSE,
                                               ##
@@ -708,6 +724,8 @@ MVP_model <- R6Class("MVP_model",
                                               store_log_lik_trace = NULL,
                                               use_disk_path = "/tmp/hmc_traces",
                                               test_perm_override = NULL,
+                                              test_order_rule_for_reorder_cols_MVP = NULL,
+                                              n_chunks_multiplier_for_PartialLog_log_scale_evaluation = 3,
                                               run_in_fresh_R_process = TRUE
                                               ##
                                              ) {
@@ -916,6 +934,11 @@ MVP_model <- R6Class("MVP_model",
                                                             store_log_lik_trace = store_log_lik_trace,
                                                             use_disk_path = use_disk_path,
                                                             test_perm_override = test_perm_override,
+                                                            test_order_rule_for_reorder_cols_MVP =
+                                                                  test_order_rule_for_reorder_cols_MVP,
+                                                ## (indented less: the argument name is long)
+                                                n_chunks_multiplier_for_PartialLog_log_scale_evaluation =
+                                                      n_chunks_multiplier_for_PartialLog_log_scale_evaluation,
                                                             partitioned_HMC = partitioned_HMC,
                                                             ##
                                                             clip_iter = clip_iter,

@@ -91,6 +91,12 @@ struct   Model_fn_args_struct {
     //// Snapshot on the R thread; likelihood workers never read R options.
     bool autodiff_fallback = false;
     bool autodiff_fallback_option_is_set = false;
+    //// The number-of-chunks multiplier of every PartialLog (log-scale) evaluation of the built-in LC_MVP / MVP
+    //// and LC_MVOP / MVOP models: the sample() argument n_chunks_multiplier_for_PartialLog_log_scale_evaluation
+    //// (default 3), read from the list entry of the same name; 1 (no extra chunks) for a list without that entry
+    //// (e.g. a direct Rcpp_wrapper_fn_lp_grad() call on a list built outside sample()):
+    int PartialLog_n_chunks_multiplier = 1;
+    bool PartialLog_n_chunks_multiplier_option_is_set = false;
    
                int N;
                int n_nuisance;

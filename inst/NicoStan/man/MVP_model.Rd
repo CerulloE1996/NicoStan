@@ -407,7 +407,7 @@ Sample from the model
   n_threads_WCP_sampling = 1,
   num_chunks_burnin = NULL,
   num_chunks_sampling = NULL,
-  reorder_cols_MVP = FALSE,
+  reorder_cols_MVP = NULL,
   diffusion_HMC_integrator = "kick_flow_kick",
   debug_burnin_timing = FALSE,
   debug = FALSE,
@@ -430,6 +430,8 @@ Sample from the model
   store_log_lik_trace = NULL,
   use_disk_path = "/tmp/hmc_traces",
   test_perm_override = NULL,
+  test_order_rule_for_reorder_cols_MVP = NULL,
+  n_chunks_multiplier_for_PartialLog_log_scale_evaluation = 3,
   run_in_fresh_R_process = TRUE
 )}\if{html}{\out{</div>}}
 }
@@ -576,6 +578,21 @@ automatically from the model's unconstrained dimension; \code{0} never stores it
 buffer is grown to the full length on the first write, so e.g. 1 would cost exactly as much as keeping everything).}
 
 \item{\code{diffusion_HMC_integrator}}{Joint diffusion integrator: "kick_flow_kick" (default) or "flow_kick_flow".}
+
+\item{\code{test_order_rule_for_reorder_cols_MVP}}{The rule that sets the test order after
+the pre-burnin when reorder_cols_MVP = TRUE:
+"most_nearly_deterministic_test_last_then_greedy_correlation_order" (the most nearly
+deterministic test last, the greedy correlation order for the other tests) or
+"greedy_correlation_order" (the rule used before this option existed). NULL (default,
+not set): the first rule for LC_MVP, the greedy rule for external Stan models. See
+R_fn_sample_model(). "test_with_largest_tail_category_distance_from_latent_mean_last_then_
+greedy_correlation_order" (binary and ordinal tests) is the default for LC_MVOP.}
+
+\item{\code{n_chunks_multiplier_for_PartialLog_log_scale_evaluation}}{A positive whole
+number (default 3): every PartialLog (log-scale) evaluation of the built-in models
+(the multi_attempts fallback and force_PartialLog = TRUE) uses this many times the
+number of chunks of the fit, with the nuisance values re-laid out exactly. See
+R_fn_sample_model().}
 
 \item{\code{run_in_fresh_R_process}}{TRUE (default) runs the complete burn-in/sampling fit in a fresh R process and returns the usual draws/diagnostics. Native worker memory is released when it exits. FALSE uses the calling session.}
 
