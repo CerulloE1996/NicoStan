@@ -30,6 +30,18 @@
 ## approximation there.
 ## The factors are computed here from those formulas rather than typed in, so they trace to the derivation.
 ##
+## ESJD (squared jump E||x_t - x_0||^2 = 2 (1 - cos(t)) on the unit Gaussian) and ESJD_CHESSR (the geometric mean of the ESJD and
+## CHESSR rates), both per-chain means of C_i / tau_i as coded (R_fn_metric_trajectory_adaptation.R):
+##   ESJD         fixed:  max 2 (1 - cos(t)) / t                          -> t = 2.3311
+##                jitter: max E[2 (1 - cos(t)) / t]                       -> T = 1.7899   factor 0.7678
+##   ESJD_CHESSR  fixed:  max sqrt(2 (1 - cos(t)) / t * sin^2(t) / t)     -> t = 1.4465
+##                jitter: max sqrt(E[2 (1 - cos(t)) / t] * E[sin^2(t) / t]) -> T = 1.1693   factor 0.8083
+## (ESJD has the CHESSR factor: each is one term (1 - cos(omega t)) / t, omega = 1 for ESJD and 2 for CHESSR, and both optima scale
+## as 1 / omega.)
+##
+## ESJD_SNAPER has the same unit-Gaussian trajectory-length factor as ESJD_CHESSR: the SNAPER squared-change rate is proportional to
+## sin^2(t) / t for a fixed principal direction, so the equal-weight geometric mean has the same optimiser and jittered factor.
+##
 fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 
         ##
@@ -71,6 +83,36 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
                 return(fn_first_maximiser(fn_expected_per_chain_rate_jittered) / tau_fixed_optimum_rate)
         } else if (burnin_algorithm == "CHESSR_log") {
                 return(fn_first_maximiser(fn_ratio_of_means_rate_jittered) / tau_fixed_optimum_rate)
+        }
+        ##
+        ## ---- ESJD and ESJD_CHESSR (see the header): the fixed-length ESJD optimum 2.3311 lies beyond 2.0, so ESJD takes the bracket
+        ##      (0.3, 4.0), which holds its first local maximum (fixed and jittered) and no other; ESJD_CHESSR keeps (0.3, 2.0):
+        ##
+        fn_squared_jump_rate_fixed <- function(tau_fixed) {
+                2 * (1 - cos(tau_fixed)) / tau_fixed
+        }
+        fn_expected_per_chain_squared_jump_rate_jittered <- function(tau_bar) {
+                integral_value <- stats::integrate(f = function(tau_value) ifelse(tau_value == 0, 0, 2 * (1 - cos(tau_value)) / tau_value),
+                                                   lower = 0,
+                                                   upper = 2 * tau_bar,
+                                                   rel.tol = 1e-10)$value
+                integral_value / (2 * tau_bar)
+        }
+        fn_first_maximiser_up_to_four <- function(criterion_function) {
+                stats::optimize(f = criterion_function,
+                                interval = c(0.3, 4.0),
+                                maximum = TRUE,
+                                tol = 1e-10)$maximum
+        }
+        if (burnin_algorithm == "ESJD") {
+                return(fn_first_maximiser_up_to_four(fn_expected_per_chain_squared_jump_rate_jittered) /
+                       fn_first_maximiser_up_to_four(fn_squared_jump_rate_fixed))
+        } else if (burnin_algorithm == "ESJD_SNAPER") {
+                return(fn_first_maximiser(function(tau_bar) sqrt(fn_expected_per_chain_squared_jump_rate_jittered(tau_bar) * fn_expected_per_chain_rate_jittered(tau_bar))) /
+                       fn_first_maximiser(function(tau_fixed) sqrt(fn_squared_jump_rate_fixed(tau_fixed) * fn_chees_rate_fixed(tau_fixed))))
+        } else if (burnin_algorithm == "ESJD_CHESSR") {
+                return(fn_first_maximiser(function(tau_bar) sqrt(fn_expected_per_chain_squared_jump_rate_jittered(tau_bar) * fn_expected_per_chain_rate_jittered(tau_bar))) /
+                       fn_first_maximiser(function(tau_fixed) sqrt(fn_squared_jump_rate_fixed(tau_fixed) * fn_chees_rate_fixed(tau_fixed))))
         }
         stop(paste0("tau_sampling_scale = 'gaussian_matched' has no factor for burnin_algorithm = '", burnin_algorithm, "'."))
 
@@ -216,6 +258,11 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   (randomize_tau_burnin = FALSE) and sampling is randomised; eps is not re-initialised. "gaussian_matched" uses the
 #'   criterion-specific unit-Gaussian factor (an experimental heuristic, not a published method; see
 #'   docs/adaptation-notes.md). The requested value, effective value, factor and tau before/after are returned.
+#' @param tau_gradient_estimator "forward" (default) uses the proposed endpoint gradient; "two_ended" uses the
+#'   time-reversal-averaged endpoint gradient for the trajectory-length criterion.
+#' @param tau_cost_exponent Exponent in [0, 1.5] applied to the trajectory-length cost in the trajectory criterion. Default 1.
+#' @param esjd_jump_power Power in {2, 3, 4} of the metric jump used by the ESJD criterion. Default 2.
+#' @param tau_jitter_burnin Burn-in trajectory-length jitter: "uniform" (default) or "halton".
 #' @param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in.
 #'   FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in
 #'   and skips that search; it has no effect when no pre-burnin runs.
@@ -344,7 +391,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          (1 - s) * cov + s * diag(diag(cov)).
                                         ## See init_and_run_burnin_ChESSR and R_fn_metric_pooled_settings.R.
                                         metric_pooled_window_resets          = NULL,
-                                        metric_pooled_offdiagonal_shrinkage  = NULL,
+                                        metric_pooled_offdiagonal_shrinkage,
                                         ## burnin_algorithm = "CHESSR_time" / "SNAPER_time" only: settings of the time-to-target-ESS criterion (sampling timing
                                         ## probe, previous saved run(s), user-supplied times, ESS target), as a named list; NULL = the defaults
                                         ## (fn_default_time_criterion_settings(), R_fn_time_criterion.R). Ignored by the other criteria.
@@ -384,6 +431,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         # randomize_tau_burnin = FALSE,
                                         randomize_tau_burnin,                  ## tau adapted under the sampling jitter U(0, 2 tau), as in ChEES and SNAPER
                                         randomize_tau_sampling = TRUE,
+                                        tau_gradient_estimator,
+                                        tau_cost_exponent,
+                                        esjd_jump_power,
+                                        tau_jitter_burnin,
                                         ##   tau_sampling_scale                   - multiply the adapted tau ONCE at the burn-in -> sampling switch,
                                         ##                                          only when tau was adapted with a fixed length (randomize_tau_burnin
                                         ##                                          = FALSE) and sampling is randomised. "none" (default) = factor 1,
@@ -866,6 +917,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         stop(paste0(flag, " must be TRUE or FALSE."))
                     }
                 }
+                fn_validate_trajectory_criterion_options(
+                    tau_gradient_estimator = tau_gradient_estimator,
+                    tau_cost_exponent = tau_cost_exponent,
+                    esjd_jump_power = esjd_jump_power,
+                    tau_jitter_burnin = tau_jitter_burnin,
+                    algorithm = burnin_algorithm,
+                    randomize_tau_burnin = randomize_tau_burnin)
                 ##
                 ## ---- tau_sampling_scale: "none", "gaussian_matched" or one positive finite number (see the argument note):
                 ##
@@ -925,8 +983,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 }
                 ## pooled metric estimator options (NULL = "stan_style" and 0, the earlier rule; read only when metric_estimator = "pooled"):
                 metric_pooled_window_resets         <- fn_validate_metric_pooled_window_resets(metric_pooled_window_resets)
-                metric_pooled_offdiagonal_shrinkage <- fn_validate_metric_pooled_offdiagonal_shrinkage(
-                                                           if_null_then_set_to(metric_pooled_offdiagonal_shrinkage, 0))
+                metric_pooled_offdiagonal_shrinkage <- fn_validate_metric_pooled_offdiagonal_shrinkage(metric_pooled_offdiagonal_shrinkage)
                 if (length(tau_ramp) != 1 || !tau_ramp %in% c("original", "staged")) {
                     stop("tau_ramp must be 'original' or 'staged'; got: ", paste(as.character(tau_ramp), collapse = ", "))
                 }
@@ -994,6 +1051,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 metric_shape_main <- if_null_then_set_to(metric_shape_main, "diag")
                 ratio_M_main <- if_null_then_set_to(ratio_M_main, 0.25)
                 interval_width_main <- if_null_then_set_to(interval_width_main, 10)
+                metric_pooled_offdiagonal_shrinkage_resolution <- fn_resolve_metric_pooled_offdiagonal_shrinkage(
+                    metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
+                    metric_estimator = metric_estimator,
+                    metric_type_main = metric_type_main,
+                    metric_shape_main = metric_shape_main)
                 ##
                 metric_type_nuisance <- if_null_then_set_to(metric_type_nuisance, "Empirical")
                 metric_shape_nuisance <- if_null_then_set_to(metric_shape_nuisance, "diag")
@@ -1558,6 +1620,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                                  ##
                                                                  manual_tau = pre_burnin_params$manual_tau,
                                                                  randomize_tau_burnin = randomize_tau_burnin,
+                                                                 ## The ordering pre-burnin is a fixed-length/manual warm-start; advanced trajectory options belong to the main burn-in.
+                                                                 tau_gradient_estimator = "forward",
+                                                                 tau_cost_exponent = 1,
+                                                                 esjd_jump_power = 2,
+                                                                 tau_jitter_burnin = "uniform",
                                                                  tau_adaptation_block = tau_adaptation_block,
                                                                  tau_if_manual = pre_burnin_params$tau_if_manual,
                                                                  tau_if_manual_in_L_units = pre_burnin_params$tau_if_manual_in_L_units,
@@ -2386,6 +2453,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              metric_adaptation_end_iter = metric_adaptation_end_iter,
                                                              share_tau_ii_across_chains_in_burnin = share_tau_ii_across_chains_in_burnin,
                                                              randomize_tau_burnin = randomize_tau_burnin,
+                                                             tau_gradient_estimator = tau_gradient_estimator,
+                                                             tau_cost_exponent = tau_cost_exponent,
+                                                             esjd_jump_power = esjd_jump_power,
+                                                             tau_jitter_burnin = tau_jitter_burnin,
                                                              tau_adaptation_block = tau_adaptation_block,
                                                              ##
                                                              burnin_algorithm = burnin_algorithm,
@@ -2488,6 +2559,12 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           EHMC_args_as_Rcpp_List$randomize_tau <-  randomize_tau_sampling
                           EHMC_args_as_Rcpp_List$share_tau_ii_across_chains <-  FALSE
                           EHMC_args_as_Rcpp_List$use_given_tau_main_ii <-  FALSE
+                          ## The burn-in jitter sequence is deliberately cleared at the sampling handover; the sampling phase keeps
+                          ## its established uniform RNG path.
+                          tau_jitter_burnin_for_sampling <-  "uniform"
+                          if (identical(tau_jitter_burnin, "halton")) {
+                              EHMC_args_as_Rcpp_List <-  fn_tau_jitter_burnin_reset(EHMC_args_as_Rcpp_List)
+                          }
                           ##
                           ## ---- tau_sampling_scale: rescale the adapted tau ONCE for the randomised sampling phase.
                           ##      Burn-in adapts tau with a FIXED trajectory length (randomize_tau_burnin = FALSE, deliberately:
@@ -2700,6 +2777,18 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                     num_chunks_used_in_sampling, " (inits + ", paste(names_of_remapped_fields, collapse = ", "), ")\n", sep = "")
                           }
                           ##
+                          ## ---- validate the frozen sampling state and geometry before the timer/native call:
+                          ##
+                          R_fn_validate_frozen_sampling_geometry(
+                              EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                              EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                              theta_main = theta_main_vectors_all_chains_input_from_R,
+                              theta_nuisance = theta_nuisance_vectors_all_chains_input_from_R,
+                              n_chains_sampling = n_chains_sampling,
+                              sample_nuisance = sample_nuisance,
+                              partitioned_HMC = partitioned_HMC,
+                              Model_args_as_Rcpp_List = Model_args_as_Rcpp_List)
+                          ##
                           ## ---- keep the per-chain log-lik trace during sampling? (read by the C++ as an optional list element):
                           ##
                           if (!store_log_lik_trace && (parallel_method == "OpenMP")) {
@@ -2833,9 +2922,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    eps_acceptance_mean = eps_acceptance_mean,
                    burnin_algorithm = burnin_algorithm,
                    trajectory_adaptation_version = "metric_main_v4",
+                   ## trajectory_criterion = if (burnin_algorithm == "CHESSR_log") "ema_log_expected_numerator_over_mean_tau" else
+                   ##                        if (burnin_algorithm %in% c("CHESSR", "SNAPER")) "expected_per_trajectory_rate" else
+                   ##                        if (burnin_algorithm %in% c("CHESSR_time", "SNAPER_time")) "expected_per_trajectory_rate_with_time_to_target_ESS_penalty" else
+                   ##                        if (burnin_algorithm == "ChEES") "expected_squared_position_statistic_change" else "squared_kinetic_energy_change",
                    trajectory_criterion = if (burnin_algorithm == "CHESSR_log") "ema_log_expected_numerator_over_mean_tau" else
                                           if (burnin_algorithm %in% c("CHESSR", "SNAPER")) "expected_per_trajectory_rate" else
                                           if (burnin_algorithm %in% c("CHESSR_time", "SNAPER_time")) "expected_per_trajectory_rate_with_time_to_target_ESS_penalty" else
+                                          if (burnin_algorithm == "ESJD") "expected_per_trajectory_rate_of_squared_jumped_distance" else
+                                          if (burnin_algorithm == "ESJD_CHESSR") "geometric_mean_of_ESJD_and_CHESSR_per_trajectory_rates" else
+                                          if (burnin_algorithm == "ESJD_SNAPER") "geometric_mean_of_ESJD_and_SNAPER_per_trajectory_rates" else
                                           if (burnin_algorithm == "ChEES") "expected_squared_position_statistic_change" else "squared_kinetic_energy_change",
                    trajectory_coordinates = if (burnin_algorithm == "KE") "kinetic_energy" else "mass_metric",
                    trajectory_parameter_block = if_null_then_set_to(burnin_object$trajectory_parameter_block, "main"),
@@ -2845,6 +2941,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    tau_adaptation_enabled = !isTRUE(manual_tau),
                    randomize_tau_burnin = randomize_tau_burnin,
                    randomize_tau_sampling = randomize_tau_sampling,
+                   tau_gradient_estimator = tau_gradient_estimator,
+                   tau_cost_exponent = tau_cost_exponent,
+                   esjd_jump_power = esjd_jump_power,
+                   tau_jitter_burnin = tau_jitter_burnin,
+                   tau_jitter_burnin_for_sampling = tau_jitter_burnin_for_sampling,
                    ## tau_sampling_scale: requested value, effective value / factor, and tau either side of the one-off rescaling:
                    tau_sampling_scale = tau_sampling_scale,
                    tau_sampling_scale_effective = tau_sampling_scale_effective,
@@ -2870,6 +2971,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    metric_pooled_window_resets           = metric_pooled_window_resets,
                    metric_pooled_window_reset_iterations = burnin_object$metric_pooled_window_reset_iterations,
                    metric_pooled_offdiagonal_shrinkage   = metric_pooled_offdiagonal_shrinkage,
+                   metric_adaptive_shrinkage              = burnin_object$metric_adaptive_shrinkage,
+                   metric_adaptive_shrinkage_history     = burnin_object$metric_adaptive_shrinkage_history,
                    ## CHESSR_time / SNAPER_time: settings, the quantities the criterion used and their sources, the sampling timing probe,
                    ## the previous-run quantities and the burn-in record (NULL for every other criterion):
                    time_criterion = if (fn_burnin_algorithm_is_time_criterion(burnin_algorithm) && !isTRUE(manual_tau)) list(
@@ -2915,6 +3018,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
   return(out_list)
 
 }
+
+
+
+
 
 
 

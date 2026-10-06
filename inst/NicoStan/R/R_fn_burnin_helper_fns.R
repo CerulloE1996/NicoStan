@@ -515,6 +515,7 @@ update_M_Empirical_main <- function( debug,
                                      ## cross-chain variances of the current iteration's draws), used instead of
                                      ## variance_scale * snaper_s_vec_main_empirical. NULL (default) = unchanged. Not read by the dense shape.
                                      per_iteration_variance_vec_main = NULL,
+                                     adaptive_shrinkage_state,
                                     ## the symmetric square root M_dense_sqrt is only read by the SNAPER functions; the ChESSR
                                     ## burn-in never uses it, so it passes FALSE and skips a pracma::sqrtm() per metric update:
                                     compute_M_dense_sqrt = TRUE
@@ -538,8 +539,14 @@ update_M_Empirical_main <- function( debug,
               any(!is.finite(proposed_variance_vec_check)) ||
               any(proposed_variance_vec_check <= 0)) {
             ## Keep the last valid metric when empirical moments are not yet usable.
+            if (is.null(adaptive_shrinkage_state)) {
+              return(list(EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                          EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+            }
             return(list(EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
-                        EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+                        EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
+                        adaptive_shrinkage_state = adaptive_shrinkage_state,
+                        adaptive_shrinkage_diagnostics = NULL))
           }
         } else if (metric_shape_main == "dense") {
           ##
@@ -560,8 +567,14 @@ update_M_Empirical_main <- function( debug,
               nrow(proposed_covariance_check) != ncol(proposed_covariance_check) ||
               max(abs(proposed_covariance_check - t(proposed_covariance_check))) > 1e-8) {
             ## Keep the last valid metric when the covariance estimate is not usable.
+            if (is.null(adaptive_shrinkage_state)) {
+              return(list(EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                          EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+            }
             return(list(EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
-                        EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+                        EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
+                        adaptive_shrinkage_state = adaptive_shrinkage_state,
+                        adaptive_shrinkage_diagnostics = NULL))
           }
         }
         ##
@@ -637,7 +650,33 @@ update_M_Empirical_main <- function( debug,
                 ##
                 M_inv_dense_main_current <- EHMC_Metric_as_Rcpp_List$M_inv_dense_main
                 ##
-                M_inv_dense_main_new <- ( ratio_M_effective * variance_scale * empicical_cov_main + (1.0 - ratio_M_effective) *  M_inv_dense_main_current )
+                adaptive_shrinkage_diagnostics <- NULL
+                if (!is.null(adaptive_shrinkage_state)) {
+                      adaptive_shrinkage_state <- fn_update_adaptive_metric_shrinkage(
+                            state = adaptive_shrinkage_state,
+                            main_draws = NULL,
+                            covariance_proposal = variance_scale * empicical_cov_main,
+                            ratio_M_effective = ratio_M_effective)
+                      if (is.null(adaptive_shrinkage_state$unshrunk_covariance)) {
+                            stop("update_M_Empirical_main: adaptive shrinkage state did not return unshrunk_covariance.")
+                      }
+                      adaptive_shrinkage_resolution <- fn_resolve_adaptive_metric_shrinkage(
+                            state = adaptive_shrinkage_state,
+                            covariance_matrix = adaptive_shrinkage_state$unshrunk_covariance)
+                      adaptive_shrinkage_diagnostics <- list(
+                            shrinkage = adaptive_shrinkage_resolution$shrinkage,
+                            applied = ratio_M_effective > 0,
+                            details = adaptive_shrinkage_resolution$diagnostics)
+                      if (isTRUE(ratio_M_effective == 0)) {
+                            return(list(  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                          EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
+                                          adaptive_shrinkage_state = adaptive_shrinkage_state,
+                                          adaptive_shrinkage_diagnostics = adaptive_shrinkage_diagnostics))
+                      }
+                      M_inv_dense_main_new <- adaptive_shrinkage_resolution$covariance_matrix
+                } else {
+                      M_inv_dense_main_new <- ( ratio_M_effective * variance_scale * empicical_cov_main + (1.0 - ratio_M_effective) *  M_inv_dense_main_current )
+                }
                 # ## inside update_M_Empirical_main dense branch, or as a special-case at the last update:
                 # p <- nrow(empicical_cov_main)
                 # M_inv_dense_main_new <- 0.9 * empicical_cov_main + 0.1 * mean(diag(empicical_cov_main)) * diag(p)
@@ -661,8 +700,14 @@ update_M_Empirical_main <- function( debug,
           
         }
         
+        if (is.null(adaptive_shrinkage_state)) {
+              return(list(  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                            EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+        }
         return(list(  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
-                      EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+                      EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
+                      adaptive_shrinkage_state = adaptive_shrinkage_state,
+                      adaptive_shrinkage_diagnostics = adaptive_shrinkage_diagnostics))
   
 }
 

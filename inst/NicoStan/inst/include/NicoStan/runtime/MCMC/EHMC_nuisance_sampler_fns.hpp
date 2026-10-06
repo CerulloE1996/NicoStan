@@ -457,7 +457,7 @@ ALWAYS_INLINE  void         fn_Diffusion_HMC_nuisance_only_single_iter_InPlace_p
               }
               // Draw + assign tau_ii:
               EHMC_args_as_cpp_struct.tau_us_ii = EHMC_args_as_cpp_struct.randomize_tau
-                  ? generate_random_tau_ii(EHMC_args_as_cpp_struct.tau_us, rng_nuisance)
+                  ? fn_generate_burnin_tau_ii(EHMC_args_as_cpp_struct.tau_us, rng_nuisance, false)
                   : EHMC_args_as_cpp_struct.tau_us;
               if (EHMC_args_as_cpp_struct.tau_us_ii < EHMC_args_as_cpp_struct.eps_us) { 
                 EHMC_args_as_cpp_struct.tau_us_ii = EHMC_args_as_cpp_struct.eps_us; 

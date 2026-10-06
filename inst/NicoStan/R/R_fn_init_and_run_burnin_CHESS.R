@@ -23,6 +23,11 @@
 #' @param time_criterion_sampling_quantities For burnin_algorithm = "CHESSR_time" / "SNAPER_time": the sampling-side quantities of the
 #'   time-to-target-ESS criterion, as returned by fn_resolve_time_criterion_sampling_quantities() (see R_fn_time_criterion.R). NULL
 #'   (default) with a "_time" criterion gives the plain CHESSR / SNAPER criterion, with a warning; ignored by the other criteria.
+#' @param tau_gradient_estimator "forward" uses the proposed endpoint gradient; "two_ended" uses the time-reversal-averaged endpoint
+#'   gradient. Required for internal callers.
+#' @param tau_cost_exponent Exponent in [0, 1.5] applied to the trajectory-length cost. Required for internal callers.
+#' @param esjd_jump_power Power in {2, 3, 4} of the metric jump used by ESJD. Required for internal callers.
+#' @param tau_jitter_burnin Burn-in trajectory-length jitter: "uniform" or "halton". Required for internal callers.
 #' @export
 init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##
@@ -152,6 +157,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## waiting for whichever chain drew the longest trajectory. FALSE = per-chain tau_ii (as before).
                                            share_tau_ii_across_chains_in_burnin = FALSE,
                                            randomize_tau_burnin,
+                                           tau_gradient_estimator,
+                                           tau_cost_exponent,
+                                           esjd_jump_power,
+                                           tau_jitter_burnin,
                                            ##
                                            ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL):
                                            ##      which parameters feed the trajectory-length criterion. "main" = the main block only (the
@@ -165,6 +174,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## "KE", "ChEES", "CHESSR", "CHESSR_log" and "SNAPER".
                                            ## "CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion (different criteria).
                                            ## "CHESSR_time" / "SNAPER_time": the time-to-target-ESS variants of CHESSR / SNAPER (R_fn_time_criterion.R).
+                                           ## "ESJD": expected squared jumped distance per unit trajectory length (Pasarica and Gelman, 2010), the
+                                           ## CHESSR estimator with the statistic ||z_t - z_0||^2; "ESJD_CHESSR": the geometric mean of the ESJD and
+                                           ## CHESSR criteria, equal weights (both in R_fn_metric_trajectory_adaptation.R).
+                                           ## "ESJD_SNAPER": the experimental equal-weight geometric mean of the ESJD and SNAPER per-trajectory rates; its
+                                           ## learned SNAPER direction is updated and transported wherever this criterion is used.
                                            burnin_algorithm,
                                            diffusion_HMC,
                                            partitioned_HMC,
@@ -236,7 +250,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##                                          (1 - s) * cov + s * diag(diag(cov)). 0 (default) = all
                                            ##                                          off-diagonals unshrunk, as in all earlier runs.
                                            metric_pooled_window_resets          = "stan_style",
-                                           metric_pooled_offdiagonal_shrinkage  = 0,
+                                           metric_pooled_offdiagonal_shrinkage,
                                            ##
                                            ## NOTE: 'eps_init' and 'eps_initial' are DIFFERENT things.
                                            ## eps_init  = carry the step-size over from a previous stage
@@ -328,6 +342,17 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   { # ----------------------------------------------------------------- trajectory-length adaptation options
 
     burnin_algorithm <- fn_normalise_burnin_algorithm(burnin_algorithm)
+    fn_validate_trajectory_criterion_options(
+        tau_gradient_estimator = tau_gradient_estimator,
+        tau_cost_exponent = tau_cost_exponent,
+        esjd_jump_power = esjd_jump_power,
+        tau_jitter_burnin = tau_jitter_burnin,
+        algorithm = burnin_algorithm,
+        randomize_tau_burnin = randomize_tau_burnin)
+    trajectory_criterion_advanced_active <- !identical(tau_gradient_estimator, "forward") ||
+                                             !identical(as.numeric(tau_cost_exponent), 1) ||
+                                             !identical(as.numeric(esjd_jump_power), 2) ||
+                                             !identical(tau_jitter_burnin, "uniform")
     if (is.null(tau_weight_by_p_jump)) tau_weight_by_p_jump <- burnin_algorithm != "KE"
     tau_ramp <- match.arg(arg = tau_ramp, choices = c("original", "staged"))
     ## eps_acceptance_mean <- match.arg(arg = eps_acceptance_mean, choices = c("harmonic", "arithmetic"))
@@ -375,6 +400,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ##
     metric_pooled_window_resets         <- fn_validate_metric_pooled_window_resets(metric_pooled_window_resets)
     metric_pooled_offdiagonal_shrinkage <- fn_validate_metric_pooled_offdiagonal_shrinkage(metric_pooled_offdiagonal_shrinkage)
+    metric_pooled_offdiagonal_shrinkage_resolution <- fn_resolve_metric_pooled_offdiagonal_shrinkage(
+        metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
+        metric_estimator = metric_estimator,
+        metric_type_main = metric_type_main,
+        metric_shape_main = metric_shape_main)
+    metric_pooled_offdiagonal_shrinkage_adaptive_active <- isTRUE(metric_pooled_offdiagonal_shrinkage_resolution$active)
+    metric_pooled_offdiagonal_shrinkage_numeric <- if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive")) 0 else
+                                                   metric_pooled_offdiagonal_shrinkage
     ##
     if (!is.logical(tau_weight_by_p_jump) || length(tau_weight_by_p_jump) != 1 || is.na(tau_weight_by_p_jump)) {
         stop("tau_weight_by_p_jump must be a single TRUE or FALSE.")
@@ -500,7 +533,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     message(paste0("metric estimator = ", metric_estimator,
                    if (metric_variance_scale != 1) paste0(" (x ", metric_variance_scale, ")") else "",
                    if (metric_estimator == "pooled") paste0(" (window resets = ", paste(metric_pooled_window_resets, collapse = "/"),
-                                                            ", off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage, ")") else "",
+                                                            ", off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage,
+                                                            if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive") &&
+                                                                !metric_pooled_offdiagonal_shrinkage_adaptive_active)
+                                                                paste0("; not applied: ", metric_pooled_offdiagonal_shrinkage_resolution$reason) else "",
+                                                            ")") else "",
                    " | tau adaptation: algorithm = ", burnin_algorithm,
                    ", ramp = ", tau_ramp,
                    ", eps re-init at handover = ", eps_reinit_at_ChEES_handover,
@@ -1029,6 +1066,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   p_jump_us_during_burnin_vec   <- p_jump_us_for_eps_during_burnin_vec   <- rep(x = NA_real_, times = n_burnin)
   ChEES_criterion_ema_vec <- ChEES_per_tau_gradient_vec <- rep(x = NA_real_, times = n_burnin)
   ChEES_criterion_ema <- NA_real_
+  ## burnin_algorithm = "ESJD_CHESSR" only: moving averages of the chain-mean ESJD and CHESSR criteria (the levels that turn each
+  ## gradient into a log-tau derivative, fn_metric_tau_block_update); reset with ChEES_criterion_ema at the handover:
+  ESJD_CHESSR_component_criterion_ema <-  c(ESJD = NA_real_, CHESSR = NA_real_)
+  ## burnin_algorithm = "ESJD_SNAPER" only: the same component moving averages, with the learned SNAPER rate as the second component:
+  ESJD_SNAPER_component_criterion_ema <-  c(ESJD = NA_real_, SNAPER = NA_real_)
   ## Iterations at which the divergence-triggered tau shrink fired (tau_shrink_on_divergence = TRUE):
   tau_shrink_fired_vec <- rep(x = FALSE, times = n_burnin)
   ##
@@ -1274,8 +1316,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   tau_probe_rung_start   <-  -3
   # tau_probe_rung_max     <-  2
   tau_probe_rung_max     <-  if (tau_probe_fixed_length_decay) 0 else 2
+  # tau_probe_state <-  list(probing = FALSE, rung = tau_probe_rung_start, gradient_block_sum = 0, n_in_block = 0,
+  #                          log_tau_start = NA_real_, end_iteration = NA_real_)
+  ## (component_block_sums: burnin_algorithm = "ESJD_CHESSR" only, the block sums of the chain means of its two components; see fn_tau_probe_step)
   tau_probe_state <-  list(probing = FALSE, rung = tau_probe_rung_start, gradient_block_sum = 0, n_in_block = 0,
-                           log_tau_start = NA_real_, end_iteration = NA_real_)
+                           log_tau_start = NA_real_, end_iteration = NA_real_,
+                           component_block_sums = c(ESJD_gradient = 0, ESJD_criterion = 0, CHESSR_gradient = 0, CHESSR_criterion = 0,
+                                                    SNAPER_gradient = 0, SNAPER_criterion = 0))
   tau_probe_tau_path_vec <-  rep(x = NA_real_, times = n_burnin)
   tau_average_start_iteration <-  metric_adaptation_end_iter
   tau_average_sum_log_tau <-  0
@@ -1287,12 +1334,51 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## ends, record the iteration (the probe's tau is exp(log_tau_start + rung * log(2))):
   fn_tau_probe_step <-  function(state,
                                  aggregated_gradient,
-                                 iteration) {
+                                 ## iteration) {
+                                 iteration,
+                                 ##
+                                 ## ---- burnin_algorithm = "ESJD_CHESSR" only (NULL for the other criteria): this update's chain means of the two
+                                 ##      components, c(ESJD_gradient = , ESJD_criterion = , CHESSR_gradient = , CHESSR_criterion = ):
+                                 component_chain_means) {
 
         state$gradient_block_sum <-  state$gradient_block_sum + aggregated_gradient
+        ## The probe carries either the existing ESJD/CHESSR pair or the ESJD/SNAPER pair. Keep both named slots in the state so
+        ## that the second component is selected by its criterion name without changing the existing CHESSR path.
+        if (!is.null(component_chain_means)) {
+              state$component_block_sums[["ESJD_gradient"]] <-
+                  state$component_block_sums[["ESJD_gradient"]] + component_chain_means[["ESJD_gradient"]]
+              state$component_block_sums[["ESJD_criterion"]] <-
+                  state$component_block_sums[["ESJD_criterion"]] + component_chain_means[["ESJD_criterion"]]
+              second_component_name <-  if ("SNAPER_gradient" %in% names(component_chain_means)) "SNAPER" else "CHESSR"
+              state$component_block_sums[[paste0(second_component_name, "_gradient")]] <-
+                  state$component_block_sums[[paste0(second_component_name, "_gradient")]] + component_chain_means[[paste0(second_component_name, "_gradient")]]
+              state$component_block_sums[[paste0(second_component_name, "_criterion")]] <-
+                  state$component_block_sums[[paste0(second_component_name, "_criterion")]] + component_chain_means[[paste0(second_component_name, "_criterion")]]
+        }
         state$n_in_block <-  state$n_in_block + 1
         if (state$n_in_block >= tau_probe_block_length) {
-              block_sum_negative <-  state$gradient_block_sum < 0
+              # block_sum_negative <-  state$gradient_block_sum < 0
+              ##
+              ## ---- "ESJD_CHESSR": the block's sign is that of the block-pooled log-tau derivative of the geometric mean,
+              ##        0.5 * sum(ESJD gradient) / sum(ESJD criterion) + 0.5 * sum(CHESSR gradient) / sum(CHESSR criterion),
+              ##      the sums over the block's updates (all at the one tau of this rung). The per-update gradients divide by moving
+              ##      averages that still carry the levels of the previous rung (tau was half as long), which would weight the two
+              ##      terms by the wrong levels; near the optimum the two terms have opposite signs, so this could flip the decision.
+              ##      A component with no positive criterion sum gives 0, as a non-finite aggregated gradient does:
+              ##
+              block_decision_value <-  state$gradient_block_sum
+              if (!is.null(component_chain_means)) {
+                    block_sums <-  state$component_block_sums
+                    second_component_name <-  if (!is.null(component_chain_means) && "SNAPER_gradient" %in% names(component_chain_means)) "SNAPER" else "CHESSR"
+                    block_decision_value <-  if (is.finite(block_sums[["ESJD_criterion"]]) && block_sums[["ESJD_criterion"]] > 0 &&
+                                                 is.finite(block_sums[[paste0(second_component_name, "_criterion")]]) &&
+                                                 block_sums[[paste0(second_component_name, "_criterion")]] > 0) {
+                          0.5 * block_sums[["ESJD_gradient"]] / block_sums[["ESJD_criterion"]] +
+                          0.5 * block_sums[[paste0(second_component_name, "_gradient")]] / block_sums[[paste0(second_component_name, "_criterion")]]
+                    } else 0
+                    if (!is.finite(block_decision_value)) block_decision_value <-  0
+              }
+              block_sum_negative <-  block_decision_value < 0
               probe_at_top <-  !block_sum_negative && (state$rung >= tau_probe_rung_max)
               probe_goes_up <-  !block_sum_negative && (state$rung < tau_probe_rung_max)
               if (block_sum_negative && (state$rung > tau_probe_rung_start)) state$rung <-  state$rung - 1
@@ -1302,6 +1388,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                     state$end_iteration <-  iteration
               }
               state$gradient_block_sum <-  0
+              state$component_block_sums[] <-  0
               state$n_in_block <-  0
         }
         return(state)
@@ -1584,6 +1671,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      keeps it for tau_adaptation_block = "joint" only.
   ##
   worker_api_env <-  environment(fn_create_persistent_burnin_worker)
+  tau_jitter_burnin_state <-  fn_tau_jitter_burnin_init(
+                                tau_jitter_burnin = tau_jitter_burnin,
+                                randomize_tau_burnin = randomize_tau_burnin,
+                                seed = seed,
+                                n_chains = n_chains_burnin,
+                                share_tau_ii_across_chains = isTRUE(share_tau_ii_across_chains_in_burnin),
+                                partitioned_HMC = partitioned_HMC)
+  if (!is.null(tau_jitter_burnin_state)) {
+        run_burnin_iteration_tau_jitter <-  fn_tau_jitter_burnin_worker_api(worker_api_env)
+  }
   resident_api_names <-  c("fn_persistent_burnin_resident_api_version",
                            "fn_persistent_burnin_run_one_iter_main_only",
                            "fn_persistent_burnin_run_one_iter_main_only_profiled",
@@ -1605,6 +1702,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                  "fn_persistent_burnin_joint_direction_update_snaper_resident",
                                  "fn_persistent_burnin_joint_position_reductions_resident",
                                  "fn_persistent_burnin_joint_kinetic_energy_sums_us_resident")
+  resident_joint_two_ended_api_name <-  "fn_persistent_burnin_joint_position_two_ended_reductions_resident"
   ##
   fn_worker_api_has_functions <-  function(function_names) {
         all(vapply(X = function_names,
@@ -1623,6 +1721,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         resident_joint_api_available <-  isTRUE(tryCatch(resident_api$fn_persistent_burnin_resident_joint_api_version() >= 1,
                                                          error = function(e) FALSE))
   }
+  resident_joint_two_ended_api_available <-  resident_joint_api_available &&
+                                             fn_worker_api_has_functions(resident_joint_two_ended_api_name)
+  if (resident_joint_two_ended_api_available) {
+        resident_api[[resident_joint_two_ended_api_name]] <-  get(resident_joint_two_ended_api_name,
+                                                                  envir = worker_api_env,
+                                                                  inherits = FALSE)
+  }
   ##
   use_resident_burnin <-  resident_api_available &&
                           isTRUE(getOption("NicoStan_resident_burnin", TRUE)) &&
@@ -1633,6 +1738,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                           identical(getOption("matprod", "default"), "default")
   ## the joint trajectory block on the resident interface (every nuisance-sized quantity of its criterion is computed in the worker):
   use_resident_joint_block <-  use_resident_burnin && identical(tau_adaptation_block_effective, "joint")
+  if (use_resident_joint_block && identical(tau_gradient_estimator, "two_ended") && !resident_joint_two_ended_api_available) {
+        stop("tau_gradient_estimator = 'two_ended' with tau_adaptation_block = 'joint' needs the resident two-ended reduction helper; rebuild the native NicoStan worker.")
+  }
   ##
   ## ---- tau_initial = "adaptive" on the resident interface: the nuisance block's running n_tests x n_tests sum and its count
   ##      (see tau_initial_moments above) are kept in the worker, which reads its own nuisance state and centre
@@ -1716,7 +1824,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   if (metric_estimator == "per_iteration") {
       message(colourise(paste0("per-iteration metric: cross-chain (co)variance of each iteration's draws, iterations ", metric_start_iter,
                                " to ", metric_adaptation_end_iter, ", blended into the metric with ratio_M (no accumulation, no window resets)",
-                               if (identical(metric_shape_main, "dense")) paste0(" | off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage) else ""),
+                               if (identical(metric_shape_main, "dense")) paste0(" | off-diagonal shrinkage = ", metric_pooled_offdiagonal_shrinkage,
+                                                                                  if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive") &&
+                                                                                      !metric_pooled_offdiagonal_shrinkage_adaptive_active)
+                                                                                      paste0(" (not applied: ", metric_pooled_offdiagonal_shrinkage_resolution$reason, ")") else "") else ""),
                         "cyan"))
   }
   wf_min_draws <- n_params_main + 1
@@ -1733,6 +1844,41 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## number of draws that have entered the per-iteration proposals so far (the n of the Stan-style regularisation of the dense proposal):
   per_iteration_variance_vec_main          <- rep(1, n_params_main)
   per_iteration_metric_n_draws_since_start <- 0
+  adaptive_metric_shrinkage_state <- NULL
+  adaptive_metric_shrinkage_last_diagnostics <- NULL
+  adaptive_metric_shrinkage_lambda_history <- rep(NA_real_, n_burnin)
+  adaptive_metric_shrinkage_window_updates <- function(window_start) {
+        next_reset <- metric_window_resets[metric_window_resets >= window_start]
+        window_end <- if (length(next_reset) > 0) next_reset[1] else metric_adaptation_end_iter
+        return(max(1, window_end - window_start + 1))
+  }
+  adaptive_metric_shrinkage_per_iteration_updates <- function() {
+        ii_min_for_metric <- round(n_burnin / 10)
+        ii_max_for_metric <- n_adapt
+        first_update <- max(metric_start_iter, ii_min_for_metric + 1)
+        last_update <- min(metric_adaptation_end_iter, ii_max_for_metric - 1)
+        if (first_update > last_update) return(1)
+        update_iterations <- seq.int(first_update, last_update)
+        n_updates <- sum(update_iterations %% interval_width_main == 0)
+        if (identical(burnin_schedule, "automatic") && metric_adaptation_end_iter > ii_min_for_metric &&
+            metric_adaptation_end_iter < ii_max_for_metric && metric_adaptation_end_iter %% interval_width_main != 0) {
+              n_updates <- n_updates + 1
+        }
+        return(max(1, n_updates))
+  }
+  if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+        n_window_updates_initial <- if (identical(metric_estimator, "pooled")) {
+              adaptive_metric_shrinkage_window_updates(metric_start_iter)
+        } else {
+              adaptive_metric_shrinkage_per_iteration_updates()
+        }
+        adaptive_metric_shrinkage_state <- fn_init_adaptive_metric_shrinkage(
+              n_main = n_params_main,
+              n_chains = n_chains_burnin,
+              metric_estimator = metric_estimator,
+              n_window_updates = n_window_updates_initial,
+              initial_covariance = EHMC_Metric_as_Rcpp_List$M_inv_dense_main)
+  }
   ##
   metric_ready <- (metric_estimator %in% c("chain_mean", "chain_mean_scaled"))   # pooled: wait for draws; chain_mean(_scaled): behave exactly as before
   ##
@@ -1980,6 +2126,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                             tau_adam_updates_performed_by_block$main <- 0
                             tau_adam_updates_performed_by_block$us   <- 0
                             ChEES_criterion_ema <- NA_real_
+                            ESJD_CHESSR_component_criterion_ema <-  c(ESJD = NA_real_, CHESSR = NA_real_)
+                            ESJD_SNAPER_component_criterion_ema <-  c(ESJD = NA_real_, SNAPER = NA_real_)
 
                             ## ---- tau_initial = "adaptive": tau = (pi/2) * sqrt(lambda_max) per block (see tau_initial_moments above), the main
                             ##      mass being the one in force now. The joint sampler (partitioned_HMC = FALSE) has one tau for both blocks,
@@ -2093,6 +2241,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                   tau_probe_state$probing <-  TRUE
                                   tau_probe_state$rung <-  tau_probe_rung_start
                                   tau_probe_state$gradient_block_sum <-  0
+                                  tau_probe_state$component_block_sums[] <-  0
                                   tau_probe_state$n_in_block <-  0
                                   ## "fixed_length_probe_then_decay_and_average": fixed-length trajectories (tau_ii = tau) for the probe's updates:
                                   if (tau_probe_fixed_length_decay) EHMC_args_as_Rcpp_List$randomize_tau <-  FALSE
@@ -2408,7 +2557,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                          window_reset_now <-  ii %in% (metric_window_resets + 1)
                          ## if (window_reset_now) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
                          ## after a window reset the metric is held (no blending towards the previous window's proposal) until the new window has wf_min_draws draws:
-                         if (window_reset_now) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE }
+                         if (window_reset_now) {
+                               wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE
+                               if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                                     adaptive_metric_shrinkage_state <- fn_reset_adaptive_metric_shrinkage(
+                                           state = adaptive_metric_shrinkage_state,
+                                           n_window_updates = adaptive_metric_shrinkage_window_updates(ii))
+                               }
+                         }
                          wf_n_before_update <-  wf_n
                          ##
                          X_main <- theta_main_vectors_all_chains_input_from_R
@@ -2422,6 +2578,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                           tcrossprod(delta) * (wf_n * K / n_new)
                          wf_m  <- wf_m + delta * (K / n_new)
                          wf_n  <- n_new
+                         if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                               adaptive_metric_shrinkage_state <- fn_update_adaptive_metric_shrinkage(
+                                     state = adaptive_metric_shrinkage_state,
+                                     main_draws = X_main,
+                                     covariance_proposal = NULL,
+                                     ratio_M_effective = NULL)
+                         }
                          ##
                          n_new_resident <-  resident_api$fn_persistent_burnin_pooled_welford_nuisance_resident( worker_ptr,
                                                                                                                wf_n_R = wf_n_before_update,
@@ -2433,9 +2596,23 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                              cov_draws     <- wf_C2 / (wf_n - 1)
                              w <- wf_n / (wf_n + 5)
                              empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
-                             ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
-                             empicical_cov_main <- fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
-                                                                                        metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                             if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                                   adaptive_shrinkage_resolution <- fn_resolve_adaptive_metric_shrinkage(
+                                         state = adaptive_metric_shrinkage_state,
+                                         covariance_matrix = empicical_cov_main)
+                                   empicical_cov_main <- adaptive_shrinkage_resolution$covariance_matrix
+                                   adaptive_metric_shrinkage_lambda_history[ii] <- adaptive_shrinkage_resolution$shrinkage
+                                   adaptive_metric_shrinkage_last_diagnostics <- adaptive_shrinkage_resolution$diagnostics
+                             } else {
+                                   ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
+                                   empicical_cov_main <- if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive")) {
+                                         fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                              metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage_numeric)
+                                   } else {
+                                         fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                              metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                                   }
+                             }
                              empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                              metric_ready <- TRUE
                          }
@@ -2444,7 +2621,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                if ((metric_estimator == "pooled") && (ii >= metric_start_iter) && (ii <= metric_adaptation_end_iter)) {
                     ## if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0 }
                     ## after a window reset the metric is held (no blending towards the previous window's proposal) until the new window has wf_min_draws draws:
-                    if (ii %in% (metric_window_resets + 1)) { wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE }
+                    if (ii %in% (metric_window_resets + 1)) {
+                          wf_n <- 0; wf_m[] <- 0; wf_M2[] <- 0; wf_C2[] <- 0; metric_ready <- FALSE
+                          if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                                adaptive_metric_shrinkage_state <- fn_reset_adaptive_metric_shrinkage(
+                                      state = adaptive_metric_shrinkage_state,
+                                      n_window_updates = adaptive_metric_shrinkage_window_updates(ii))
+                          }
+                    }
                     ##
                     X_all <- if (sample_nuisance) rbind(theta_us_vectors_all_chains_input_from_R,
                                                         theta_main_vectors_all_chains_input_from_R)
@@ -2459,15 +2643,36 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                      tcrossprod(delta[index_main]) * (wf_n * K / n_new)
                     wf_m  <- wf_m + delta * (K / n_new)
                     wf_n  <- n_new
+                    if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                          adaptive_metric_shrinkage_state <- fn_update_adaptive_metric_shrinkage(
+                                state = adaptive_metric_shrinkage_state,
+                                main_draws = X_all[index_main, , drop = FALSE],
+                                covariance_proposal = NULL,
+                                ratio_M_effective = NULL)
+                    }
                     ##
                     if (wf_n >= wf_min_draws) {
                         var_draws_all <- wf_M2 / (wf_n - 1)
                         cov_draws     <- wf_C2 / (wf_n - 1)
                         w <- wf_n / (wf_n + 5)
                         empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
-                        ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
-                        empicical_cov_main <- fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
-                                                                                   metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                        if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                              adaptive_shrinkage_resolution <- fn_resolve_adaptive_metric_shrinkage(
+                                    state = adaptive_metric_shrinkage_state,
+                                    covariance_matrix = empicical_cov_main)
+                              empicical_cov_main <- adaptive_shrinkage_resolution$covariance_matrix
+                              adaptive_metric_shrinkage_lambda_history[ii] <- adaptive_shrinkage_resolution$shrinkage
+                              adaptive_metric_shrinkage_last_diagnostics <- adaptive_shrinkage_resolution$diagnostics
+                        } else {
+                              ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
+                              empicical_cov_main <- if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive")) {
+                                    fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                         metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage_numeric)
+                              } else {
+                                    fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                         metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                              }
+                        }
                         empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                         metric_ready <- TRUE
                     }
@@ -2503,9 +2708,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                               per_iteration_regularisation_weight <- per_iteration_metric_n_draws_since_start / (per_iteration_metric_n_draws_since_start + 5)
                               empicical_cov_main <- per_iteration_regularisation_weight * per_iteration_covariance_main +
                                                     (1 - per_iteration_regularisation_weight) * 1e-3 * diag(n_params_main)
-                              ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
-                              empicical_cov_main <- fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
-                                                                                         metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                              if (!metric_pooled_offdiagonal_shrinkage_adaptive_active) {
+                                    ## off-diagonals x (1 - metric_pooled_offdiagonal_shrinkage), diagonal kept (0 = unchanged):
+                                    empicical_cov_main <- if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive")) {
+                                          fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                               metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage_numeric)
+                                    } else {
+                                          fn_shrink_metric_pooled_offdiagonal( covariance_matrix                   = empicical_cov_main,
+                                                                               metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage)
+                                    }
+                              }
                               empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
                          }
                          ##
@@ -2641,7 +2853,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                    ## With realised accept/reject endpoints, the current mean
                    ## is the corresponding lower-variance-free fallback.
                    ## if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) {
-                   if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) {
+                   ## if (!isTRUE(manual_tau) && ii < n_adapt && burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) {
+                   ## ("ESJD_CHESSR" reads the proposal centre through its CHESSR term. "ESJD" alone does not use it, since a jump
+                   ##  ||z_t - z_0||^2 does not depend on any centre, but the centre is kept exactly as for CHESSR, so every array the
+                   ##  criterion code receives, including the resident worker's copy, has the same shape and state as for CHESSR)
+                   if (!isTRUE(manual_tau) && ii < n_adapt &&
+                       burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
                      if (use_resident_burnin) {
                          ##
                          ## ---- the full update below (every row, as in its last branch), in the worker on the resident proposals of the
@@ -2988,10 +3205,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                  M_decay_power = M_decay_power,
                                                                  M_decay_scale = M_decay_scale,
                                                                  variance_scale = metric_variance_scale,   ## x n_chains_burnin only for chain_mean_scaled
+                                                                 adaptive_shrinkage_state = if (metric_pooled_offdiagonal_shrinkage_adaptive_active &&
+                                                                                                 identical(metric_estimator, "per_iteration"))
+                                                                                                    adaptive_metric_shrinkage_state else NULL,
                                                                  compute_M_dense_sqrt = FALSE)             ## M_dense_sqrt is only read by SNAPER
                                
                                EHMC_Metric_as_Rcpp_List <- outs$EHMC_Metric_as_Rcpp_List
                                EHMC_burnin_as_Rcpp_List <- outs$EHMC_burnin_as_Rcpp_List
+                               if (metric_pooled_offdiagonal_shrinkage_adaptive_active && identical(metric_estimator, "per_iteration")) {
+                                     adaptive_metric_shrinkage_state <- outs$adaptive_shrinkage_state
+                                     adaptive_metric_shrinkage_last_diagnostics <- outs$adaptive_shrinkage_diagnostics
+                                     if (!is.null(adaptive_metric_shrinkage_last_diagnostics) &&
+                                         isTRUE(adaptive_metric_shrinkage_last_diagnostics$applied) &&
+                                         is.finite(adaptive_metric_shrinkage_last_diagnostics$shrinkage)) {
+                                           adaptive_metric_shrinkage_lambda_history[ii] <- adaptive_metric_shrinkage_last_diagnostics$shrinkage
+                                     }
+                               }
                              } else {
                                outs <- update_M_Empirical_main(  debug = debug,
                                                                  metric_shape_main = metric_shape_main,
@@ -3011,6 +3240,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                  ## pooled blocks above), not the running variance of the cross-chain mean (snaper_s_vec_main_empirical, ~ Sigma / n_chains):
                                                                  per_iteration_variance_vec_main = if (metric_estimator == "per_iteration") per_iteration_variance_vec_main else
                                                                                                    if (metric_estimator == "pooled") diag(empicical_cov_main) else NULL,
+                                                                 adaptive_shrinkage_state = NULL,
                                                                  compute_M_dense_sqrt = FALSE)             ## M_dense_sqrt is only read by SNAPER
                                
                                EHMC_Metric_as_Rcpp_List <- outs$EHMC_Metric_as_Rcpp_List
@@ -3220,7 +3450,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       ## ---- fn_transport_snaper_direction() of the resident joint direction: the main-block part here, with the same R
                       ##      code on the direction's main rows; the nuisance part and the joint normalisation in the worker:
                       previous_joint_factor <-  trajectory_metric[[adapted_block]]
-                      if (burnin_algorithm %in% c("SNAPER", "SNAPER_time") &&
+                      if (burnin_algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER") &&
                           !(is.null(previous_joint_factor) || identical(previous_joint_factor, new_factor))) {
                           ## Both blocks retain their transported magnitudes until the single joint normalisation.
                           ## The complete direction is a temporary vector; no chain draws or direction history are stored.
@@ -3236,7 +3466,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       trajectory_mass[[adapted_block]] <- mass
                   }
                   ## if (ii < n_adapt && burnin_algorithm == "SNAPER") {
-                  if (ii < n_adapt && burnin_algorithm %in% c("SNAPER", "SNAPER_time")) {
+                  if (ii < n_adapt && burnin_algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER")) {
                       if (use_resident_joint_block) {
                       ## ---- fn_update_snaper_w_minibatch() of the resident joint direction: the main rows of the states in metric
                       ##      coordinates here (the same R code on the main rows), the nuisance rows and the update in the worker:
@@ -3358,10 +3588,25 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                             eps_main_used_for_iteration <-  EHMC_args_as_Rcpp_List$eps_main
                                             native_call_start_time <-  Sys.time()
                                         }
-                                        result <- run_burnin_iteration(
-                                                  worker_ptr,
-                                                  seed_R = seed + ii,
-                                                  current_iter_R = ii)
+                                        tau_jitter_iteration <-  if (ii < clip_iter) NULL else
+                                                                   fn_tau_jitter_burnin_draw(tau_jitter_burnin_state,
+                                                                                              ii - clip_iter + 1,
+                                                                                              EHMC_args_as_Rcpp_List)
+                                        if (is.null(tau_jitter_iteration)) {
+                                            result <- run_burnin_iteration(
+                                                      worker_ptr,
+                                                      seed_R = seed + ii,
+                                                      current_iter_R = ii)
+                                        } else {
+                                            result <-  run_burnin_iteration_tau_jitter(
+                                                       worker_ptr,
+                                                       seed_R = seed + ii,
+                                                       current_iter_R = ii,
+                                                       tau_main_ii_R = tau_jitter_iteration$tau_main_ii,
+                                                       tau_us_ii_R = tau_jitter_iteration$tau_us_ii,
+                                                       main_only_R = use_resident_burnin,
+                                                       profile_burnin_R = debug_burnin_timing)
+                                        }
                                         if (time_criterion_active) {
                                             time_per_iter_native_call_burnin_vec[ii] <-  as.numeric(difftime(Sys.time(), native_call_start_time, units = "secs"))
                                         }
@@ -4206,9 +4451,26 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                     velocity_main_metric <-  fn_apply_trajectory_metric(joint_metric_factor$main,
                                                                                         if (use_proposals_joint) velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R else
                                                                                                                  velocity_main_vectors_all_chains_input_from_R)
-                                    joint_reductions <-  resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
+                                    ##
+                                    ## ---- ESJD / ESJD_CHESSR: the worker's reductions carry no z_0 . z_t cross products (the squared jump
+                                    ##      ||z_t - z_0||^2 needs them), so these criteria always take the "status 2" route below: the joint endpoints
+                                    ##      come from the worker and fn_metric_position_criterion() computes the criterion in R (no C++ change):
+                                    ##
+                                    ## joint_reductions <-  resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
+                                    joint_reductions <-  if (burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) list(status = 2) else
+                                                         if (identical(tau_gradient_estimator, "two_ended"))
+                                                             resident_api[[resident_joint_two_ended_api_name]]( worker_ptr,
+                                                                                                                 projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER"),
+                                                                                                                 use_proposals_R = use_proposals_joint,
+                                                                                                                 initial_main = initial_main_metric,
+                                                                                                                 proposed_main = proposed_main_metric,
+                                                                                                                 velocity_main = velocity_main_metric,
+                                                                                                                 velocity_initial_main = fn_apply_trajectory_metric(joint_metric_factor$main,
+                                                                                                                                                                     velocity_main_0_burnin_tau_adapt_all_chains_input_from_R),
+                                                                                                                 factor_us = joint_metric_factor$us) else
+                                                         resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
                                                                                                                               ## projection_R = identical(burnin_algorithm, "SNAPER"),
-                                                                                                                              projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time"),
+                                                                                                                              projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER"),
                                                                                                                               use_proposals_R = use_proposals_joint,
                                                                                                                               initial_main = initial_main_metric,
                                                                                                                               proposed_main = proposed_main_metric,
@@ -4230,20 +4492,56 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                     resident_api$fn_persistent_burnin_get_state(worker_ptr, "velocity_us_prop_burnin_tau_adapt_all_chains_input_from_R"))
                                         velocity_accepted <-  rbind(velocity_main_vectors_all_chains_input_from_R,
                                                                     resident_api$fn_persistent_burnin_get_state(worker_ptr, "velocity_us_vectors_all_chains_output_to_R"))
+                                        velocity_initial <-  rbind(velocity_main_0_burnin_tau_adapt_all_chains_input_from_R,
+                                                                   resident_api$fn_persistent_burnin_get_state(worker_ptr, "velocity_us_0_burnin_tau_adapt_all_chains_input_from_R"))
                                         joint_mean_initial <-  c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main,
                                                                  resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_vec_us"))
                                         joint_mean_proposed <-  c(snaper_m_prop_vec_all[index_main],
                                                                   resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr, "snaper_m_prop_vec_us"))
                                         joint_direction <-  resident_api$fn_persistent_burnin_joint_direction_get(worker_ptr, FALSE)
+                                        if (trajectory_criterion_advanced_active) {
+                                            joint_position_criterion <-  fn_metric_position_criterion_advanced(
+                                                algorithm = burnin_algorithm,
+                                                theta_initial = theta_initial,
+                                                theta_proposed = if (use_proposals_joint) theta_proposed else theta_accepted,
+                                                velocity_initial = velocity_initial,
+                                                velocity_proposed = if (use_proposals_joint) velocity_proposed else velocity_accepted,
+                                                mean_initial = joint_mean_initial,
+                                                mean_proposed = if (use_proposals_joint) joint_mean_proposed else joint_mean_initial,
+                                                metric_factor = joint_metric_factor,
+                                                tau_values = tau_values,
+                                                direction = joint_direction,
+                                                tau_gradient_estimator = tau_gradient_estimator,
+                                                tau_cost_exponent = tau_cost_exponent,
+                                                esjd_jump_power = esjd_jump_power,
+                                                tau_jitter_burnin = tau_jitter_burnin,
+                                                randomize_tau_burnin = randomize_tau_burnin,
+                                                tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                                burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                                lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
+                                        }
                                     } else {
-                                        joint_position_criterion <-  fn_metric_position_criterion_from_reductions(algorithm = burnin_algorithm,
-                                                                                                                  reductions = joint_reductions,
+                                        joint_position_criterion <-  if (trajectory_criterion_advanced_active)
+                                            fn_metric_position_criterion_from_reductions_advanced(
+                                                algorithm = burnin_algorithm,
+                                                reductions = joint_reductions,
+                                                tau_values = tau_values,
+                                                tau_gradient_estimator = tau_gradient_estimator,
+                                                tau_cost_exponent = tau_cost_exponent,
+                                                esjd_jump_power = esjd_jump_power,
+                                                tau_jitter_burnin = tau_jitter_burnin,
+                                                randomize_tau_burnin = randomize_tau_burnin,
+                                                tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                                burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                                lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update) else
+                                            fn_metric_position_criterion_from_reductions(algorithm = burnin_algorithm,
+                                                                                          reductions = joint_reductions,
                                                                                                                   ## tau_values = tau_values)
-                                                                                                                  tau_values = tau_values,
-                                                                                                                  tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                                                                          tau_values = tau_values,
+                                                                                          tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
                                                                                                                   ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update)
-                                                                                                                  burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
-                                                                                                                  lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
+                                                                                          burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                                                                          lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
                                         ## (with the criterion given, only the number of columns (chains) of theta_initial is read)
                                         theta_initial <-  theta_main_0_burnin_tau_adapt_all_chains_input_from_R
                                     }
@@ -4271,12 +4569,37 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ## lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
                                         lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update,
                                         learning_rate_schedule_iteration = tau_learning_rate_schedule_iteration,
-                                        learning_rate_schedule_length = tau_learning_rate_schedule_length)
+                                        ## learning_rate_schedule_length = tau_learning_rate_schedule_length)
+                                        learning_rate_schedule_length = tau_learning_rate_schedule_length,
+                                        component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
+                                                                  ESJD_CHESSR_component_criterion_ema)
                                     } else {
                                     initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
                                                     if (is_joint) c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
                                                     EHMC_burnin_as_Rcpp_List$snaper_m_vec_us
                                     proposal_mean <- snaper_m_prop_vec_all[if (is_main) index_main else if (is_joint) c(index_main, index_nuisance) else index_nuisance]
+                                    position_criterion <-  NULL
+                                    if (trajectory_criterion_advanced_active) {
+                                        position_criterion <-  fn_metric_position_criterion_advanced(
+                                            algorithm = burnin_algorithm,
+                                            theta_initial = theta_initial,
+                                            theta_proposed = if (isTRUE(tau_weight_by_p_jump)) theta_proposed else theta_accepted,
+                                            velocity_initial = velocity_initial,
+                                            velocity_proposed = if (isTRUE(tau_weight_by_p_jump)) velocity_proposed else velocity_accepted,
+                                            mean_initial = c(initial_mean),
+                                            mean_proposed = if (isTRUE(tau_weight_by_p_jump)) c(proposal_mean) else c(initial_mean),
+                                            metric_factor = trajectory_metric[[adapted_block]],
+                                            tau_values = tau_values,
+                                            direction = trajectory_direction[[adapted_block]],
+                                            tau_gradient_estimator = tau_gradient_estimator,
+                                            tau_cost_exponent = tau_cost_exponent,
+                                            esjd_jump_power = esjd_jump_power,
+                                            tau_jitter_burnin = tau_jitter_burnin,
+                                            randomize_tau_burnin = randomize_tau_burnin,
+                                            tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
+                                            burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
+                                            lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
+                                    }
                                     update <- fn_metric_tau_block_update(
                                         algorithm = burnin_algorithm, theta_initial = theta_initial, theta_proposed = theta_proposed,
                                         theta_accepted = theta_accepted, velocity_proposed = velocity_proposed, velocity_accepted = velocity_accepted,
@@ -4294,13 +4617,18 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         criterion_ema = ChEES_criterion_ema,
                                         ## bias_correction_step = tau_adam_bias_correction_step)
                                         bias_correction_step = tau_adam_bias_correction_step,
+                                        ## position_criterion = position_criterion)
+                                        position_criterion = position_criterion,
                                         tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
                                         ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update)
                                         burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
                                         ## lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update)
                                         lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update,
                                         learning_rate_schedule_iteration = tau_learning_rate_schedule_iteration,
-                                        learning_rate_schedule_length = tau_learning_rate_schedule_length)
+                                        ## learning_rate_schedule_length = tau_learning_rate_schedule_length)
+                                        learning_rate_schedule_length = tau_learning_rate_schedule_length,
+                                        component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
+                                                                  ESJD_CHESSR_component_criterion_ema)
                                     }  ## end of: if (use_resident_joint_block)
                                     updated <- update$updated
                                     tau_adam_update_performed <- isTRUE(update$adam_update_performed)
@@ -4308,6 +4636,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ChEES_criterion_ema <- update$criterion_ema
                                         ChEES_criterion_ema_vec[ii] <- update$criterion_ema
                                         ChEES_per_tau_gradient_vec[ii] <- update$gradient
+                                        ## "ESJD_CHESSR": the two component moving averages, carried to the next update:
+                                        if (!is.null(update$component_criterion_ema)) {
+                                            if (burnin_algorithm == "ESJD_SNAPER") {
+                                                ## "ESJD_SNAPER": carry its ESJD/SNAPER component moving averages to the next update.
+                                                ESJD_SNAPER_component_criterion_ema <-  update$component_criterion_ema
+                                            } else {
+                                                ESJD_CHESSR_component_criterion_ema <-  update$component_criterion_ema
+                                            }
+                                        }
                                     }
                                     ##
                                     ## ---- CHESSR_time / SNAPER_time: the chain-mean estimate of ESS_elasticity_wrt_log_tau at this update (the snapshots
@@ -4333,7 +4670,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                             if (use_resident_joint_block && is.null(joint_mean_initial)) {
                                                 joint_reductions_of_accepted_end <-  if (!use_proposals_joint) joint_reductions else
                                                     resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
-                                                                                                                          projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time"),
+                                                                                                                          projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER"),
                                                                                                                           use_proposals_R = FALSE,
                                                                                                                           initial_main = initial_main_metric,
                                                                                                                           proposed_main = fn_apply_trajectory_metric(joint_metric_factor$main,
@@ -4375,9 +4712,39 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                     tau_probe_aggregated_gradient <-  if (burnin_algorithm == "KE") attr(updated, "aggregated_gradient") else update$gradient
                                     if (is.null(tau_probe_aggregated_gradient) || length(tau_probe_aggregated_gradient) != 1 ||
                                         !is.finite(tau_probe_aggregated_gradient)) tau_probe_aggregated_gradient <-  0
+                                    ## "ESJD_CHESSR": the chain means of its two components go into the block sums of the probe (fn_tau_probe_step):
+                                    tau_probe_component_chain_means <-  NULL
+                                    if (burnin_algorithm == "ESJD_CHESSR") {
+                                        tau_probe_component_chain_means <-  c(ESJD_gradient    = update$component_gradient_chain_mean[["ESJD"]],
+                                                                              ESJD_criterion   = update$component_criterion_chain_mean[["ESJD"]],
+                                                                              CHESSR_gradient  = update$component_gradient_chain_mean[["CHESSR"]],
+                                                                              CHESSR_criterion = update$component_criterion_chain_mean[["CHESSR"]])
+                                        tau_probe_component_chain_means[!is.finite(tau_probe_component_chain_means)] <-  0
+                                    } else if (burnin_algorithm == "ESJD_SNAPER") {
+                                        ## The ESJD_SNAPER probe pools the same ESJD component with the SNAPER rate, so its rung decision
+                                        ## cannot accidentally use the CHESSR component from the existing ESJD_CHESSR path.
+                                        tau_probe_component_chain_means <-  c(ESJD_gradient    = update$component_gradient_chain_mean[["ESJD"]],
+                                                                              ESJD_criterion   = update$component_criterion_chain_mean[["ESJD"]],
+                                                                              SNAPER_gradient  = update$component_gradient_chain_mean[["SNAPER"]],
+                                                                              SNAPER_criterion = update$component_criterion_chain_mean[["SNAPER"]])
+                                        tau_probe_component_chain_means[!is.finite(tau_probe_component_chain_means)] <-  0
+                                    }
+                                    tau_probe_rung_before_step <-  tau_probe_state$rung
                                     tau_probe_state <-  fn_tau_probe_step( state = tau_probe_state,
                                                                            aggregated_gradient = tau_probe_aggregated_gradient,
-                                                                           iteration = ii)
+                                                                           ## iteration = ii)
+                                                                           iteration = ii,
+                                                                           component_chain_means = tau_probe_component_chain_means)
+                                    ##
+                                    ## ---- "ESJD_CHESSR": when the probe moves tau to a new rung, or ends (ADAM from the next tau update; with
+                                    ##      "fixed_length_probe_then_decay_and_average" the jitter also resumes), the two component moving averages
+                                    ##      restart, so that the levels dividing the next gradients are those of the new tau, not of the previous rung:
+                                    if (burnin_algorithm == "ESJD_CHESSR" && (tau_probe_state$rung != tau_probe_rung_before_step || !tau_probe_state$probing)) {
+                                        ESJD_CHESSR_component_criterion_ema <-  c(ESJD = NA_real_, CHESSR = NA_real_)
+                                    }
+                                    if (burnin_algorithm == "ESJD_SNAPER" && (tau_probe_state$rung != tau_probe_rung_before_step || !tau_probe_state$probing)) {
+                                        ESJD_SNAPER_component_criterion_ema <-  c(ESJD = NA_real_, SNAPER = NA_real_)
+                                    }
                                     updated <-  c(exp(tau_probe_state$log_tau_start + tau_probe_state$rung * log(2)),
                                                   EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
                                                   EHMC_burnin_as_Rcpp_List[[adam_variance_name]])
@@ -4744,6 +5111,26 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           ##
     }
     ##
+    adaptive_metric_shrinkage_history <- adaptive_metric_shrinkage_lambda_history[is.finite(adaptive_metric_shrinkage_lambda_history)]
+    names(adaptive_metric_shrinkage_history) <- as.character(which(is.finite(adaptive_metric_shrinkage_lambda_history)))
+    metric_adaptive_shrinkage <- list(
+        requested = metric_pooled_offdiagonal_shrinkage_resolution$requested,
+        effective = metric_pooled_offdiagonal_shrinkage_resolution$effective,
+        active = metric_pooled_offdiagonal_shrinkage_adaptive_active,
+        reason = metric_pooled_offdiagonal_shrinkage_resolution$reason,
+        metric_estimator = metric_estimator,
+        intensity_scope = if (identical(metric_estimator, "pooled")) "last_resolved_covariance_proposal" else
+                              "last_applied_unshrunk_blended_metric",
+        history_scope = if (identical(metric_estimator, "pooled")) "covariance_proposal_resolutions" else
+                            "applied_metric_updates",
+        final_shrinkage = if (length(adaptive_metric_shrinkage_history) > 0) utils::tail(adaptive_metric_shrinkage_history, 1) else NA_real_,
+        n_events = if (metric_pooled_offdiagonal_shrinkage_adaptive_active) adaptive_metric_shrinkage_state$n_events else 0,
+        n_draws = if (metric_pooled_offdiagonal_shrinkage_adaptive_active) adaptive_metric_shrinkage_state$n_draws else 0,
+        n_batches = if (metric_pooled_offdiagonal_shrinkage_adaptive_active) adaptive_metric_shrinkage_state$n_batches else 0,
+        batch_length = if (metric_pooled_offdiagonal_shrinkage_adaptive_active) adaptive_metric_shrinkage_state$batch_length else NA_real_,
+        weight_sum_squared = if (metric_pooled_offdiagonal_shrinkage_adaptive_active) adaptive_metric_shrinkage_state$weight_sum_squared else NA_real_,
+        diagnostics = if (metric_pooled_offdiagonal_shrinkage_adaptive_active) adaptive_metric_shrinkage_last_diagnostics else NULL)
+    ##
     rm(worker_ptr); 
     # gc()
     ##
@@ -4807,6 +5194,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 metric_pooled_window_resets           = metric_pooled_window_resets,
                 metric_pooled_window_reset_iterations = metric_window_resets,
                 metric_pooled_offdiagonal_shrinkage   = metric_pooled_offdiagonal_shrinkage,
+                metric_adaptive_shrinkage = metric_adaptive_shrinkage,
+                metric_adaptive_shrinkage_history = adaptive_metric_shrinkage_history,
                 ChEES_criterion_ema_vec = ChEES_criterion_ema_vec,
                 ChEES_per_tau_gradient_vec = ChEES_per_tau_gradient_vec,
                 tau_adaptation_version = 4,
@@ -4814,6 +5203,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 ## EXPERIMENTAL: requested and effective block feeding the trajectory-length criterion ("main" | "joint"):
                 tau_adaptation_block_requested = tau_adaptation_block,
                 tau_adaptation_block = tau_adaptation_block_effective,
+                tau_gradient_estimator = tau_gradient_estimator,
+                tau_cost_exponent = tau_cost_exponent,
+                esjd_jump_power = esjd_jump_power,
+                tau_jitter_burnin = tau_jitter_burnin,
                 snaper_direction_main = trajectory_direction$main,
                 snaper_direction_joint = trajectory_direction$joint,
                 trajectory_metric_factor_main = trajectory_metric$main,
@@ -4880,11 +5273,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   
   
 }
-  
 
 
-              
-   
+
+
 
 
 

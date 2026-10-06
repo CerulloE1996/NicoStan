@@ -39,6 +39,7 @@ generate_summary_tibble <- function(n_threads = NULL,
                                             n_eff = NA,
                                             Rhat = NA,
                                             n_Rhat = NA,
+                                            n_eff_tail = NA,   ## tail ESS (Vehtari et al. 2021): the smaller of the 5% and 95% quantile ESS
                                             check.names = FALSE)
               
               # # Effective Sample Size (ESS) and Rhat - using the fast custom RcppParallel fn "NicoStan::Rcpp_compute_MCMC_diagnostics()"
@@ -87,6 +88,7 @@ generate_summary_tibble <- function(n_threads = NULL,
                                                         n_threads = n_threads))
               ess_vec <- outs$diagnostics[, 1]
               # ess_tail_vec <- outs$diagnostics[, 2]
+              ess_tail_vec <- outs$diagnostics[, 2]   ## the tail ESS "split_ESS_rank" already returns (column 2), now kept
               ##
               outs <-  (Rcpp_compute_MCMC_diagnostics(  posterior_draws_as_std_vec_of_mats,
                                                         diagnostic = "split_rhat_rank",
@@ -109,6 +111,7 @@ generate_summary_tibble <- function(n_threads = NULL,
                             #### summary_df[i, c("2.5%", "50%", "97.5%")] <- quantiles_between_chains[, i]
                         })
                         summary_df$n_eff[i] <- round(ess_vec[i])
+                        summary_df$n_eff_tail[i] <- round(ess_tail_vec[i])
                         summary_df$Rhat[i] <- rhat_vec[i]
                 
               }

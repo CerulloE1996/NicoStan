@@ -119,6 +119,7 @@ static std::atomic<long long> g_n_load{0};
 
 
 
+
     
 #include <RcppParallel.h>
 //// #include <RcppEigen.h>
@@ -677,8 +678,8 @@ Eigen::Matrix<double, -1, -1>     Rcpp_wrapper_EIGEN_double_mat(             con
 
 
 
- 
- 
+
+
  
 // [[Rcpp::export]]
 Eigen::Matrix<double, -1, 1>     Rcpp_wrapper_EIGEN_double_colvec(           const Eigen::Matrix<double, -1, 1> x,
@@ -2745,7 +2746,9 @@ struct BurninOutputCopyWorker : public RcppParallel::Worker {
 Rcpp::List fn_persistent_burnin_run_one_iter_impl(   SEXP worker_ptr,
                                                 const int seed_R,
                                                 const int current_iter_R,
-                                                const bool profile_burnin) {
+                                                const bool profile_burnin,
+                                                const std::vector<double> *tau_main_ii_overrides,
+                                                const std::vector<double> *tau_us_ii_overrides) {
   
         Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
         PersistentBurninState &st = *ptr;
@@ -2757,7 +2760,8 @@ Rcpp::List fn_persistent_burnin_run_one_iter_impl(   SEXP worker_ptr,
         const auto parallel_start = profile_burnin ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
         
         //// ---- run the iteration (all chains in parallel, state resident):
-        BurninIterWorker worker(&st, seed_R, current_iter_R, profile_burnin ? &chain_profiles : nullptr, parallel_start);
+        BurninIterWorker worker(&st, seed_R, current_iter_R, profile_burnin ? &chain_profiles : nullptr, parallel_start,
+                                 tau_main_ii_overrides, tau_us_ii_overrides);
         parallelFor(0, n_threads, worker);
         const auto parallel_end = profile_burnin ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
         
@@ -2857,12 +2861,12 @@ Rcpp::List fn_persistent_burnin_run_one_iter_impl(   SEXP worker_ptr,
 
 // [[Rcpp::export]]
 Rcpp::List fn_persistent_burnin_run_one_iter(SEXP worker_ptr, const int seed_R, const int current_iter_R) {
-    return fn_persistent_burnin_run_one_iter_impl(worker_ptr, seed_R, current_iter_R, false);
+    return fn_persistent_burnin_run_one_iter_impl(worker_ptr, seed_R, current_iter_R, false, nullptr, nullptr);
 }
 
 // [[Rcpp::export]]
 Rcpp::List fn_persistent_burnin_run_one_iter_profiled(SEXP worker_ptr, const int seed_R, const int current_iter_R) {
-    return fn_persistent_burnin_run_one_iter_impl(worker_ptr, seed_R, current_iter_R, true);
+    return fn_persistent_burnin_run_one_iter_impl(worker_ptr, seed_R, current_iter_R, true, nullptr, nullptr);
 }
 
 
@@ -3047,7 +3051,9 @@ static Rcpp::List fn_persistent_burnin_main_only_outputs(PersistentBurninState &
 Rcpp::List fn_persistent_burnin_run_one_iter_main_only_impl(   SEXP worker_ptr,
                                                                const int seed_R,
                                                                const int current_iter_R,
-                                                               const bool profile_burnin) {
+                                                               const bool profile_burnin,
+                                                               const std::vector<double> *tau_main_ii_overrides,
+                                                               const std::vector<double> *tau_us_ii_overrides) {
 
         Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
         PersistentBurninState &st = *ptr;
@@ -3056,7 +3062,8 @@ Rcpp::List fn_persistent_burnin_run_one_iter_main_only_impl(   SEXP worker_ptr,
         const auto parallel_start = profile_burnin ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
 
         //// ---- run the iteration: the same worker and the same parallelFor as fn_persistent_burnin_run_one_iter_impl:
-        BurninIterWorker worker(&st, seed_R, current_iter_R, profile_burnin ? &chain_profiles : nullptr, parallel_start);
+        BurninIterWorker worker(&st, seed_R, current_iter_R, profile_burnin ? &chain_profiles : nullptr, parallel_start,
+                                 tau_main_ii_overrides, tau_us_ii_overrides);
         parallelFor(0, n_threads, worker);
         const auto parallel_end = profile_burnin ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
 
@@ -3086,12 +3093,54 @@ Rcpp::List fn_persistent_burnin_run_one_iter_main_only_impl(   SEXP worker_ptr,
 
 // [[Rcpp::export]]
 Rcpp::List fn_persistent_burnin_run_one_iter_main_only(SEXP worker_ptr, const int seed_R, const int current_iter_R) {
-    return fn_persistent_burnin_run_one_iter_main_only_impl(worker_ptr, seed_R, current_iter_R, false);
+    return fn_persistent_burnin_run_one_iter_main_only_impl(worker_ptr, seed_R, current_iter_R, false, nullptr, nullptr);
 }
 
 // [[Rcpp::export]]
 Rcpp::List fn_persistent_burnin_run_one_iter_main_only_profiled(SEXP worker_ptr, const int seed_R, const int current_iter_R) {
-    return fn_persistent_burnin_run_one_iter_main_only_impl(worker_ptr, seed_R, current_iter_R, true);
+    return fn_persistent_burnin_run_one_iter_main_only_impl(worker_ptr, seed_R, current_iter_R, true, nullptr, nullptr);
+}
+
+
+//// Explicit burn-in jitter values are scoped to this iteration and cleared on normal return or exception.
+// [[Rcpp::export]]
+Rcpp::List fn_persistent_burnin_run_one_iter_tau_jitter(   SEXP worker_ptr,
+                                                         const int seed_R,
+                                                         const int current_iter_R,
+                                                         const std::vector<double> tau_main_ii_R,
+                                                         const std::vector<double> tau_us_ii_R,
+                                                         const bool main_only_R,
+                                                         const bool profile_burnin_R) {
+
+        Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
+        const PersistentBurninState &st = *ptr;
+        if (st.n_threads <= 0 || static_cast<int>(tau_main_ii_R.size()) != st.n_threads ||
+            static_cast<int>(tau_us_ii_R.size()) != st.n_threads) {
+            Rcpp::stop("Burn-in tau jitter must have one main and one nuisance value per chain.");
+        }
+        for (int i = 0; i < st.n_threads; ++i) {
+            if (!std::isfinite(tau_main_ii_R[i]) || tau_main_ii_R[i] < 0.0 ||
+                !std::isfinite(tau_us_ii_R[i]) || tau_us_ii_R[i] < 0.0) {
+                Rcpp::stop("Burn-in tau jitter values must be finite and non-negative.");
+            }
+            if (!st.EHMC_args_copies[i].randomize_tau) {
+                Rcpp::stop("The burn-in tau jitter entry point requires randomize_tau = TRUE.");
+            }
+            if (!st.partitioned_HMC && tau_us_ii_R[i] != tau_main_ii_R[i]) {
+                Rcpp::stop("Joint burn-in requires one shared main/nuisance trajectory length per chain.");
+            }
+            if (st.EHMC_args_copies[i].share_tau_ii_across_chains &&
+                (tau_main_ii_R[i] != tau_main_ii_R[0] || tau_us_ii_R[i] != tau_us_ii_R[0])) {
+                Rcpp::stop("Shared burn-in tau jitter must be identical across chains.");
+            }
+        }
+        if (main_only_R) {
+            return fn_persistent_burnin_run_one_iter_main_only_impl(worker_ptr, seed_R, current_iter_R, profile_burnin_R,
+                                                                    &tau_main_ii_R, &tau_us_ii_R);
+        }
+        return fn_persistent_burnin_run_one_iter_impl(worker_ptr, seed_R, current_iter_R, profile_burnin_R,
+                                                    &tau_main_ii_R, &tau_us_ii_R);
+
 }
 
 
@@ -4000,6 +4049,136 @@ Rcpp::List fn_persistent_burnin_joint_position_reductions_resident(   SEXP worke
           Rcpp::Named("projection_initial") = projection_initial,
           Rcpp::Named("projection_proposed") = projection_proposed,
           Rcpp::Named("projection_velocity") = projection_velocity);
+
+}
+
+
+//// ---------------------------------------------------------------- two-ended position criterion, joint block:
+////
+//// This entry point has the same resident state inputs and legacy reductions as
+//// fn_persistent_burnin_joint_position_reductions_resident(), and additionally
+//// reduces the initial position against the initial velocity. The main initial
+//// velocity is supplied in metric coordinates; the nuisance initial velocity is
+//// read from us_velocity_0_vec in the resident worker.
+////
+//// The extra reduction is used only by the two-ended numerator derivative. The
+//// criterion rate, acceptance weighting and chain combination remain in R.
+//// The joint ordering is main rows first followed by nuisance rows, matching the
+//// existing helper and the trajectory metric factor.
+////
+//// projection_R = FALSE returns the three legacy column sums plus
+//// column_sums_initial_velocity. projection_R = TRUE returns the three legacy
+//// projections plus projection_initial_velocity. The status values retain the
+//// legacy meanings: 0 = computed, 2 = R would not use the BLAS, and 3 = the
+//// resident SNAPER direction is non-finite.
+////
+// [[Rcpp::export]]
+Rcpp::List fn_persistent_burnin_joint_position_two_ended_reductions_resident(   SEXP worker_ptr,
+                                                                                 const bool projection_R,
+                                                                                 const bool use_proposals_R,
+                                                                                 const Rcpp::NumericMatrix initial_main,
+                                                                                 const Rcpp::NumericMatrix proposed_main,
+                                                                                 const Rcpp::NumericMatrix velocity_main,
+                                                                                 const Rcpp::NumericMatrix velocity_initial_main,
+                                                                                 const Rcpp::NumericVector factor_us) {
+
+        Rcpp::XPtr<PersistentBurninState> ptr(worker_ptr);
+        PersistentBurninState &st = *ptr;
+        fn_persistent_burnin_require_resident_statistics(st);
+        fn_persistent_burnin_check_main_matrix(initial_main, st,
+                                               "fn_persistent_burnin_joint_position_two_ended_reductions_resident: initial_main");
+        fn_persistent_burnin_check_main_matrix(proposed_main, st,
+                                               "fn_persistent_burnin_joint_position_two_ended_reductions_resident: proposed_main");
+        fn_persistent_burnin_check_main_matrix(velocity_main, st,
+                                               "fn_persistent_burnin_joint_position_two_ended_reductions_resident: velocity_main");
+        fn_persistent_burnin_check_main_matrix(velocity_initial_main, st,
+                                               "fn_persistent_burnin_joint_position_two_ended_reductions_resident: velocity_initial_main");
+        fn_persistent_burnin_check_vector_length(factor_us, st.n_nuisance, "fn_persistent_burnin_joint_position_two_ended_reductions_resident: factor_us");
+
+        const int n_chains = st.n_threads;
+        const Eigen::Index n_us = st.n_nuisance;
+        const std::vector<const double *> theta_initial_us_columns  = st.state_columns(&HMCResult::us_theta_vec_0, n_us);
+        const std::vector<const double *> theta_proposed_us_columns = st.state_columns(
+                use_proposals_R ? static_cast<HMCResultStateAccessor>(&HMCResult::us_theta_vec_proposed) :
+                                  static_cast<HMCResultStateAccessor>(&HMCResult::us_theta_vec), n_us);
+        const std::vector<const double *> velocity_us_columns = st.state_columns(
+                use_proposals_R ? static_cast<HMCResultStateAccessor>(&HMCResult::us_velocity_vec_proposed) :
+                                  static_cast<HMCResultStateAccessor>(&HMCResult::us_velocity_vec), n_us);
+        const std::vector<const double *> velocity_initial_us_columns = st.state_columns(&HMCResult::us_velocity_0_vec, n_us);
+        const double *mean_initial_us  = st.resident_snaper_m_vec_us.data();
+        const double *mean_proposed_us = use_proposals_R ? st.resident_snaper_m_prop_vec_us.data() : st.resident_snaper_m_vec_us.data();
+
+        if (!projection_R) {
+
+              Rcpp::NumericVector column_sums_proposed_sq(n_chains), column_sums_initial_sq(n_chains),
+                                    column_sums_proposed_velocity(n_chains), column_sums_initial_velocity(n_chains);
+              fn_exact_R_joint_position_column_sums(   REAL(initial_main), REAL(proposed_main), REAL(velocity_main),
+                                                       static_cast<std::size_t>(st.n_params_main),
+                                                       theta_initial_us_columns, theta_proposed_us_columns, velocity_us_columns,
+                                                       mean_initial_us, mean_proposed_us, REAL(factor_us),
+                                                       static_cast<std::size_t>(n_us),
+                                                       n_chains,
+                                                       column_sums_proposed_sq.begin(), column_sums_initial_sq.begin(), column_sums_proposed_velocity.begin());
+
+              for (int k = 0; k < n_chains; ++k) {
+                    const std::size_t offset_main = static_cast<std::size_t>(k) * static_cast<std::size_t>(st.n_params_main);
+                    const double *theta_initial_us = theta_initial_us_columns[k];
+                    const double *velocity_initial_us = velocity_initial_us_columns[k];
+                    long double sum_initial_velocity = 0.0L;
+                    for (std::size_t i = 0; i < static_cast<std::size_t>(st.n_params_main); ++i) {
+                          const double initial = REAL(initial_main)[offset_main + i];
+                          const double initial_velocity = REAL(velocity_initial_main)[offset_main + i];
+                          const double initial_velocity_product = initial * initial_velocity;
+                          sum_initial_velocity += initial_velocity_product;
+                    }
+                    for (std::size_t i = 0; i < static_cast<std::size_t>(n_us); ++i) {
+                          const double initial_difference = theta_initial_us[i] - mean_initial_us[i];
+                          const double initial = REAL(factor_us)[i] * initial_difference;
+                          const double initial_velocity = REAL(factor_us)[i] * velocity_initial_us[i];
+                          const double initial_velocity_product = initial * initial_velocity;
+                          sum_initial_velocity += initial_velocity_product;
+                    }
+                    column_sums_initial_velocity[k] = static_cast<double>(sum_initial_velocity);
+              }
+              return Rcpp::List::create(
+                Rcpp::Named("status") = 0,
+                Rcpp::Named("column_sums_proposed_sq") = column_sums_proposed_sq,
+                Rcpp::Named("column_sums_initial_sq") = column_sums_initial_sq,
+                Rcpp::Named("column_sums_proposed_velocity") = column_sums_proposed_velocity,
+                Rcpp::Named("column_sums_initial_velocity") = column_sums_initial_velocity);
+
+        }
+
+        //// SNAPER: length(direction) != nrow(initial) || any(!is.finite(direction)) -> R's stop():
+        fn_persistent_burnin_require_joint_direction(st);
+        const Eigen::Index n_all = fn_persistent_burnin_joint_rows(st);
+        for (Eigen::Index i = 0; i < n_all; ++i) {
+              if (!std::isfinite(st.resident_snaper_direction_joint(i))) {
+                    return Rcpp::List::create(Rcpp::Named("status") = 3);
+              }
+        }
+
+        fn_persistent_burnin_stage_joint_matrix(st, initial_main, theta_initial_us_columns, mean_initial_us, REAL(factor_us), st.resident_joint_staging_initial);
+        fn_persistent_burnin_stage_joint_matrix(st, proposed_main, theta_proposed_us_columns, mean_proposed_us, REAL(factor_us), st.resident_joint_staging_proposed);
+        fn_persistent_burnin_stage_joint_matrix(st, velocity_main, velocity_us_columns, nullptr, REAL(factor_us), st.resident_joint_staging_velocity);
+        std::vector<double> initial_velocity_staging;
+        fn_persistent_burnin_stage_joint_matrix(st, velocity_initial_main, velocity_initial_us_columns, nullptr, REAL(factor_us), initial_velocity_staging);
+
+        Rcpp::NumericVector projection_initial(n_chains), projection_proposed(n_chains), projection_velocity(n_chains), projection_initial_velocity(n_chains);
+        const double *direction = st.resident_snaper_direction_joint.data();
+        const std::size_t n_rows = static_cast<std::size_t>(n_all);
+        if ((fn_exact_R_crossprod_vector_matrix(direction, st.resident_joint_staging_initial.data(), n_rows, n_chains, projection_initial.begin()) != 0) ||
+            (fn_exact_R_crossprod_vector_matrix(direction, st.resident_joint_staging_proposed.data(), n_rows, n_chains, projection_proposed.begin()) != 0) ||
+            (fn_exact_R_crossprod_vector_matrix(direction, st.resident_joint_staging_velocity.data(), n_rows, n_chains, projection_velocity.begin()) != 0) ||
+            (fn_exact_R_crossprod_vector_matrix(direction, initial_velocity_staging.data(), n_rows, n_chains, projection_initial_velocity.begin()) != 0)) {
+              return Rcpp::List::create(Rcpp::Named("status") = 2);
+        }
+        return Rcpp::List::create(
+          Rcpp::Named("status") = 0,
+          Rcpp::Named("projection_initial") = projection_initial,
+          Rcpp::Named("projection_proposed") = projection_proposed,
+          Rcpp::Named("projection_velocity") = projection_velocity,
+          Rcpp::Named("projection_initial_velocity") = projection_initial_velocity);
 
 }
 

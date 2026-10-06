@@ -373,7 +373,7 @@ ALWAYS_INLINE  void                                        fn_standard_HMC_main_
                 if (!EHMC_args_as_cpp_struct.randomize_tau) {
                   EHMC_args_as_cpp_struct.tau_main_ii = EHMC_args_as_cpp_struct.tau_main;
                 } else if (!EHMC_args_as_cpp_struct.use_given_tau_main_ii) {
-                  EHMC_args_as_cpp_struct.tau_main_ii = generate_random_tau_ii(EHMC_args_as_cpp_struct.tau_main, rng_main);
+                  EHMC_args_as_cpp_struct.tau_main_ii = fn_generate_burnin_tau_ii(EHMC_args_as_cpp_struct.tau_main, rng_main, true);
                 }
                 if (EHMC_args_as_cpp_struct.tau_main_ii < EHMC_args_as_cpp_struct.eps_main) { 
                         EHMC_args_as_cpp_struct.tau_main_ii = EHMC_args_as_cpp_struct.eps_main; 

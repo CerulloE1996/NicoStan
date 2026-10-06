@@ -121,14 +121,80 @@ fn_resolve_metric_pooled_window_reset_iterations <-  function( metric_pooled_win
 #' @noRd
 fn_validate_metric_pooled_offdiagonal_shrinkage <-  function(metric_pooled_offdiagonal_shrinkage) {
 
+        if (is.character(metric_pooled_offdiagonal_shrinkage) && length(metric_pooled_offdiagonal_shrinkage) == 1 &&
+            !is.na(metric_pooled_offdiagonal_shrinkage)) {
+              if (identical(metric_pooled_offdiagonal_shrinkage, "adaptive")) {
+                    return("adaptive")
+              }
+              numeric_value <- suppressWarnings(as.numeric(metric_pooled_offdiagonal_shrinkage))
+              if (is.finite(numeric_value)) {
+                    metric_pooled_offdiagonal_shrinkage <- numeric_value
+              }
+        }
         if (!is.numeric(metric_pooled_offdiagonal_shrinkage) || is.factor(metric_pooled_offdiagonal_shrinkage) ||
             length(metric_pooled_offdiagonal_shrinkage) != 1 || !is.finite(metric_pooled_offdiagonal_shrinkage) ||
             metric_pooled_offdiagonal_shrinkage < 0 || metric_pooled_offdiagonal_shrinkage > 1) {
-              stop(paste0("metric_pooled_offdiagonal_shrinkage must be a single number in [0, 1]; got: ",
+              stop(paste0("metric_pooled_offdiagonal_shrinkage must be a single number in [0, 1], a numeric string, or 'adaptive'; got: ",
                           paste(as.character(metric_pooled_offdiagonal_shrinkage), collapse = ", ")))
         }
         ##
         return(as.numeric(metric_pooled_offdiagonal_shrinkage))
+
+}
+
+
+
+#' Resolve whether adaptive metric shrinkage is active for the requested metric.
+#'
+#' @param metric_pooled_offdiagonal_shrinkage Validated numeric shrinkage or "adaptive".
+#' @param metric_estimator Metric estimator used for the main block.
+#' @param metric_type_main Main metric type.
+#' @param metric_shape_main Main metric shape.
+#' @return A list containing the requested setting, effective setting, active flag and reason.
+#' @noRd
+fn_resolve_metric_pooled_offdiagonal_shrinkage <-  function( metric_pooled_offdiagonal_shrinkage,
+                                                              metric_estimator,
+                                                              metric_type_main,
+                                                              metric_shape_main) {
+
+        requested <- fn_validate_metric_pooled_offdiagonal_shrinkage(metric_pooled_offdiagonal_shrinkage)
+        if (!identical(requested, "adaptive")) {
+              return(list(requested = requested,
+                          effective = requested,
+                          active = FALSE,
+                          reason = NA_character_))
+        }
+        if (identical(metric_estimator, "chain_mean") || identical(metric_estimator, "chain_mean_scaled")) {
+              if (identical(metric_type_main, "Empirical") && identical(metric_shape_main, "dense")) {
+                    stop("metric_pooled_offdiagonal_shrinkage = 'adaptive' is unsupported for the chain_mean and chain_mean_scaled metric estimators.")
+              }
+              return(list(requested = requested,
+                          effective = NA_character_,
+                          active = FALSE,
+                          reason = "unsupported_chain_mean_estimator"))
+        }
+        if (!identical(metric_estimator, "pooled") && !identical(metric_estimator, "per_iteration")) {
+              return(list(requested = requested,
+                          effective = NA_character_,
+                          active = FALSE,
+                          reason = "metric_estimator_not_supported"))
+        }
+        if (!identical(metric_type_main, "Empirical")) {
+              return(list(requested = requested,
+                          effective = NA_character_,
+                          active = FALSE,
+                          reason = "metric_type_main_not_empirical"))
+        }
+        if (!identical(metric_shape_main, "dense")) {
+              return(list(requested = requested,
+                          effective = NA_character_,
+                          active = FALSE,
+                          reason = "metric_shape_main_not_dense"))
+        }
+        return(list(requested = requested,
+                    effective = requested,
+                    active = TRUE,
+                    reason = NA_character_))
 
 }
 

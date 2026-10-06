@@ -127,14 +127,44 @@ fn_metric_position_criterion <-  function( algorithm,
             length(mean_initial) != nrow(theta_initial) || length(mean_proposed) != nrow(theta_initial) ||
             length(tau_values) != ncol(theta_initial)) stop("Trajectory endpoint dimensions do not agree.")
         ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
-        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) stop("Unknown position-based trajectory algorithm.")
+        ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) stop("Unknown position-based trajectory algorithm.")
+        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
+                stop("Unknown position-based trajectory algorithm.")
+        }
         ##
         initial <-  fn_apply_trajectory_metric(metric_factor, theta_initial - mean_initial)
         proposed <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - mean_proposed)
         velocity <-  fn_apply_trajectory_metric(metric_factor, velocity_proposed)
         ## velocity already equals d(theta)/dt. No additional M_inv belongs here.
+        ##
+        ## ---- ESJD: expected squared jumped distance (Pasarica and Gelman, 2010) per unit trajectory length, in the same metric
+        ##      coordinates z = B (theta - m) as the other criteria. The statistic is the squared jump of the chain,
+        ##        numerator = ||z_t - z_0||^2 = ||B (theta_t - theta_0)||^2,
+        ##      which does not depend on the centres m (a jump is a difference of two positions), so the uncentred positions are used and
+        ##      the change is not squared again. Along the trajectory d/dt ||z_t - z_0||^2 = 2 (z_t - z_0) . dz_t/dt, with dz_t/dt = B v_t
+        ##      (velocity above), and t_i = u_i * tau gives d t_i / d log(tau) = t_i, hence
+        ##        numerator_gradient = 2 * ((z_t - z_0) . B v_t) * tau_values = d(numerator) / d log(tau).
+        ##      Everything after the statistic is the CHESSR code below: per chain criterion = numerator / tau_values (the per-trajectory
+        ##      rate) and gradient = (numerator_gradient - numerator) / tau_values = d(numerator / tau_values) / d log(tau); the acceptance
+        ##      weighting and the chain mean are applied by the caller (fn_metric_tau_block_update), exactly as for CHESSR.
+        ##      With the accepted endpoints (weight_by_probability = FALSE) a rejected chain has theta_t = theta_0 and contributes 0.
+        ##
+        ## ---- ESJD_CHESSR: both statistics of the same endpoints, returned side by side as list(ESJD = ..., CHESSR = ...), each with the
+        ##      four per-chain fields of its own criterion; fn_metric_tau_block_update() combines them (geometric mean of the two criteria):
+        ##
+        if (algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
+                jump_in_metric_coordinates <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - theta_initial)
+                ESJD_numerator <-  colSums(jump_in_metric_coordinates^2)
+                ESJD_numerator_gradient <-  2 * colSums(jump_in_metric_coordinates * velocity) * tau_values
+                ESJD_position_criterion <-  list(gradient           = (ESJD_numerator_gradient - ESJD_numerator) / tau_values,
+                                                 criterion          = ESJD_numerator / tau_values,
+                                                 numerator_gradient = ESJD_numerator_gradient,
+                                                 numerator          = ESJD_numerator)
+                if (algorithm == "ESJD") return(ESJD_position_criterion)
+        }
+        ##
         ## if (algorithm == "SNAPER") {
-        if (algorithm %in% c("SNAPER", "SNAPER_time")) {
+        if (algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER")) {
                 if (length(direction) != nrow(initial) || any(!is.finite(direction))) stop("Invalid SNAPER direction.")
                 projection_initial <-  c(crossprod(direction, initial))
                 projection_proposed <-  c(crossprod(direction, proposed))
@@ -172,6 +202,25 @@ fn_metric_position_criterion <-  function( algorithm,
                              numerator = numerator,
                              time_to_target_ESS_tau_penalty = time_to_target_ESS_tau_penalty))
         }
+        ##
+        ## ---- ESJD_CHESSR: the ESJD criterion (above) and the CHESSR criterion (the rate criterion below, from the ChEES delta), side by side:
+        ##
+        ## ---- ESJD_SNAPER: return the ESJD and SNAPER per-trajectory rates from the same endpoints. The SNAPER direction is held fixed
+        ##      for this transition and is learned/transported by the burn-in driver in the same way as for SNAPER.
+        if (algorithm == "ESJD_SNAPER") {
+                return(list(ESJD   = ESJD_position_criterion,
+                            SNAPER = list(gradient           = (numerator_gradient - numerator) / tau_values,
+                                          criterion          = numerator / tau_values,
+                                          numerator_gradient = numerator_gradient,
+                                          numerator          = numerator)))
+        }
+        if (algorithm == "ESJD_CHESSR") {
+                return(list(ESJD   = ESJD_position_criterion,
+                            CHESSR = list(gradient           = (numerator_gradient - numerator) / tau_values,
+                                          criterion          = numerator / tau_values,
+                                          numerator_gradient = numerator_gradient,
+                                          numerator          = numerator)))
+        }
         return(list(gradient = (numerator_gradient - numerator) / tau_values,
                      criterion = numerator / tau_values,
                      numerator_gradient = numerator_gradient,
@@ -200,10 +249,19 @@ fn_metric_position_criterion_from_reductions <-  function( algorithm,
                                                            burnin_to_sampling_leapfrog_time_ratio = 0,
                                                            lag_one_autocorrelation_rho            = 1) {
 
+        ##
+        ## ---- ESJD / ESJD_CHESSR need ||z_t - z_0||^2 and (z_t - z_0) . dz_t/dt, i.e. the cross products z_0 . z_t and z_0 . dz_t/dt of the
+        ##      uncentred positions, which these reductions do not carry; the resident joint block therefore passes the endpoints to
+        ##      fn_metric_position_criterion() for them (R_fn_init_and_run_burnin_CHESS.R, the "status 2" route):
+        ##
+        if (algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
+                stop(paste0("burnin_algorithm = '", algorithm, "' is not available from the per-chain reductions (no z_0 . z_t cross products); ",
+                            "use fn_metric_position_criterion() on the endpoints."))
+        }
         ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
-        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) stop("Unknown position-based trajectory algorithm.")
+        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD_SNAPER")) stop("Unknown position-based trajectory algorithm.")
         ## if (algorithm == "SNAPER") {
-        if (algorithm %in% c("SNAPER", "SNAPER_time")) {
+        if (algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER")) {
                 projection_initial <-  c(reductions$projection_initial)
                 projection_proposed <-  c(reductions$projection_proposed)
                 projection_velocity <-  c(reductions$projection_velocity)
@@ -305,7 +363,13 @@ fn_metric_tau_block_update <-  function( algorithm,
                                          ## ---- position in the tau learning-rate schedule, passed on to R_fn_update_tau_using_ADAM (NULL = iteration and
                                          ##      adaptation_iterations: one linear decay LR -> LR^2 over the tau adaptation):
                                          learning_rate_schedule_iteration       = NULL,
-                                         learning_rate_schedule_length          = NULL) {
+                                         ## learning_rate_schedule_length          = NULL) {
+                                         learning_rate_schedule_length          = NULL,
+                                         ##
+                                         ## ---- "ESJD_CHESSR" only: the exponential moving averages of the chain-mean ESJD and CHESSR criteria carried
+                                         ##      between updates, c(ESJD = , CHESSR = ); NULL or NA = none yet. The other criteria ignore it:
+                                         ## component_criterion_ema                = NULL) {
+                                         component_criterion_ema) {
 
         use_proposals <-  isTRUE(weight_by_probability)
         if (!is.null(position_criterion)) {
@@ -330,6 +394,112 @@ fn_metric_tau_block_update <-  function( algorithm,
         ##
         if (length(probabilities) != ncol(as.matrix(theta_initial)) ||
             length(divergences) != length(probabilities)) stop("Acceptance probabilities and divergences must match the chains.")
+        ##
+        ## ---- ESJD_CHESSR: ascend the geometric mean of the ESJD and CHESSR criteria with equal weights,
+        ##        C = sqrt( E[w * ESJD rate] * E[w * CHESSR] ),
+        ##        d log C / d log(tau) = 0.5 * d log E[w * ESJD rate] / d log(tau) + 0.5 * d log E[w * CHESSR] / d log(tau),
+        ##      so the scale of either criterion (a squared distance, or the squared change of a squared distance) does not set the
+        ##      weights. Each term is its own criterion exactly as the code below forms it (validity, weights, zero for an invalid chain,
+        ##      chain mean sum(weights * gradients) / n_chains), divided by the level of that criterion: an exponential moving average
+        ##      (decay 0.9, as criterion_ema and fn_normalise_ChEES_per_tau) of its chain mean sum(weights * values) / n_chains,
+        ##      including this update's mean. The moving average, rather than this update's mean alone, keeps the ratio clear of the
+        ##      E[a / b] != E[a] / E[b] bias of a minibatch of a few burn-in chains. The two moving averages are carried between updates
+        ##      in component_criterion_ema and returned updated; a component whose chain mean is not positive keeps its moving average,
+        ##      and the update is skipped (tau and the ADAM moments unchanged) while either component has no positive weighted value
+        ##      or the combined gradient is not finite. The reported criterion is sqrt(ESJD chain mean * CHESSR chain mean):
+        ##
+        ## ---- ESJD_SNAPER uses the same equal-weight geometric-mean update as ESJD_CHESSR, with SNAPER's learned direction as its
+        ##      second per-trajectory rate. The component names below keep the two criteria's EMA, masks and probe reductions separate.
+        if (algorithm %in% c("ESJD_CHESSR", "ESJD_SNAPER")) {
+                ##
+                component_names <-  if (algorithm == "ESJD_SNAPER") c("ESJD", "SNAPER") else c("ESJD", "CHESSR")
+                if (is.null(component_criterion_ema)) component_criterion_ema <-  stats::setNames(rep(NA_real_, 2), component_names)
+                if (!is.numeric(component_criterion_ema) || !all(component_names %in% names(component_criterion_ema))) {
+                        stop(paste0("component_criterion_ema must be a numeric vector named ESJD and ", component_names[[2]],
+                                    " (NA = no moving average yet)."))
+                }
+                if (!is.list(criterion[[component_names[[1]]]]) || !is.list(criterion[[component_names[[2]]]])) {
+                        stop(paste0("burnin_algorithm = '", algorithm, "' needs the ESJD and ", component_names[[2]],
+                                    " criteria of fn_metric_position_criterion()."))
+                }
+                ##
+                valid <-  is.finite(criterion[[component_names[[1]]]]$numerator_gradient) & is.finite(criterion[[component_names[[1]]]]$numerator) &
+                          is.finite(criterion[[component_names[[2]]]]$numerator_gradient) & is.finite(criterion[[component_names[[2]]]]$numerator) &
+                          is.finite(tau_values) & tau_values > 0 & is.finite(divergences) & divergences == 0
+                weights <-  if (use_proposals) pmin(1, pmax(0, probabilities)) else rep(1, length(probabilities))
+                weights[!is.finite(weights) | !valid] <-  0
+                ##
+                component_gradient_chain_mean <-  stats::setNames(rep(NA_real_, 2), component_names)
+                component_criterion_chain_mean <-  stats::setNames(rep(NA_real_, 2), component_names)
+                component_criterion_ema_updated <-  stats::setNames(rep(NA_real_, 2), component_names)
+                component_log_tau_derivative <-  stats::setNames(rep(NA_real_, 2), component_names)
+                component_informative <-  stats::setNames(rep(FALSE, 2), component_names)
+                for (component_name in component_names) {
+                        ##
+                        component_gradients <-  criterion[[component_name]]$gradient
+                        component_values <-  criterion[[component_name]]$criterion
+                        component_gradients[!valid] <-  0
+                        component_values[!valid] <-  0
+                        component_gradient_chain_mean[[component_name]] <-  sum(weights * component_gradients) / length(weights)
+                        component_criterion_chain_mean[[component_name]] <-  sum(weights * component_values) / length(weights)
+                        ##
+                        previous_component_ema <-  component_criterion_ema[[component_name]]
+                        component_chain_mean_is_positive <-  is.finite(component_criterion_chain_mean[[component_name]]) &&
+                                                             component_criterion_chain_mean[[component_name]] > 0
+                        component_criterion_ema_updated[[component_name]] <-  if (!component_chain_mean_is_positive) {
+                                previous_component_ema
+                        } else if (is.finite(previous_component_ema) && previous_component_ema > 0) {
+                                0.9 * previous_component_ema + 0.1 * component_criterion_chain_mean[[component_name]]
+                        } else component_criterion_chain_mean[[component_name]]
+                        ##
+                        component_informative[[component_name]] <-  any(weights > 0 & component_values > 0) &&
+                                                                     is.finite(component_criterion_ema_updated[[component_name]]) &&
+                                                                     component_criterion_ema_updated[[component_name]] > 0
+                        component_log_tau_derivative[[component_name]] <-  if (component_informative[[component_name]]) {
+                                component_gradient_chain_mean[[component_name]] / component_criterion_ema_updated[[component_name]]
+                        } else NA_real_
+                }
+                ##
+                gradient_used <-  0.5 * component_log_tau_derivative[[component_names[[1]]]] + 0.5 * component_log_tau_derivative[[component_names[[2]]]]
+                criterion_mean <-  sqrt(component_criterion_chain_mean[[component_names[[1]]]] * component_criterion_chain_mean[[component_names[[2]]]])
+                criterion_updated <-  if (is.finite(criterion_ema) && criterion_ema > 0) {
+                        0.9 * criterion_ema + 0.1 * criterion_mean
+                } else criterion_mean
+                ##
+                if (!all(component_informative) || !is.finite(gradient_used)) {
+                        ## skipped: tau and the ADAM moments are unchanged, so this is NOT a performed update.
+                        updated <-  c(tau, adam_mean, adam_variance)
+                        attr(updated, "adam_update_performed") <-  FALSE
+                } else {
+                        updated <-  R_fn_update_tau_using_ADAM( n_chains                         = 1,
+                                                                noisy_grads_prop_per_chain       = gradient_used,
+                                                                valid_chains                     = 1,
+                                                                tau                              = tau,
+                                                                LR                               = learning_rate,
+                                                                ii                               = iteration,
+                                                                n_burnin                         = adaptation_iterations,
+                                                                tau_m_adam                       = adam_mean,
+                                                                tau_v_adam                       = adam_variance,
+                                                                beta1_adam                       = beta1,
+                                                                beta2_adam                       = beta2,
+                                                                eps_adam                         = adam_epsilon,
+                                                                bias_correction_step             = bias_correction_step,
+                                                                aggregation                      = "weighted_mean",
+                                                                learning_rate_schedule_iteration = learning_rate_schedule_iteration,
+                                                                learning_rate_schedule_length    = learning_rate_schedule_length)
+                }
+                ##
+                return(list(updated                        = updated,
+                            adam_update_performed          = isTRUE(attr(updated, "adam_update_performed")),
+                            gradient                       = gradient_used,
+                            criterion                      = criterion_mean,
+                            criterion_ema                  = criterion_updated,
+                            component_criterion_ema        = component_criterion_ema_updated,
+                            component_criterion_chain_mean = component_criterion_chain_mean,
+                            component_gradient_chain_mean  = component_gradient_chain_mean,
+                            component_log_tau_derivative   = component_log_tau_derivative))
+        }
+        ##
         valid <-  is.finite(criterion$numerator_gradient) & is.finite(criterion$numerator) &
                   is.finite(tau_values) & tau_values > 0 & is.finite(divergences) & divergences == 0
         weights <-  if (use_proposals) pmin(1, pmax(0, probabilities)) else rep(1, length(probabilities))
@@ -402,6 +572,11 @@ fn_metric_tau_block_update <-  function( algorithm,
                      criterion_ema = criterion_updated))
 
 }
+
+
+
+
+
 
 
 

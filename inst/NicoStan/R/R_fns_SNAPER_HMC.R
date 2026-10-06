@@ -100,7 +100,9 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
 
         if (length(burnin_algorithm) != 1L || is.na(burnin_algorithm)) {
             ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'.")
-            stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'.")
+            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'.")
+            stop(paste0("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time', 'SNAPER_time', ",
+                        "'ESJD', 'ESJD_CHESSR' or 'ESJD_SNAPER'."))
         }
         algorithm_key <- tolower(trimws(as.character(burnin_algorithm)))
         ##
@@ -133,9 +135,25 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            snaper_time = "SNAPER_time",
                            `snaper-time` = "SNAPER_time",
                            snaper_hmc_time = "SNAPER_time",
+                           ##
+                           ## ---- expected squared jumped distance per unit trajectory length (Pasarica and Gelman, 2010; the rate form, as
+                           ##      CHESSR is the rate form of ChEES), and the geometric mean of the ESJD and CHESSR criteria
+                           ##      (R_fn_metric_trajectory_adaptation.R):
+                           ##
+                           esjd = "ESJD",
+                           esjd_chessr = "ESJD_CHESSR",
+                           esjd_cheesr = "ESJD_CHESSR",
+                           `esjd-chessr` = "ESJD_CHESSR",
+                           `esjd-chees-r` = "ESJD_CHESSR",
+                           esjd_snaper = "ESJD_SNAPER",
+                           `esjd-snaper` = "ESJD_SNAPER",
+                           esjd_snaper_hmc = "ESJD_SNAPER",
+                           `esjd-snaper-hmc` = "ESJD_SNAPER",
                            ke = "KE",
                            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'; got: ", burnin_algorithm))
-                           stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'; got: ", burnin_algorithm))
+                           ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'; got: ", burnin_algorithm))
+                           stop(paste0("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time', 'SNAPER_time', ",
+                                       "'ESJD', 'ESJD_CHESSR' or 'ESJD_SNAPER'; got: ", burnin_algorithm)))
         return(algorithm)
 
 }
@@ -189,10 +207,17 @@ fn_stabilize_snaper_w <- function(snaper_w_vec,
 
 
 
+
+
+
+
+
+
+
+
+
+
  
-
-
-
 
 
 
