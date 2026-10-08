@@ -446,6 +446,164 @@ fn_spectral_ESS_jump_weighted_acceptance_linear_scores <-  function( state,
         return(scores)
 
 }
+##
+## ---- (8 Oct 2026) the complete update in C++ (src_extra/spectral_LQ_ESSR_update.cpp; the moving averages, the
+##      length bins, the cosine-mixture fit, the objective on the candidates, the bootstrap test of the expansion
+##      rule "evidence" and the tau move, with the same arithmetic as the R code of
+##      fn_spectral_ESS_soft_minimum_tau_update() below), compiled at first use as the NNLS solver. It is used for
+##      the options it implements (finite_run_draws = NULL, objective_mix = "none", jump_weighted_acceptance =
+##      FALSE: "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory" and "LQ_ESSR_spec_bins99_evid_expand"), so
+##      that the criterion adds no computation in R beyond passing its inputs; options(
+##      NicoStan_spectral_LQ_ESSR_update_in_R = TRUE) runs the R code instead (for checks):
+##
+fn_spectral_LQ_ESSR_update_cpp_function <-  function() {
+
+        ## (once compiled and loaded in this R session, the function is returned at once: no file look-up or md5
+        ##  per update; a changed .cpp is picked up by a new R session)
+        session_loaded <-  getOption("NicoStan_spectral_LQ_ESSR_update_loaded", default = NULL)
+        if (is.list(session_loaded) && is.function(session_loaded$update_function)) {
+                return(session_loaded$update_function)
+        }
+        cpp_file_name <-  "spectral_LQ_ESSR_update.cpp"
+        cpp_function_name <-  "fn_spectral_LQ_ESSR_update_cpp"
+        this_source_file <-  tryCatch(utils::getSrcFilename(fn_spectral_LQ_ESSR_update_cpp_function,
+                                                            full.names = TRUE),
+                                      error = function(e) character(0))
+        cpp_file_candidates <-  c(getOption("NicoStan_spectral_LQ_ESSR_update_cpp", default = NA_character_),
+                                  if (length(this_source_file) == 1 && nzchar(this_source_file)) {
+                                          file.path(dirname(dirname(this_source_file)), "inst", "src_extra",
+                                                    cpp_file_name)
+                                  } else NA_character_,
+                                  system.file("src_extra", cpp_file_name, package = "NicoStan"))
+        cpp_file_candidates <-  cpp_file_candidates[!is.na(cpp_file_candidates) & nzchar(cpp_file_candidates)]
+        cpp_file <-  cpp_file_candidates[file.exists(cpp_file_candidates)][1]
+        if (is.na(cpp_file)) {
+                stop(paste0("the spectral LQ_ESSR criterion: ", cpp_file_name, " not found (looked in: ",
+                            paste(cpp_file_candidates, collapse = ", "), ")."))
+        }
+        cpp_file <-  normalizePath(cpp_file, mustWork = TRUE)
+        cpp_file_md5 <-  unname(tools::md5sum(cpp_file))
+        session_loaded <-  getOption("NicoStan_spectral_LQ_ESSR_update_loaded", default = NULL)
+        if (is.list(session_loaded) && identical(session_loaded$cpp_file, cpp_file) &&
+            identical(session_loaded$cpp_file_md5, cpp_file_md5) && is.function(session_loaded$update_function)) {
+                return(session_loaded$update_function)
+        }
+        fn_source_cpp_into <-  function(cache_dir) {
+                dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+                update_env <-  new.env()
+                load_result <-  try(Rcpp::sourceCpp(file = cpp_file, cacheDir = cache_dir, env = update_env),
+                                    silent = TRUE)
+                if (inherits(load_result, "try-error") ||
+                    !exists(cpp_function_name, envir = update_env, mode = "function", inherits = FALSE)) {
+                        return(list(update_function = NULL, error = trimws(as.character(load_result))))
+                }
+                return(list(update_function = get(cpp_function_name, envir = update_env, inherits = FALSE),
+                            error = NA_character_))
+        }
+        cache_dir <-  getOption("NicoStan_src_extra_cache_dir",
+                                default = file.path(tools::R_user_dir(package = "NicoStan", which = "cache"),
+                                                    "src_extra"))
+        loaded <-  fn_source_cpp_into(cache_dir)
+        if (is.null(loaded$update_function)) {
+                process_cache_dir <-  file.path(cache_dir, paste0("process_", Sys.getpid()))
+                message(colourise(paste0("spectral LQ_ESSR: ", cpp_file, " did not load from the shared cache ",
+                                         cache_dir, " (", loaded$error, "); compiling it again into ",
+                                         process_cache_dir, "."), "cyan"))
+                loaded <-  fn_source_cpp_into(process_cache_dir)
+        }
+        if (is.null(loaded$update_function)) {
+                stop(paste0("the spectral LQ_ESSR criterion: ", cpp_file, " did not compile or load (",
+                            loaded$error, ")."))
+        }
+        options(NicoStan_spectral_LQ_ESSR_update_loaded = list(cpp_file = cpp_file, cpp_file_md5 = cpp_file_md5,
+                                                              update_function = loaded$update_function))
+        return(loaded$update_function)
+
+}
+##
+## ---- the call of the C++ update, and the list that fn_spectral_ESS_soft_minimum_tau_update() returns (the
+##      bootstrap draws come from R's generator, so R's random-number stream is restored afterwards, as the R code
+##      restores it):
+##      (8 Oct 2026) the C++ bootstrap now draws from its own generator (BootstrapNormalGenerator, seeded from the
+##      update count as before), so R's random-number stream is not touched and is no longer saved or restored
+##      here (the R code's draws, with options(NicoStan_spectral_LQ_ESSR_update_in_R = TRUE), still come from
+##      R's):
+##
+fn_spectral_LQ_ESSR_update_in_cpp <-  function( criterion,
+                                               state,
+                                               tau,
+                                               tau_values,
+                                               eps_used_for_trajectories,
+                                               eps_now,
+                                               probabilities,
+                                               divergences,
+                                               use_proposals,
+                                               learning_rate,
+                                               schedule_iteration,
+                                               schedule_length,
+                                               adam_mean,
+                                               adam_variance,
+                                               interest_rows,
+                                               soft_minimum_power,
+                                               minimum_bin_count,
+                                               grid_step_in_doublings,
+                                               upper_end_zone_in_doublings,
+                                               bin_forgetting_factor,
+                                               expansion_rule,
+                                               n_bootstrap_draws) {
+
+        rows <-  if (is.null(interest_rows)) seq_len(nrow(criterion$linear_jump_squared)) else interest_rows
+        ## global_environment <-  globalenv()
+        ## had_seed <-  exists(".Random.seed", envir = global_environment, inherits = FALSE)
+        ## if (had_seed) saved_seed <-  get(".Random.seed", envir = global_environment, inherits = FALSE)
+        update_function <-  fn_spectral_LQ_ESSR_update_cpp_function()
+        out <-  update_function(state, criterion$linear_jump_squared[rows, , drop = FALSE],
+                                criterion$quadratic_jump_squared[rows, , drop = FALSE],
+                                criterion$initial_second_moment[rows, , drop = FALSE],
+                                criterion$initial_fourth_moment[rows, , drop = FALSE],
+                                tau, as.numeric(tau_values),
+                                if (isTRUE(is.finite(eps_used_for_trajectories))) {
+                                        eps_used_for_trajectories
+                                } else NA_real_,
+                                eps_now, as.numeric(probabilities), as.numeric(divergences),
+                                isTRUE(use_proposals),
+                                learning_rate, schedule_iteration, schedule_length, soft_minimum_power,
+                                minimum_bin_count, grid_step_in_doublings, upper_end_zone_in_doublings,
+                                bin_forgetting_factor, identical(expansion_rule, "evidence"), n_bootstrap_draws)
+        ## if (isTRUE(out$bootstrap_ran)) {
+        ##         if (had_seed) {
+        ##                 assign(".Random.seed", saved_seed, envir = global_environment)
+        ##         } else if (exists(".Random.seed", envir = global_environment, inherits = FALSE)) {
+        ##                 rm(".Random.seed", envir = global_environment)
+        ##         }
+        ## }
+        if (!isTRUE(out$performed)) {
+                updated <-  c(tau, adam_mean, adam_variance)
+                attr(updated, "adam_update_performed") <-  FALSE
+                return(list(updated = updated, adam_update_performed = FALSE, gradient = NA_real_,
+                            criterion = NA_real_, criterion_ema = NA_real_, component_criterion_ema = out$state))
+        }
+        updated <-  c(out$new_tau, adam_mean, adam_variance)
+        attr(updated, "adam_update_performed") <-  TRUE
+        result <-  list(updated                      = updated,
+                        adam_update_performed        = TRUE,
+                        gradient                     = out$gradient,
+                        criterion                    = out$criterion,
+                        criterion_ema                = out$criterion,
+                        component_criterion_ema      = out$state,
+                        tau_maximising_criterion     = out$tau_maximising_criterion,
+                        maximum_is_at_upper_end      = out$maximum_is_at_upper_end,
+                        largest_candidate            = out$largest_candidate,
+                        learning_rate_now            = out$learning_rate_now,
+                        lowest_resolvable_frequency  = out$lowest_resolvable_frequency,
+                        acceptance_moving_average    = out$acceptance_moving_average)
+        if (identical(expansion_rule, "evidence")) {
+                result$expanded_towards_doubling <-  out$expanded_towards_doubling
+                result$expansion_evidence_z <-  out$expansion_evidence_z
+        }
+        return(result)
+
+}
 fn_spectral_ESS_soft_minimum_tau_update <-  function( criterion,
                                                       state,
                                                       tau,
@@ -488,6 +646,38 @@ fn_spectral_ESS_soft_minimum_tau_update <-  function( criterion,
         }
         if (!isTRUE(is.finite(eps_used_for_trajectories)) || eps_used_for_trajectories <= 0) {
                 eps_used_for_trajectories <-  eps_now
+        }
+        ## (8 Oct 2026) the options that the C++ update implements run in C++ (the R code below otherwise, or with
+        ##  options(NicoStan_spectral_LQ_ESSR_update_in_R = TRUE)):
+        if (is.null(finite_run_draws) && identical(objective_mix, "none") && !isTRUE(jump_weighted_acceptance) &&
+            expansion_rule %in% c("as_built", "evidence") &&
+            !isTRUE(getOption("NicoStan_spectral_LQ_ESSR_update_in_R", default = FALSE))) {
+                return(fn_spectral_LQ_ESSR_update_in_cpp(
+                      criterion                   = criterion,
+                      state                       = state,
+                      tau                         = tau,
+                      tau_values                  = tau_values,
+                      eps_used_for_trajectories   = eps_used_for_trajectories,
+                      eps_now                     = eps_now,
+                      probabilities               = probabilities,
+                      divergences                 = divergences,
+                      use_proposals               = use_proposals,
+                      learning_rate               = learning_rate,
+                      schedule_iteration          = if (is.null(learning_rate_schedule_iteration)) iteration else
+                                                    learning_rate_schedule_iteration,
+                      schedule_length             = if (is.null(learning_rate_schedule_length)) {
+                                                            adaptation_iterations
+                                                    } else learning_rate_schedule_length,
+                      adam_mean                   = adam_mean,
+                      adam_variance               = adam_variance,
+                      interest_rows               = interest_rows,
+                      soft_minimum_power          = soft_minimum_power,
+                      minimum_bin_count           = minimum_bin_count,
+                      grid_step_in_doublings      = grid_step_in_doublings,
+                      upper_end_zone_in_doublings = upper_end_zone_in_doublings,
+                      bin_forgetting_factor       = bin_forgetting_factor,
+                      expansion_rule              = expansion_rule,
+                      n_bootstrap_draws           = n_bootstrap_draws))
         }
         ## interest_only: keep only the rows of the parameters of interest (the main rows lead every block):
         if (!is.null(interest_rows)) {

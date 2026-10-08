@@ -14,7 +14,7 @@
 [How NicoStan works](#how-nicostan-works) ·
 [NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) ·
 [LQ_ESSR trajectory-length criterion](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) ·
-[Spectral LQ_ESSR trajectory-length criterion](#spectral-lq_essr-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) ·
+[SpESS-R trajectory-length criterion](#spess-r-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) ·
 [Custom AVX2 and AVX-512 functions](#custom-avx2-and-avx-512-functions) ·
 [How to cite NicoStan](#how-to-cite-nicostan) ·
 [How to cite BayesMVP](#how-to-cite-bayesmvp) ·
@@ -435,7 +435,7 @@ alongside the computational settings.
 ### Stan vs NicoStan (diffusion HMC and standard HMC) on eight general models
 
 
-We compared NicoStan with Stan (i.e., NUTS, via cmdstanr) on eight models,
+We compared NicoStan with Stan (i.e., NUTS, via cmdstanr) in terms of wall-clock time on eight models,
 using the same Stan model files, data and initial values.
 Five of these models have a nuisance block -
 a stochastic volatility model (T = 1,000; SV), a shared-frailty Cox model (N = 250; COX),
@@ -447,68 +447,92 @@ and a robust regression with t₄ errors (N = 1,000; RT4).
 For the models with a nuisance block, NicoStan sampled the nuisance block using either diffusion HMC
 (i.e., hybrid HMC; NicoStan's default) or standard HMC;
 for the models without one, NicoStan samples all of the parameters using standard HMC.
+NicoStan used its default trajectory-length criterion (ChEES-R) and the SpESS-R criterion
+(see [SpESS-R](#spess-r-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below).
 
 
-Stan used 4 chains, each with 1,000 warm-up and 1,000 sampling iterations
-(adapt_delta = 0.9, or 0.999 for SV; maximum tree depth 10; diagonal metric).
-NicoStan used 4 burnin chains (with burnins of 500, 250 or 125 iterations),
-followed by 16 sampling chains of 250 iterations each (i.e., 4,000 draws in total, the same as for Stan),
-with its default trajectory-length criterion (ChEES-R).
+Both samplers used 4 chains for the warm-up (or burnin), followed by 180 sampling chains of 100 iterations each
+(45 sampling chains starting from the final state of each warm-up chain),
+one fit at a time on a 96-core (192-thread) machine, with 5 seeds per configuration.
+Stan ran in two stages: the warm-up with 4 chains, then the sampling with 180 chains, each using the step size,
+metric and final state of its warm-up chain (adaptation off); adapt_delta = 0.8, maximum tree depth 10,
+and 250, 500 or 1,000 warm-up iterations (vs. NicoStan's 125, 250 or 500 burnin iterations,
+since Stan's warm-up is unreliable with only 125 iterations).
+For COX, both samplers evaluated the log-likelihood in 3 chunks (reduce_sum_static),
+as given by NicoStan's cache-based chunking rule (`fn_compute_initial_N_chunks()`) for 180 chains;
+for the other models, the rule gave 1 chunk.
 
 
-The table below shows, for each model and NicoStan burnin length,
-the projected number of gradient evaluations (in thousands; the burnin or warm-up gradient evaluations
-plus 1,000 divided by the minimum ESS per sampling gradient evaluation) needed to reach
-a minimum ESS of 1,000 / the minimum ESS per 1,000 sampling gradient evaluations
-(geometric means over 10 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
+The table below shows the (projected) time needed to reach a minimum ESS of 1,000
+(the measured warm-up or burnin time, plus 1,000 times the measured sampling time divided by the minimum ESS;
+in seconds) / the minimum ESS per 1,000 sampling gradient evaluations
+(geometric means over 5 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
 i.e., of the SD, of the main parameters).
+Stan's times are those of its CmdStan processes (from the first chain's start to the last chain's end;
+for the sampling, this includes the staggered launch of its 180 processes),
+and NicoStan's those of its burnin and sampling
+(excluding, for both, the compilation and loading of the model; and, for SpESS-R, the one-off compilation of its
+C++ code, which is then cached, and its loading, which took about 0.01 s per fit).
 **Bold**: the best of the row for each endpoint (and any within 1% of it).
 
 
-| Model | NicoStan burnin | Stan (NUTS, 1,000 warm-up) | NicoStan, diffusion HMC | NicoStan, standard HMC |
-|---|---|---|---|---|
-| SV | 500 | 1162.0 / 1.4 | **86.7** / **15.3** | 114.3 / 10.8 |
-|  | 250 |  | **85.7** / **13.6** | 116.5 / 9.7 |
-|  | 125 |  | **83.0** / **13.3** | 134.1 / 7.9 |
-| COX | 500 | 123.1 / 18.7 | **39.6** / **38.9** | 52.3 / 27.5 |
-|  | 250 |  | **43.2** / **29.3** | 53.4 / 22.4 |
-|  | 125 |  | **39.2** / **30.4** | 44.2 / 25.6 |
-| LDS | 500 | 919.5¹ / 1.6 | 213.5 / 5.4 | **179.1** / **6.7** |
-|  | 250 |  | 206.0 / 5.3 | **148.7** / **7.6** |
-|  | 125 |  | 220.0 / 4.8 | **209.2** / **5.0** |
-| JLS | 500 | 549.0 / 6.2 | **133.6** / **9.4** | 175.2 / 6.7 |
-|  | 250 |  | **120.4** / **9.6** | **121.3** / **9.5** |
-|  | 125 |  | 100.4 / 11.0 | **98.9** / **11.2** |
-| HLR | 500 | 251.3 / 8.2 | **80.4** / **16.4** | 84.6 / 15.3 |
-|  | 250 |  | **71.1** / **16.7** | 75.5 / 15.5 |
-|  | 125 |  | **65.7** / **16.8** | 75.4 / 14.6 |
-| GP | 500 | 48.0 / 57.0 | (no nuisance block) | **20.2** / **96.4** |
-|  | 250 |  | (no nuisance block) | **15.7** / **106.8** |
-|  | 125 |  | (no nuisance block) | **15.5** / **90.5** |
-| WEI | 500 | 42.8 / 68.2 | (no nuisance block) | **18.2** / **108.5** |
-|  | 250 |  | (no nuisance block) | **14.5** / **116.8** |
-|  | 125 |  | (no nuisance block) | **14.5** / **100.7** |
-| RT4 | 500 | 35.2 / 76.2 | (no nuisance block) | **13.4** / **201.2** |
-|  | 250 |  | (no nuisance block) | **10.7** / **196.3** |
-|  | 125 |  | (no nuisance block) | **10.5** / **169.1** |
+| Model | Stan warm-up / NicoStan burnin | Stan (NUTS) | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC | NicoStan, SpESS-R, diffusion HMC | NicoStan, SpESS-R, standard HMC |
+|---|---|---|---|---|---|---|
+| SV | 250 / 125 | 2.08 / 7.0 | 0.52 / 11.4 | 0.55 / 7.8 | **0.47** / **19.5** | 0.51 / 12.1 |
+|  | 500 / 250 | 2.90 / 6.0 | **0.72** / 11.3 | 0.76 / 8.7 | 0.79 / **15.2** | 0.86 / 13.1 |
+|  | 1000 / 500 | 3.93 / 7.9 | **1.22** / 14.3 | 1.27 / 8.5 | 1.63 / **15.2** | 1.72 / 12.6 |
+| COX | 250 / 125 | 10.5 / 23.7 | **1.58** / 28.8 | 1.89 / 17.9 | 1.61 / **30.4** | 1.69 / 26.8 |
+|  | 500 / 250 | 14.4 / 23.3 | 2.77 / 29.9 | 2.76 / 32.1 | **2.68** / **34.9** | 2.76 / 31.8 |
+|  | 1000 / 500 | 22.3 / 23.6 | **4.23** / 39.9 | 5.06 / 26.8 | 4.56 / **40.5** | 4.92 / 31.2 |
+| LDS | 250 / 125 | 1.17 / 2.8 | 0.30 / 7.2 | **0.30** / **7.6** | 0.31 / 7.2 | **0.30** / 6.2 |
+|  | 500 / 250 | 1.47 / 2.8 | **0.50** / **7.3** | 0.51 / 6.4 | 0.54 / 5.9 | 0.53 / 6.6 |
+|  | 1000 / 500 | 1.91 / 2.8 | **0.89** / **8.7** | **0.89** / 7.3 | 0.97 / 7.1 | 0.96 / 6.6 |
+| JLS | 250 / 125 | 13.1 / 6.7 | 1.07 / 8.6 | 1.11 / 9.0 | 1.13 / 12.6 | **1.04** / **13.9** |
+|  | 500 / 250 | 15.3 / 6.2 | **1.65** / 10.1 | 1.67 / 8.0 | 1.73 / **15.4** | 1.81 / 14.6 |
+|  | 1000 / 500 | 19.7 / 6.1 | **2.69** / 7.2 | **2.71** / 5.9 | 3.29 / **16.3** | 3.43 / 14.3 |
+| HLR | 250 / 125 | 1.29 / 8.8 | **0.28** / 15.0 | 0.29 / 12.4 | **0.28** / **15.5** | 0.30 / 13.1 |
+|  | 500 / 250 | 1.60 / 8.7 | **0.50** / **15.8** | **0.51** / 11.8 | 0.55 / 14.3 | 0.55 / 13.8 |
+|  | 1000 / 500 | 2.45 / 9.5 | **0.92** / 15.0 | 0.93 / 11.9 | 1.02 / **16.7** | 1.04 / 13.2 |
+| GP | 250 / 125 | 0.89 / 86.5 | (no nuisance block) | **0.38** / 101.9 | (no nuisance block) | 0.39 / **112.8** |
+|  | 500 / 250 | 1.39 / 86.3 | (no nuisance block) | **0.70** / 116.4 | (no nuisance block) | 0.74 / **126.8** |
+|  | 1000 / 500 | 2.29 / 78.9 | (no nuisance block) | **1.32** / 107.5 | (no nuisance block) | 1.42 / **129.1** |
+| WEI | 250 / 125 | 0.37 / 78.9 | (no nuisance block) | 0.16 / 108.9 | (no nuisance block) | **0.15** / **127.8** |
+|  | 500 / 250 | 0.48 / 79.7 | (no nuisance block) | 0.28 / 132.2 | (no nuisance block) | **0.27** / **149.1** |
+|  | 1000 / 500 | 0.58 / 86.6 | (no nuisance block) | **0.52** / 116.2 | (no nuisance block) | 0.54 / **155.8** |
+| RT4 | 250 / 125 | 0.46 / 114.3 | (no nuisance block) | 0.15 / 171.2 | (no nuisance block) | **0.15** / **184.2** |
+|  | 500 / 250 | 0.68 / 110.3 | (no nuisance block) | **0.26** / **224.1** | (no nuisance block) | 0.26 / 207.2 |
+|  | 1000 / 500 | 1.07 / 114.0 | (no nuisance block) | **0.48** / **232.7** | (no nuisance block) | 0.50 / 221.2 |
 
 
-¹ One of Stan's 10 LDS fits did not converge (maximum R-hat 1.31) and needed 24.3 million gradient evaluations;
-without it, Stan's geometric mean for LDS is 639.0 thousand.
+NicoStan reached the target faster than Stan for every model and warm-up/burnin length.
+For the fastest configuration of each sampler (for every model, Stan's 250 warm-up iterations and NicoStan's
+125 burnin iterations), NicoStan was between 2.3× (GP) and 12.6× (JLS) faster
+(2.5× for WEI, 3.2× for RT4, 3.9× for LDS, 4.4× for SV, 4.6× for HLR and 6.6× for COX),
+and its highest minimum ESS per gradient was between 1.5× and 3.1× that of Stan.
 
 
-NicoStan needed fewer (projected) gradient evaluations than Stan to reach a minimum ESS of 1,000
-for every model, burnin length and sampler
-(with Stan's 1,000 warm-up iterations, vs. NicoStan's 125, 250 or 500 burnin iterations):
-between 2.4× and 3.4× fewer for the models without a nuisance block,
-and between 2.3× and 14.0× fewer for the models with one
-(the largest difference being for SV, for which Stan used adapt_delta = 0.999).
+Within NicoStan, diffusion HMC reached the target faster than standard HMC in 24 of the 30 cells with a nuisance
+block (combinations of model, criterion and burnin length), with a higher minimum ESS per gradient in 25 of them
+(geometric means of 0.97× and 1.19× those of standard HMC):
+it was faster for COX, SV and HLR (0.92×, 0.94× and 0.97× the time of standard HMC),
+whilst the two samplers were essentially level for JLS and LDS (0.99× and 1.01×).
 
 
-Furthermore, diffusion HMC needed fewer gradient evaluations than standard HMC for SV, COX and HLR
-at every burnin length (up to 1.62× fewer), and for JLS with a 500-iteration burnin (1.31× fewer);
-however, for JLS with the two shorter burnins, the two samplers were within 1.5% of each other,
-and for LDS, standard HMC was better at every burnin length.
+Compared to ChEES-R (with the same model, sampler and burnin length), SpESS-R had a higher minimum ESS per gradient
+in 30 of the 39 cells (20% higher, on average) and needed fewer gradient evaluations to reach the target in 28 of them
+(11% fewer, on average).
+However, it chose longer trajectories during the burnin (9%, 14% and 29% more burnin gradient evaluations than
+ChEES-R, for burnins of 125, 250 and 500 iterations); hence, it reached the target slightly faster than ChEES-R with
+125 burnin iterations (0.98× its time, on average), but more slowly with 250 and 500 (1.05× and 1.13×).
+For the fastest configuration of each model, SpESS-R was faster for SV, WEI, RT4 and JLS
+(0.91×, 0.92×, 0.96× and 0.97× the time of ChEES-R), essentially joint-best for HLR and LDS (within 1%),
+and slower for COX and GP (1.02× and 1.03×).
+
+
+SpESS-R's own computation (its update in each burnin iteration, which runs in C++) took between 0.18 and 0.21 ms
+per burnin iteration on average, vs. between 0.09 and 0.11 ms for ChEES-R (for burnins of 125 to 500 iterations);
+in other words, it added 0.03 s per burnin, on average, i.e., 3.1% of the average burnin time of ChEES-R (0.96 s;
+between 0.6% and 6.1%, depending on the model).
 
 
 Note that:
@@ -517,23 +541,24 @@ Note that:
 and NicoStan's as the expected number of leapfrog steps of its (jittered) trajectories,
 plus one for every iteration in which the sampler evaluates the gradient at the start of the trajectory
 (i.e., during the burnin, for standard HMC, and for the models without a nuisance block).
-- NicoStan's chains were short (16 chains of 250 draws), and its maximum (rank-normalised, split) R-hat
-exceeded 1.01 in most of its fits of the models with a nuisance block
-(with medians of 1.022 to 1.041 per model and sampler, vs. 1.002 to 1.009 per model for Stan).
-- NicoStan had divergent transitions in 14 (diffusion HMC) and 9 (standard HMC) of its 150 LDS fits
-(22 and 10 in total, out of 4,000 draws per fit), and in 5 of its 600 HLR and SV fits (6 in total);
-Stan had none.
+- The nested R-hat ([Margossian et al., 2024](https://arxiv.org/abs/2110.13017v6); with the 4 warm-up chains as the
+superchains) exceeded 1.01 in 51 of the 510 fits, 46 of which were for LDS (45 of NicoStan's 60 LDS fits, with a
+median of 1.018 and a maximum of 1.044, and 1 of Stan's 15, with 1.012); for the other models, it was at most 1.038
+for NicoStan (COX) and 1.003 for Stan.
+- Stan had 77 divergent transitions (in 9 of its 120 fits: 8 for HLR and 1 for LDS),
+and NicoStan had 22 (in 17 of its 390 fits: 13 for LDS and 4 for SV), out of 18,000 sampling draws per fit.
 
 
 ### Trajectory-length criteria within NicoStan
 
 
 On the same eight models, we also compared NicoStan's trajectory-length criteria:
-the spectral LQ_ESSR criterion (see [Spectral LQ_ESSR](#spectral-lq_essr-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below),
+the SpESS-R criterion (see [SpESS-R](#spess-r-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below),
 ChEES-R (NicoStan's default), ESJD, SNAPER and the geometric mean of ESJD and SNAPER (`"ESJD_SNAPER"`).
 For the models with a nuisance block, we ran every criterion with both diffusion HMC and standard HMC;
 hence, with burnins of 500, 250 and 125 iterations,
-there were 39 cells (i.e., combinations of model, sampler and burnin length), with 10 seeds per cell.
+there were 39 cells (i.e., combinations of model, sampler and burnin length), with 10 seeds per cell
+(and, in each fit, 4 burnin chains, followed by 16 sampling chains of 250 iterations each).
 
 
 For each cell, we computed each criterion's loss relative to the best criterion of the cell
@@ -550,43 +575,46 @@ and the number of cells in which the criterion was best or within noise of the b
 
 | Criterion | Gradients to target: mean loss | worst loss | best or within noise | ESS per gradient: mean loss | worst loss | best or within noise |
 |---|---|---|---|---|---|---|
-| ESJD | 1.086 | 1.56 | 34/39 | 1.105 | 1.69 | 35/39 |
-| spectral LQ_ESSR | 1.088 | 1.50 | 35/39 | 1.085 | 1.55 | 37/39 |
-| ESJD_SNAPER | 1.098 | 1.42 | 34/39 | 1.128 | 1.49 | 33/39 |
-| SNAPER | 1.130 | 1.65 | 31/39 | 1.166 | 1.76 | 31/39 |
-| ChEES-R (default) | 1.141 | 1.71 | 30/39 | 1.188 | 2.04 | 30/39 |
+| SpESS-R | 1.081 | 1.39 | 36/39 | 1.075 | 1.43 | 38/39 |
+| ESJD | 1.091 | 1.59 | 34/39 | 1.109 | 1.75 | 35/39 |
+| ESJD_SNAPER | 1.103 | 1.49 | 34/39 | 1.132 | 1.59 | 35/39 |
+| SNAPER | 1.135 | 1.67 | 30/39 | 1.170 | 1.83 | 31/39 |
+| ChEES-R (default) | 1.146 | 1.71 | 29/39 | 1.191 | 2.04 | 29/39 |
 
 **Ordered by the minimum ESS per gradient:**
 
 | Criterion | Gradients to target: mean loss | worst loss | best or within noise | ESS per gradient: mean loss | worst loss | best or within noise |
 |---|---|---|---|---|---|---|
-| spectral LQ_ESSR | 1.088 | 1.50 | 35/39 | 1.085 | 1.55 | 37/39 |
-| ESJD | 1.086 | 1.56 | 34/39 | 1.105 | 1.69 | 35/39 |
-| ESJD_SNAPER | 1.098 | 1.42 | 34/39 | 1.128 | 1.49 | 33/39 |
-| SNAPER | 1.130 | 1.65 | 31/39 | 1.166 | 1.76 | 31/39 |
-| ChEES-R (default) | 1.141 | 1.71 | 30/39 | 1.188 | 2.04 | 30/39 |
+| SpESS-R | 1.081 | 1.39 | 36/39 | 1.075 | 1.43 | 38/39 |
+| ESJD | 1.091 | 1.59 | 34/39 | 1.109 | 1.75 | 35/39 |
+| ESJD_SNAPER | 1.103 | 1.49 | 34/39 | 1.132 | 1.59 | 35/39 |
+| SNAPER | 1.135 | 1.67 | 30/39 | 1.170 | 1.83 | 31/39 |
+| ChEES-R (default) | 1.146 | 1.71 | 29/39 | 1.191 | 2.04 | 29/39 |
 
 
-The spectral LQ_ESSR criterion and ESJD were essentially joint-best for the gradient evaluations
-needed to reach the target (1.088 vs. 1.086; within 1% of each other),
-and the spectral LQ_ESSR criterion had the smallest loss for the minimum ESS per gradient
-(1.085, vs. 1.105 for ESJD);
-it was also best or within noise of the best in the most cells (35 and 37 of the 39 cells, respectively;
-descriptive counts).
+The SpESS-R criterion had the smallest mean loss for both endpoints
+(1.081 and 1.075, vs. 1.091 and 1.109 for ESJD, the second best);
+however, for the gradient evaluations needed to reach the target, ESJD was within 1% of it
+(i.e., the two were essentially joint-best).
+It also had the smallest worst-case losses (1.39 and 1.43, vs. 1.49 and 1.59 for ESJD_SNAPER, the second best),
+and it was best or within noise of the best in the most cells (36 and 38 of the 39 cells, respectively,
+vs. 34 and 35 for ESJD and for ESJD_SNAPER; descriptive counts).
 
 
-However, no criterion was uniformly best:
-ESJD_SNAPER had the smallest worst-case losses (1.42 and 1.49, vs. 1.50 and 1.55 for the spectral LQ_ESSR criterion);
-ESJD and ESJD_SNAPER were essentially joint-best for the models without a nuisance block;
-and, when the nuisance block was sampled using standard HMC,
-ESJD was best for the gradient evaluations needed to reach the target (1.110, vs. 1.128),
-whilst the spectral LQ_ESSR criterion was best for the minimum ESS per gradient (1.119, vs. 1.130).
+More specifically, when the nuisance block was sampled using diffusion HMC,
+the SpESS-R criterion was best on average for both endpoints
+(1.089 and 1.078, vs. 1.104 and 1.123 for ESJD), and it was best or within noise of the best in all 15 of these cells;
+similarly, with standard HMC for the nuisance block, it was best on average for both endpoints
+(1.109 and 1.097, vs. 1.123 and 1.144 for ESJD).
 
 
-On the other hand, when the nuisance block was sampled using diffusion HMC,
-the spectral LQ_ESSR criterion was best on average for both endpoints
-(1.083 and 1.075, vs. 1.104 and 1.125 for ESJD),
-with the smallest worst-case losses (1.20 and 1.19).
+However, it was not uniformly best:
+for the models without a nuisance block, ESJD, ESJD_SNAPER and the SpESS-R criterion were essentially
+joint-best for both endpoints (within 1% of each other; 1.020 and 1.031 for ESJD, vs. 1.026 and 1.035 for the
+SpESS-R criterion);
+and it was not within noise of the best in 3 cells for the gradient evaluations needed to reach the target
+(RT4 with a 250-iteration burnin, and JLS and SV with standard HMC and a 500-iteration burnin; losses of up to 1.19),
+and in 1 cell (RT4 with a 250-iteration burnin) for the minimum ESS per gradient.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -836,10 +864,11 @@ Based on the expected squared jumped distance of Pasarica and Gelman, 2010.
 - `LQ_ESSR` (**LQ_ESSR**): Experimental; the soft minimum, over the monitored parameters,
 of the lag-one ESS bounds of the linear and quadratic statistics, per unit trajectory length
 (see [LQ_ESSR](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) below).
-- `LQ_ESSR_spec_bins99_evid_expand` (**spectral LQ_ESSR**): Experimental; LQ_ESSR with the ESS of the linear
+- `SpESSR` (**SpESS-R**, the spectral linear/quadratic ESS-rate criterion; also available as
+`LQ_ESSR_spec_bins99_evid_expand`): Experimental; LQ_ESSR with the ESS of the linear
 statistics estimated from the spectrum of each parameter's motion
 (i.e., from how quickly it decorrelates as a function of the trajectory length), per gradient evaluation
-(see [Spectral LQ_ESSR](#spectral-lq_essr-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below).
+(see [SpESS-R](#spess-r-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below).
 
 
 ChEES measures squared changes in the centred squared radius of the parameter vector
@@ -956,7 +985,7 @@ by default, every criterion weights each chain's proposal by its acceptance prob
 | `"CHESSR"` (ChEES-R) | ChEES per unit trajectory length | Yes (÷ its own t) | Squared radius of all monitored coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
 | `"SNAPER"` | Expected squared change in (wᵀ(z − m))² per unit trajectory length | Yes (÷ its own t) | Squared projection onto a learned leading principal direction, w | Second moments (quadratic), along one direction | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
 | `"LQ_ESSR"` | Soft minimum of the lag-one ESS bounds, (1 − ρ)/(1 + ρ), per unit trajectory length | Yes (÷ the mean t over the chains) | Per-coordinate jumps of z and of its squared deviation, converted into ESS bounds | Both (linear and quadratic), for the worst coordinate | End-point only | ÷ mean t (optional step offset² and `tau_cost_exponent`) |
-| `"LQ_ESSR_spec_bins99_evid_expand"` (spectral LQ_ESSR) | Soft minimum of the per-coordinate ESS fractions, per gradient evaluation | Per gradient evaluation (÷ the expected number of leapfrog steps) | Per-coordinate squared jumps of z, binned by trajectory length and fitted by a mixture of cosines (linear); jumps of the squared deviation, as for LQ_ESSR (quadratic) | Both (linear and quadratic), for the worst coordinate | None (a grid of candidate lengths; τ moves part of the way towards the best) | ÷ expected leapfrog steps |
+| `"SpESSR"` (SpESS-R) | Soft minimum of the per-coordinate ESS fractions, per gradient evaluation | Per gradient evaluation (÷ the expected number of leapfrog steps) | Per-coordinate squared jumps of z, binned by trajectory length and fitted by a mixture of cosines (linear); jumps of the squared deviation, as for LQ_ESSR (quadratic) | Both (linear and quadratic), for the worst coordinate | None (a grid of candidate lengths; τ moves part of the way towards the best) | ÷ expected leapfrog steps |
 
 
 ¹ "Second moments" refers to the squared (quadratic) statistics, which are closer to the tail ESS than the means;
@@ -965,11 +994,11 @@ however, they are not the same as the quantile-based tail ESS.
 ² Via the R option `NicoStan_rate_criterion_cost_offset_steps` (0, i.e., no offset, by default).
 
 
-### Spectral LQ_ESSR: a spectral linear/quadratic ESS-rate trajectory-length criterion
+### SpESS-R: a spectral linear/quadratic ESS-rate trajectory-length criterion
 
 
-NicoStan also offers a spectral version of LQ_ESSR, `burnin_algorithm = "LQ_ESSR_spec_bins99_evid_expand"`
-(the spectral LQ_ESSR), which keeps the soft minimum over the monitored parameters
+NicoStan also offers a spectral version of LQ_ESSR, SpESS-R (`burnin_algorithm = "SpESSR"`;
+also available as `"LQ_ESSR_spec_bins99_evid_expand"`), which keeps the soft minimum over the monitored parameters
 (and over the linear and quadratic statistics),
 but estimates the ESS of the linear statistics from the **spectrum** of each parameter's motion -
 i.e., from how quickly it decorrelates as a function of the trajectory length -
@@ -994,13 +1023,22 @@ and moves beyond the longest trajectory lengths tried so far only if a (parametr
 shows evidence that the criterion is still rising.
 
 
+SpESS-R's update runs entirely in C++ (compiled once, when it is first used, and then cached);
+in our 180-chain benchmark (see
+[Stan vs NicoStan](#stan-vs-nicostan-diffusion-hmc-and-standard-hmc-on-eight-general-models)),
+it added 3.1% to the average burnin time of ChEES-R (0.03 s per burnin),
+and it reached the target slightly faster than ChEES-R with 125 burnin iterations (0.98×),
+but more slowly with 250 and 500 (1.05× and 1.13×), because it chose longer trajectories during the burnin.
+
+
 In our benchmark on eight models
 (see [Trajectory-length criteria within NicoStan](#trajectory-length-criteria-within-nicostan)),
-the spectral LQ_ESSR criterion was essentially joint-best with ESJD
-for the number of gradient evaluations needed to reach a minimum ESS of 1,000,
-and it was best on average for the minimum ESS per gradient,
-as well as when the nuisance block was sampled using diffusion HMC;
-however, no criterion was uniformly best.
+the SpESS-R criterion had the smallest mean loss for both endpoints
+(with ESJD within 1% of it for the number of gradient evaluations needed to reach a minimum ESS of 1,000)
+and the smallest worst-case losses;
+however, it was not uniformly best
+(e.g., for the models without a nuisance block, ESJD, ESJD_SNAPER and the SpESS-R criterion were
+essentially joint-best).
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->

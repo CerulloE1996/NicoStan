@@ -597,6 +597,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##
   EHMC_args_as_Rcpp_List$diffusion_HMC <- diffusion_HMC
   ##
+  ## (8 Oct 2026) the spectral LQ_ESSR criteria whose update runs in C++ (src_extra/spectral_LQ_ESSR_update.cpp,
+  ## R_fn_spectral_ESS_tau_criterion.R): the compiled update is loaded here, once, before the burn-in timer starts
+  ## (as the model is), rather than at the first tau update:
+  if (burnin_algorithm %in% c("LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                              "LQ_ESSR_spec_bins99_evid_expand")) {
+        invisible(fn_spectral_LQ_ESSR_update_cpp_function())
+  }
+  ##
   tictoc::tic()
 
   ## debug = TRUE (as passed by R_fn_sample_model) keeps the burn-in debug record of every trajectory and

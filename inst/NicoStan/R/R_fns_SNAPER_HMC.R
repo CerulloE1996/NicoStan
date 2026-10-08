@@ -220,6 +220,14 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                                  "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
                            esjd_w20_lq_essr_spec_bins99_evid_expand = "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
                            esjd_w33_lq_essr_spec_bins99_evid_expand = "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand",
+                           ##
+                           ## ---- (8 Oct 2026) the published name of "LQ_ESSR_spec_bins99_evid_expand":
+                           ##      SpESS-R, the spectral linear/quadratic ESS-rate criterion (the internal name
+                           ##      stays valid):
+                           ##
+                           spessr = "LQ_ESSR_spec_bins99_evid_expand",
+                           `spess-r` = "LQ_ESSR_spec_bins99_evid_expand",
+                           spess_r = "LQ_ESSR_spec_bins99_evid_expand",
                            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'; got: ", burnin_algorithm))
                            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'; got: ", burnin_algorithm))
                            ## stop(paste0("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time', 'SNAPER_time', ",
@@ -241,13 +249,22 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                                     ## "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response', ",
                                     ## "'LQ_ESSR_length_response', 'LQ_ESSR_spectral' or ",
                                     ## "'LQ_ESSR_spectral_long_bin_memory'; got: ", burnin_algorithm)))
+                           ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                           ##             "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                           ##             "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response', ",
+                           ##             "'LQ_ESSR_length_response', 'LQ_ESSR_spectral', ",
+                           ##             "'LQ_ESSR_spectral_long_bin_memory', ",
+                           ##             "'LQ_ESSR_spec_bins99_evid_expand' or ",
+                           ##             ## "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand'; got: ",
+                           ##             "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
+                           ##             "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
+                           ##             burnin_algorithm)))
                            stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
                                        "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
-                                       "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response', ",
+                                       "'ESJD_SNAPER', 'LQ_ESSR', 'SpESSR' (SpESS-R, also ",
+                                       "'LQ_ESSR_spec_bins99_evid_expand'), 'L_ESSR_length_response', ",
                                        "'LQ_ESSR_length_response', 'LQ_ESSR_spectral', ",
                                        "'LQ_ESSR_spectral_long_bin_memory', ",
-                                       "'LQ_ESSR_spec_bins99_evid_expand' or ",
-                                       ## "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand'; got: ",
                                        "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
                                        "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
                                        burnin_algorithm)))
