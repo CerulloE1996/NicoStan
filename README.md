@@ -457,7 +457,8 @@ with its default trajectory-length criterion (ChEES-R).
 
 
 The table below shows, for each model and NicoStan burnin length,
-the number of gradient evaluations (in thousands, including the burnin or warm-up) needed to reach
+the projected number of gradient evaluations (in thousands; the burnin or warm-up gradient evaluations
+plus 1,000 divided by the minimum ESS per sampling gradient evaluation) needed to reach
 a minimum ESS of 1,000 / the minimum ESS per 1,000 sampling gradient evaluations
 (geometric means over 10 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
 i.e., of the SD, of the main parameters).
@@ -496,8 +497,9 @@ i.e., of the SD, of the main parameters).
 without it, Stan's geometric mean for LDS is 639.0 thousand.
 
 
-NicoStan needed fewer gradient evaluations than Stan to reach a minimum ESS of 1,000
-for every model, burnin length and sampler:
+NicoStan needed fewer (projected) gradient evaluations than Stan to reach a minimum ESS of 1,000
+for every model, burnin length and sampler
+(with Stan's 1,000 warm-up iterations, vs. NicoStan's 125, 250 or 500 burnin iterations):
 between 2.4× and 3.4× fewer for the models without a nuisance block,
 and between 2.3× and 14.0× fewer for the models with one
 (the largest difference being for SV, for which Stan used adapt_delta = 0.999).
@@ -515,9 +517,9 @@ Note that:
 and NicoStan's as the expected number of leapfrog steps of its (jittered) trajectories,
 plus one for every iteration in which the sampler evaluates the gradient at the start of the trajectory
 (i.e., during the burnin, for standard HMC, and for the models without a nuisance block).
-- NicoStan's chains are short (16 chains of 250 draws); hence, its (plain) R-hat values are above 1 even at stationarity.
-More specifically, the median of each fit's maximum R-hat (1.006 to 1.041, per model and sampler)
-was close to the value implied at stationarity by the fit's own ESS (1.003 to 1.051).
+- NicoStan's chains were short (16 chains of 250 draws), and its maximum (rank-normalised, split) R-hat
+exceeded 1.01 in most of its fits of the models with a nuisance block
+(with medians of 1.022 to 1.041 per model and sampler, vs. 1.002 to 1.009 per model for Stan).
 - NicoStan had divergent transitions in 14 (diffusion HMC) and 9 (standard HMC) of its 150 LDS fits
 (22 and 10 in total, out of 4,000 draws per fit), and in 5 of its 600 HLR and SV fits (6 in total);
 Stan had none.
@@ -540,7 +542,8 @@ for the minimum ESS per gradient, the best divided by the criterion's),
 and whether it was within noise of the best
 (i.e., whether the 95% interval of its matched-seed ratio to the best criterion included 1).
 The tables below give the geometric mean of the losses over the 39 cells ("mean loss"), the worst loss,
-and the number of cells in which the criterion was best or within noise of the best.
+and the number of cells in which the criterion was best or within noise of the best
+(a descriptive count, which does not require the interval to be narrow).
 
 
 **Ordered by the gradient evaluations needed to reach the target:**
@@ -568,7 +571,8 @@ The spectral LQ_ESSR criterion and ESJD were essentially joint-best for the grad
 needed to reach the target (1.088 vs. 1.086; within 1% of each other),
 and the spectral LQ_ESSR criterion had the smallest loss for the minimum ESS per gradient
 (1.085, vs. 1.105 for ESJD);
-it was also best or within noise of the best in the most cells (35 and 37 of the 39 cells, respectively).
+it was also best or within noise of the best in the most cells (35 and 37 of the 39 cells, respectively;
+descriptive counts).
 
 
 However, no criterion was uniformly best:
