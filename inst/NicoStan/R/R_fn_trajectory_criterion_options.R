@@ -10,8 +10,30 @@ fn_validate_trajectory_criterion_options <-  function( tau_gradient_estimator,
                                                        algorithm,
                                                        randomize_tau_burnin) {
 
+        ## algorithm_values <-  c("ChEES", "CHESSR", "CHESSR_log", "SNAPER",
+        ##                        "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR")
+        ## algorithm_values <-  c("ChEES", "CHESSR", "CHESSR_log", "SNAPER",
+        ##                        "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR",
+        ##                        "L_ESSR_length_response", "LQ_ESSR_length_response")
+        ## algorithm_values <-  c("ChEES", "CHESSR", "CHESSR_log", "SNAPER",
+        ##                        "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR",
+        ##                        "L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral")
+     ## algorithm_values <-  c("ChEES", "CHESSR", "CHESSR_log", "SNAPER",
+                            ## "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR",
+                            ## "L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral",
+                            ## "LQ_ESSR_spectral_long_bin_memory")
         algorithm_values <-  c("ChEES", "CHESSR", "CHESSR_log", "SNAPER",
-                               "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR")
+                               "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR",
+                               "L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral",
+                               "LQ_ESSR_spectral_long_bin_memory", "LQ_ESSR_spec_bins99_evid_expand",
+                               ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")
+                               "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                               ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")
+                               "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                               ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")
+                               "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                               "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                               "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")
         if (!is.character(tau_gradient_estimator) || length(tau_gradient_estimator) != 1 ||
             is.na(tau_gradient_estimator) || !tau_gradient_estimator %in% c("forward", "two_ended")) {
                 stop("tau_gradient_estimator must be 'forward' or 'two_ended'.")
@@ -52,6 +74,25 @@ fn_validate_trajectory_criterion_options <-  function( tau_gradient_estimator,
         ## LQ_ESSR: its per-coordinate log-tau derivatives are those of the proposed (forward) endpoint only:
         if (algorithm == "LQ_ESSR" && !identical(tau_gradient_estimator, "forward")) {
                 stop("LQ_ESSR supports tau_gradient_estimator = 'forward' only.")
+        }
+        ## the length-response criteria read the proposed (forward) endpoint's jumps only, and no tau derivative:
+        ## if (algorithm %in% c("L_ESSR_length_response", "LQ_ESSR_length_response") &&
+        ##     !identical(tau_gradient_estimator, "forward")) {
+        ## if (algorithm %in% c("L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral") &&
+     ## if (algorithm %in% c("L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral",
+                          ## "LQ_ESSR_spectral_long_bin_memory") &&
+        if (algorithm %in% c("L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral",
+                             "LQ_ESSR_spectral_long_bin_memory", "LQ_ESSR_spec_bins99_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand") &&
+                             "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_evid_expand") &&
+                             "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                             ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept") &&
+                             "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                             "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                             "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand") &&
+            !identical(tau_gradient_estimator, "forward")) {
+                stop(paste0(algorithm, " supports tau_gradient_estimator = 'forward' only."))
         }
         return(list(tau_gradient_estimator = tau_gradient_estimator,
                     tau_cost_exponent = as.numeric(tau_cost_exponent),
@@ -150,11 +191,21 @@ fn_trajectory_criterion_esjd_statistic <-  function( theta_initial,
                                                      metric_factor,
                                                      tau_values,
                                                      tau_gradient_estimator,
-                                                     esjd_jump_power) {
+                                                     ## esjd_jump_power) {
+                                                     esjd_jump_power,
+                                                     ## interest_only: the rows of the jump (NULL = every row; 6 Oct 2026):
+                                                     interest_rows = NULL) {
 
         jump <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - theta_initial)
         velocity_initial_metric <- fn_apply_trajectory_metric(metric_factor, velocity_initial)
         velocity_proposed_metric <- fn_apply_trajectory_metric(metric_factor, velocity_proposed)
+        if (!is.null(interest_rows)) {
+                jump <-  fn_rows_of_the_tau_criterion_statistic(jump, interest_rows)
+                velocity_initial_metric <-  fn_rows_of_the_tau_criterion_statistic(velocity_initial_metric,
+                                                                                   interest_rows)
+                velocity_proposed_metric <-  fn_rows_of_the_tau_criterion_statistic(velocity_proposed_metric,
+                                                                                    interest_rows)
+        }
         jump_norm <- sqrt(pmax(colSums(jump^2), 0))
         jump_power_factor <- ifelse(jump_norm > 0, jump_norm^(esjd_jump_power - 2),
                                     if (esjd_jump_power == 2) 1 else 0)
@@ -189,7 +240,11 @@ fn_metric_position_criterion_advanced <-  function( algorithm,
                                                     burnin_to_sampling_leapfrog_time_ratio,
                                                     lag_one_autocorrelation_rho,
                                                     ## the trajectory cost offset (fn_metric_position_criterion; 4 Oct 2026):
-                                                    tau_cost_offset = 0) {
+                                                    ## tau_cost_offset = 0) {
+                                                    tau_cost_offset = 0,
+                                                    ## interest_only: the rows of every non-LQ statistic (NULL = every row; 6 Oct 2026; LQ
+                                                    ## selects its rows in fn_metric_tau_block_update()):
+                                                    interest_rows = NULL) {
 
         options <- fn_validate_trajectory_criterion_options(
             tau_gradient_estimator = tau_gradient_estimator,
@@ -201,7 +256,25 @@ fn_metric_position_criterion_advanced <-  function( algorithm,
         ##
         ## ---- LQ_ESSR: the per-coordinate statistics of fn_metric_position_criterion(), with the cost exponent of the per-gradient
         ##      penalty carried along for fn_metric_tau_block_update() (1 = per unit trajectory length, as for the rate criteria):
-        if (algorithm == "LQ_ESSR") {
+        ## (the length-response criteria read the same per-coordinate statistics)
+        ## if (algorithm == "LQ_ESSR") {
+        ## if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response")) {
+        ## ("LQ_ESSR_spectral" reads the same per-coordinate statistics)
+        ## if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+        ##                      "LQ_ESSR_spectral")) {
+     ## if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                          ## "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")) {
+        if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                             "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                             "LQ_ESSR_spec_bins99_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                             "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                             "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                             ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) {
+                             "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                             "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                             "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
                 LQ_ESSR_statistics <-  fn_metric_position_criterion(
                     algorithm = algorithm,
                     theta_initial = theta_initial,
@@ -229,7 +302,9 @@ fn_metric_position_criterion_advanced <-  function( algorithm,
                     tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead,
                     burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio,
                     lag_one_autocorrelation_rho = lag_one_autocorrelation_rho,
-                    tau_cost_offset = tau_cost_offset))
+                    ## tau_cost_offset = tau_cost_offset))
+                    tau_cost_offset = tau_cost_offset,
+                    interest_rows = interest_rows))
         }
 
         theta_initial <- as.matrix(theta_initial)
@@ -248,6 +323,16 @@ fn_metric_position_criterion_advanced <-  function( algorithm,
         proposed <- fn_apply_trajectory_metric(metric_factor, theta_proposed - mean_proposed)
         velocity_initial_metric <- fn_apply_trajectory_metric(metric_factor, velocity_initial)
         velocity_proposed_metric <- fn_apply_trajectory_metric(metric_factor, velocity_proposed)
+        ## interest_only: every statistic below over the interest rows only (NULL = every row):
+        if (!is.null(interest_rows)) {
+                initial <-  fn_rows_of_the_tau_criterion_statistic(initial, interest_rows)
+                proposed <-  fn_rows_of_the_tau_criterion_statistic(proposed, interest_rows)
+                velocity_initial_metric <-  fn_rows_of_the_tau_criterion_statistic(velocity_initial_metric,
+                                                                                   interest_rows)
+                velocity_proposed_metric <-  fn_rows_of_the_tau_criterion_statistic(velocity_proposed_metric,
+                                                                                    interest_rows)
+                direction <-  fn_snaper_direction_on_the_interest_rows(direction, interest_rows)
+        }
 
         is_esjd <- algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER")
         if (is_esjd) {
@@ -259,7 +344,9 @@ fn_metric_position_criterion_advanced <-  function( algorithm,
                     metric_factor = metric_factor,
                     tau_values = tau_values,
                     tau_gradient_estimator = options$tau_gradient_estimator,
-                    esjd_jump_power = options$esjd_jump_power)
+                    ## esjd_jump_power = options$esjd_jump_power)
+                    esjd_jump_power = options$esjd_jump_power,
+                    interest_rows = interest_rows)
                 esjd_result <- fn_trajectory_criterion_rate_result(
                     numerator = esjd$numerator,
                     numerator_gradient = esjd$numerator_gradient,

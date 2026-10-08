@@ -166,6 +166,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## burnin_algorithm = "LQ_ESSR" only: the main-block rows (indices) the criterion monitors, from
                                            ## interest_only in R_fn_sample_model; NULL = every row of the adapted block:
                                            interest_rows = NULL,
+                                           ## (7 Oct 2026) the run's planned sampling iterations per
+                                           ## chain (n_iter), for the finite-run ESS of
+                                           ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand"; NULL = not
+                                           ## given (every other burnin_algorithm ignores it):
+                                           n_iter_sampling_per_chain = NULL,
                                            tau_jitter_burnin,
                                            ##
                                            ## ---- tau_adaptation_block ("main" | "joint"; EXPERIMENTAL):
@@ -594,6 +599,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##
   tictoc::tic()
 
+  ## debug = TRUE (as passed by R_fn_sample_model) keeps the burn-in debug record of every trajectory and
+  ## tau update (see its allocation); the line below still switches the burn-in's debug prints off:
+  debug_record <-  !missing(debug) && isTRUE(debug)
   debug <- FALSE ## BOOKMARK
   
   message("Printing from init_and_run_burnin_ChESSR:")
@@ -1072,6 +1080,40 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   burnin_metric_main_variance_history <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_params_main)
   burnin_metric_nuisance_variance_quantiles_history <-  matrix(data = NA_real_, nrow = n_burnin, ncol = 5,
                                                               dimnames = list(NULL, c("q05", "q25", "q50", "q75", "q95")))
+  ## Burn-in debug record (debug = TRUE only; 6 Oct 2026; saved with the run, for offline tests of
+  ## trajectory-length criteria on the real models), read from the per-chain output of the native call and from
+  ## the tau updates; nothing in the burn-in reads it. Per iteration x burn-in chain (main block; the joint
+  ## trajectory when partitioned_HMC = FALSE):
+  ##   burnin_tau_main_ii_all_chains   = the jittered length tau_main_ii the trajectory drew (never below
+  ##                                     eps_main);
+  ##   burnin_eps_main_all_chains      = the step size eps_main it ran with;
+  ##   burnin_L_main_ii_all_chains     = its leapfrog steps, max(1, ceiling(tau_main_ii / eps_main)), as the
+  ##                                     samplers compute it (length run = L_main_ii * eps_main); fewer steps
+  ##                                     run only when the log density becomes non-finite, and that iteration
+  ##                                     is always divergent;
+  ##   burnin_div_main_all_chains      = 1 if the iteration was divergent, else 0;
+  ##   burnin_p_jump_main_all_chains   = the acceptance probability of the proposal;
+  ## per iteration x parameter x burn-in chain (main parameters; the accepted ends are
+  ## burnin_trace_main_all_chains):
+  ##   burnin_start_main_all_chains    = the main parameters at the start of the trajectory;
+  ##   burnin_proposal_main_all_chains = the main-parameter proposal (the end of the trajectory, before the
+  ##                                     accept / reject step);
+  ## and burnin_tau_update_records = list(records = one entry per tau update of the main or joint block,
+  ## metric_factors_main = the distinct trajectory metric factors of the main rows, errors = any failure of
+  ## the record; R_fn_burnin_debug_record.R):
+  if (debug_record) {
+        burnin_tau_main_ii_all_chains   <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_chains_burnin)
+        burnin_eps_main_all_chains      <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_chains_burnin)
+        burnin_L_main_ii_all_chains     <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_chains_burnin)
+        burnin_div_main_all_chains      <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_chains_burnin)
+        burnin_p_jump_main_all_chains   <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_chains_burnin)
+        burnin_start_main_all_chains    <-  array(data = NA_real_,
+                                                  dim = c(n_burnin, n_params_main, n_chains_burnin))
+        burnin_proposal_main_all_chains <-  array(data = NA_real_,
+                                                  dim = c(n_burnin, n_params_main, n_chains_burnin))
+        burnin_tau_update_records       <-  list(records = list(), metric_factors_main = list(),
+                                                 errors = character())
+  }
   ## Cross-chain acceptance at each iteration: the arithmetic mean (printed as p_jump) and the mean that the eps update used
   ## (eps_acceptance_mean; identical to the arithmetic mean when eps_acceptance_mean = "arithmetic"):
   p_jump_main_during_burnin_vec <- p_jump_main_for_eps_during_burnin_vec <- rep(x = NA_real_, times = n_burnin)
@@ -1086,6 +1128,57 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## burnin_algorithm = "LQ_ESSR" only: moving averages of the per-coordinate chain means of its jump statistics and start moments
   ## (fn_metric_tau_block_update); NULL = none yet, reset with ChEES_criterion_ema at the handover:
   LQ_ESSR_component_criterion_ema <-  NULL
+  ## burnin_algorithm = "L_ESSR_length_response" / "LQ_ESSR_length_response" carry their state (bins and moving averages,
+  ## R_fn_length_response_tau_criterion.R) in LQ_ESSR_component_criterion_ema too, and read the same rows of the endpoints:
+  ## ("LQ_ESSR_spectral" carries its two states, R_fn_spectral_ESS_tau_criterion.R, the same way; 6 Oct 2026)
+  ## burnin_algorithm_carries_LQ_ESSR_component_criterion_ema <-  burnin_algorithm %in% c("LQ_ESSR",
+  ##                                                                                      "L_ESSR_length_response",
+  ##                                                                                      "LQ_ESSR_length_response")
+  ## burnin_algorithm_carries_LQ_ESSR_component_criterion_ema <-  burnin_algorithm %in% c("LQ_ESSR",
+  ##                                                                                      "L_ESSR_length_response",
+  ##                                                                                      "LQ_ESSR_length_response",
+  ##                                                                                      "LQ_ESSR_spectral")
+##   burnin_algorithm_carries_LQ_ESSR_component_criterion_ema <-
+     ## burnin_algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                             ## "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")
+  burnin_algorithm_carries_LQ_ESSR_component_criterion_ema <-
+        burnin_algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                                "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                                "LQ_ESSR_spec_bins99_evid_expand",
+                                ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")
+                                "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                                ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")
+                                "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                                ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")
+                                "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                                "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")
+  ## "LQ_ESSR_spectral" only: the step sizes of the current burn-in iteration's trajectories (their executed
+  ## lengths L eps), read just before the native call of each iteration:
+  eps_main_used_for_this_burnin_iteration <-  NA_real_
+  eps_us_used_for_this_burnin_iteration <-  NA_real_
+  ## the criteria that need every row of the joint endpoints in R (the "status 2" route of the resident joint block):
+  ## burnin_algorithm_needs_every_joint_endpoint_row_in_R <-
+  ##       burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response",
+  ##                               "LQ_ESSR_length_response")
+  ## burnin_algorithm_needs_every_joint_endpoint_row_in_R <-
+  ##       burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response",
+  ##                               "LQ_ESSR_length_response", "LQ_ESSR_spectral")
+##   burnin_algorithm_needs_every_joint_endpoint_row_in_R <-
+     ## burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response",
+                             ## "LQ_ESSR_length_response", "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")
+  burnin_algorithm_needs_every_joint_endpoint_row_in_R <-
+        burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response",
+                                "LQ_ESSR_length_response", "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                                "LQ_ESSR_spec_bins99_evid_expand",
+                                ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")
+                                "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                                ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")
+                                "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                                ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")
+                                "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                                "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")
   ## Iterations at which the divergence-triggered tau shrink fired (tau_shrink_on_divergence = TRUE):
   tau_shrink_fired_vec <- rep(x = FALSE, times = n_burnin)
   ##
@@ -1140,12 +1233,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   if (tau_initial_adaptive) tau_initial <-  pi
   ##
   ## ---- "all" uses every iteration from 1 to the handover. Numeric fractions retain the windows described below.
-  ##      The 30-iteration minimum applies only to numeric fractions; the default remains 0.5.
+  ##      The minimum window length (NicoStan_tau_initial_moments_window_min_iter, default 1) applies only to
+  ##      numeric fractions; the default remains 0.5.
   ##
   ## ---- tau_initial = "adaptive": the part of [clip_iter, gap] whose draws feed lambda_max. Option
   ##      NicoStan_tau_initial_moments_window_fraction (default 0.5 = the last half; 1 = the whole of [clip_iter, gap], the original
   ##      behaviour) keeps only the last part of it, so that the early burn-in draws taken while the chains are still moving into the typical set do not
-  ##      inflate lambda_max. The window never has fewer than NicoStan_tau_initial_moments_window_min_iter iterations (default 30)
+  ##      inflate lambda_max. The window never has fewer than NicoStan_tau_initial_moments_window_min_iter
+  ##      iterations (default 1)
   ##      and never starts before clip_iter:
   ##
   # tau_initial_moments_window_fraction <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_fraction", default = 1))
@@ -1161,7 +1256,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   } else {
 
         tau_initial_moments_window_fraction <-  as.numeric(tau_initial_moments_window_fraction)
-        tau_initial_moments_window_min_iter <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_min_iter", default = 30))
+        # tau_initial_moments_window_min_iter <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_min_iter", default = 30))
+        tau_initial_moments_window_min_iter <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_min_iter", default = 1))
         if (length(tau_initial_moments_window_fraction) != 1 || !is.finite(tau_initial_moments_window_fraction) ||
             tau_initial_moments_window_fraction <= 0 || tau_initial_moments_window_fraction > 1) {
               stop("NicoStan_tau_initial_moments_window_fraction must be \"all\" or a single number in (0, 1].")
@@ -2369,6 +2465,63 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
   }
   ##
+  ## ---- SEPARATE initial-LR hold for the tau optimiser, counted from the tau handover. Option
+  ##      NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover
+  ##      (default NULL = off; 0 = off; the behaviour is then exactly as before). When set to k >= 1,
+  ##      the first k tau updates (iterations gap to gap + k - 1, the handover included) use the
+  ##      learning rate learning_rate_initial, held constant (schedule position 1 of 1, i.e. no decay),
+  ##      in place of the block's learning rate; from tau update k + 1 on, tau uses the usual learning
+  ##      rate and schedule position (counted from the handover, or from the restart at the metric
+  ##      freeze, exactly as without the hold). During the hold it takes precedence over that restart.
+  ##      The step-size (eps) hold of iterations 1 to learning_rate_initial_iter above is unchanged:
+  ##
+  learning_rate_initial_n_tau_updates_held_from_tau_handover <-
+        getOption("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover", default = NULL)
+  if (!is.null(learning_rate_initial_n_tau_updates_held_from_tau_handover)) {
+        if (length(learning_rate_initial_n_tau_updates_held_from_tau_handover) != 1 ||
+            !is.numeric(learning_rate_initial_n_tau_updates_held_from_tau_handover) ||
+            !is.finite(learning_rate_initial_n_tau_updates_held_from_tau_handover) ||
+            learning_rate_initial_n_tau_updates_held_from_tau_handover < 0 ||
+            learning_rate_initial_n_tau_updates_held_from_tau_handover !=
+              round(learning_rate_initial_n_tau_updates_held_from_tau_handover)) {
+              stop(paste0("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover",
+                          " must be NULL or a single non-negative whole number of tau updates."))
+        }
+  }
+  tau_learning_rate_held_at_learning_rate_initial_from_tau_handover_active <-
+        !is.null(learning_rate_initial_n_tau_updates_held_from_tau_handover) &&
+        (learning_rate_initial_n_tau_updates_held_from_tau_handover >= 1) && !isTRUE(manual_tau)
+  ##
+  ## ---- FALSE until the first tau update (set at every tau update below):
+  tau_learning_rate_held_at_learning_rate_initial_now <-  FALSE
+  ##
+  ## ---- TRUE for the tau updates held at learning_rate_initial (tau update counter from 1 at the handover):
+  fn_tau_learning_rate_held_at_learning_rate_initial <-  function(tau_adaptation_iteration) {
+        tau_learning_rate_held_at_learning_rate_initial_from_tau_handover_active &&
+              (tau_adaptation_iteration <= learning_rate_initial_n_tau_updates_held_from_tau_handover)
+  }
+  ##
+  if (tau_learning_rate_held_at_learning_rate_initial_from_tau_handover_active) {
+        if (is.null(learning_rate_initial) || !is.numeric(learning_rate_initial) ||
+            length(learning_rate_initial) != 1 || !is.finite(learning_rate_initial) ||
+            learning_rate_initial <= 0) {
+              stop(paste0("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover",
+                          " requires a single positive finite learning_rate_initial",
+                          " (the rate the tau updates are held at)."))
+        }
+        if (tau_probe_then_average) {
+              stop(paste0("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover",
+                          " is not available with the probe tau adaptation schemes."))
+        }
+        message(colourise(paste0("tau initial-LR hold from the handover: tau learning rate held at ",
+                                 signif(learning_rate_initial, 4), " for the first ",
+                                 learning_rate_initial_n_tau_updates_held_from_tau_handover,
+                                 " tau updates (iterations ", gap, "-",
+                                 gap + learning_rate_initial_n_tau_updates_held_from_tau_handover - 1,
+                                 "), then the usual tau learning rate and schedule;",
+                                 " the eps hold is unchanged."), "cyan"))
+  }
+  ##
   ## ---- Per-iteration constants, built once here before the loop (the same values at every iteration; R copies an
   ##      object before any in-place change, so the list elements that share them cannot alter them):
   ##        - the unit nuisance metric (metric_type_nuisance = "unit"), one vector per list element;
@@ -3294,9 +3447,35 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                    ## if (!isTRUE(manual_tau) && ii < n_adapt &&
                    ##     burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
                    ## ("LQ_ESSR" centres its squared statistic exactly as CHESSR does, so it keeps the same centre)
+                   ## (the length-response criteria read the same centred statistics as "LQ_ESSR": the same centre)
+                   ## if (!isTRUE(manual_tau) && ii < n_adapt &&
+                   ##     burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+                   ##                             "ESJD_SNAPER", "LQ_ESSR")) {
+                   ## ("LQ_ESSR_spectral" reads the same centred statistics: the same centre)
+                   ## if (!isTRUE(manual_tau) && ii < n_adapt &&
+                   ##     burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+                   ##                             "ESJD_SNAPER", "LQ_ESSR",
+                   ##                             "L_ESSR_length_response", "LQ_ESSR_length_response")) {
+                   ## if (!isTRUE(manual_tau) && ii < n_adapt &&
+                   ##     burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+                   ##                             "ESJD_SNAPER", "LQ_ESSR",
+                   ##                             "L_ESSR_length_response", "LQ_ESSR_length_response",
+                   ##                             "LQ_ESSR_spectral")) {
                    if (!isTRUE(manual_tau) && ii < n_adapt &&
                        burnin_algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
-                                               "ESJD_SNAPER", "LQ_ESSR")) {
+                                               "ESJD_SNAPER", "LQ_ESSR",
+                                               "L_ESSR_length_response", "LQ_ESSR_length_response",
+                                            ## "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")) {
+                                               "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                                               "LQ_ESSR_spec_bins99_evid_expand",
+                                               ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                                               "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                                               ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                                               "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                                               ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) {
+                                               "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                                               "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                               "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
                      if (use_resident_burnin) {
                          ##
                          ## ---- the full update below (every row, as in its last branch), in the worker on the resident proposals of the
@@ -4018,9 +4197,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                           resident_api$fn_persistent_burnin_joint_direction_set(worker_ptr, snaper_direction_joint)
                       }
                       } else {
+                      ## trajectory_direction[[adapted_block]] <- fn_update_snaper_w_minibatch(
+                      ##     X = states, snaper_m_vec = c(centre), snaper_w_vec = trajectory_direction[[adapted_block]],
+                      ##     eta_w = 8 / max(1, ii), metric_factor = trajectory_metric[[adapted_block]])
+                      ## (interest_only: the leading eigen-direction of the interest rows of the main block)
                       trajectory_direction[[adapted_block]] <- fn_update_snaper_w_minibatch(
                           X = states, snaper_m_vec = c(centre), snaper_w_vec = trajectory_direction[[adapted_block]],
-                          eta_w = 8 / max(1, ii), metric_factor = trajectory_metric[[adapted_block]])
+                          eta_w = 8 / max(1, ii), metric_factor = trajectory_metric[[adapted_block]],
+                          interest_rows = if (identical(adapted_block, "main")) interest_rows else NULL)
                       }  ## end of: if (use_resident_joint_block)
                   }
               }
@@ -4155,6 +4339,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                             eps_main_used_for_iteration <-  EHMC_args_as_Rcpp_List$eps_main
                                             native_call_start_time <-  Sys.time()
                                         }
+                                        ## "LQ_ESSR_spectral": the step sizes of this iteration's trajectories:
+                                        eps_main_used_for_this_burnin_iteration <-
+                                              EHMC_args_as_Rcpp_List$eps_main
+                                        eps_us_used_for_this_burnin_iteration <-
+                                              EHMC_args_as_Rcpp_List$eps_us
                                         tau_jitter_iteration <-  if (ii < clip_iter) NULL else
                                                                    fn_tau_jitter_burnin_draw(tau_jitter_burnin_state,
                                                                                               ii - clip_iter + 1,
@@ -4318,6 +4507,27 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                             velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R <- result$velocity_main_prop_burnin_tau_adapt_all_chains_input_from_R
                             ##
                             tau_main_ii_vec <- result[[3]][6,]
+                            ## burn-in debug record of this iteration (debug = TRUE only; see its allocation):
+                            ## rows 6, 9, 2 and 1 of the per-chain output = tau_main_ii, eps_main, divergence and
+                            ## p_jump:
+                            if (debug_record && ii <= n_burnin && is.matrix(result[[3]]) &&
+                                nrow(result[[3]]) >= 9 && ncol(result[[3]]) == n_chains_burnin) {
+                                burnin_tau_main_ii_all_chains[ii, ] <-  result[[3]][6, ]
+                                burnin_eps_main_all_chains[ii, ]    <-  result[[3]][9, ]
+                                burnin_L_main_ii_all_chains[ii, ]   <-  pmax(1, ceiling(result[[3]][6, ] /
+                                                                                       result[[3]][9, ]))
+                                burnin_div_main_all_chains[ii, ]    <-  result[[3]][2, ]
+                                burnin_p_jump_main_all_chains[ii, ] <-  result[[3]][1, ]
+                                record_dims <-  c(as.integer(n_params_main), as.integer(n_chains_burnin))
+                                record_start <-  theta_main_0_burnin_tau_adapt_all_chains_input_from_R
+                                record_proposal <-  theta_main_prop_burnin_tau_adapt_all_chains_input_from_R
+                                if (identical(dim(record_start), record_dims)) {
+                                    burnin_start_main_all_chains[ii, , ] <-  record_start
+                                }
+                                if (identical(dim(record_proposal), record_dims)) {
+                                    burnin_proposal_main_all_chains[ii, , ] <-  record_proposal
+                                }
+                            }
                             if (bulk_local_tuner_freeze_active && ii <= bulk_local_tuner_decision_iter) {
                                 bulk_local_tuner_state <-  fn_bulk_local_tuner_append(
                                       state = bulk_local_tuner_state,
@@ -4853,6 +5063,24 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 tau_learning_rate_schedule_length <- max(1, (n_adapt - 1) - tau_probe_state$end_iteration)
                             }
                             ##
+                            ## ---- tau initial-LR hold from the handover (option NicoStan_
+                            ##      learning_rate_initial_n_tau_updates_held_from_tau_handover;
+                            ##      see above): learning_rate_initial, constant, for the first k tau updates:
+                            tau_learning_rate_held_at_learning_rate_initial_now <-
+                                  fn_tau_learning_rate_held_at_learning_rate_initial(tau_adaptation_iteration)
+                            if (tau_learning_rate_held_at_learning_rate_initial_now) {
+                                tau_learning_rate_schedule_iteration <- 1
+                                tau_learning_rate_schedule_length <- 1
+                            }
+                            if (!tau_learning_rate_held_at_learning_rate_initial_now &&
+                                fn_tau_learning_rate_held_at_learning_rate_initial(
+                                      tau_adaptation_iteration - 1)) {
+                                message(colourise(paste0(
+                                      "tau initial-LR hold from the handover finished at iteration ", ii,
+                                      ": tau learning rate ", signif(learning_rate_initial, 4),
+                                      " -> the usual tau learning rate and schedule."), "cyan"))
+                            }
+                            ##
                             ## ---- CHESSR_time / SNAPER_time: tau_offset_from_sampling_overhead (at the step size the scored trajectories ran
                             ##      with) and burnin_to_sampling_leapfrog_time_ratio (at the current time_per_leapfrog_step_burnin) for this update:
                             ##
@@ -4988,6 +5216,39 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 ## the trajectory cost offset of this update's block (eps_<block> x c; see its definition):
                                 tau_cost_offset_at_update <-  EHMC_args_as_Rcpp_List[[paste0("eps_", block_name)]] * rate_criterion_cost_offset_steps
                                 tau_cost_offset_vec[ii] <-  tau_cost_offset_at_update
+                                ## "LQ_ESSR_spectral" only: the step size of this update's trajectories (executed
+                                ## lengths) and the step size of the next trajectories (the candidates' expected
+                                ## leapfrog steps):
+                                step_sizes_for_spectral_ESS_at_update <-  NULL
+                                ## if (identical(burnin_algorithm, "LQ_ESSR_spectral")) {
+                             ## if (burnin_algorithm %in% c("LQ_ESSR_spectral",
+                                                         ## "LQ_ESSR_spectral_long_bin_memory")) {
+                                 ## step_sizes_for_spectral_ESS_at_update <-
+                                     ## list(eps_used_for_trajectories = if (block_name == "main") {
+                                                  ## eps_main_used_for_this_burnin_iteration
+                                          ## } else eps_us_used_for_this_burnin_iteration,
+                                          ## eps_now = EHMC_args_as_Rcpp_List[[paste0("eps_", block_name)]])
+                             ## }
+                                ## (7 Oct 2026) also the run's planned sampling iterations per chain, for the
+                                ## finite-run ESS of "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand":
+                                if (burnin_algorithm %in% c("LQ_ESSR_spectral",
+                                                            "LQ_ESSR_spectral_long_bin_memory",
+                                                            "LQ_ESSR_spec_bins99_evid_expand",
+                                                            ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                                                            "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                                                            ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                                                            "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                                                            ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) {
+                                                            "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                                                            "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                                            "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
+                                    step_sizes_for_spectral_ESS_at_update <-
+                                        list(eps_used_for_trajectories = if (block_name == "main") {
+                                                     eps_main_used_for_this_burnin_iteration
+                                             } else eps_us_used_for_this_burnin_iteration,
+                                             eps_now = EHMC_args_as_Rcpp_List[[paste0("eps_", block_name)]],
+                                             n_iter_sampling_per_chain = n_iter_sampling_per_chain)
+                                }
                                 pooled_metric_weight_factor_vec[ii] <-  pooled_metric_weight_factor
                                 adam_mean_name <- paste0("tau_m_adam_", block_name)
                                 adam_variance_name <- paste0("tau_v_adam_", block_name)
@@ -5001,6 +5262,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ## beta1_adam = tau_adam_beta1, beta2_adam = beta2_adam, eps_adam = eps_adam,
                                         ## aggregation = "weighted_mean")
                                 {
+                                    ##
+                                    ## ---- the state that this criterion carries between updates (component_criterion_ema below):
+                                    criterion_state_for_this_update <-  ESJD_CHESSR_component_criterion_ema
+                                    if (burnin_algorithm == "ESJD_SNAPER") {
+                                        criterion_state_for_this_update <-  ESJD_SNAPER_component_criterion_ema
+                                    }
+                                    if (burnin_algorithm_carries_LQ_ESSR_component_criterion_ema) {
+                                        criterion_state_for_this_update <-  LQ_ESSR_component_criterion_ema
+                                    }
                                     if (use_resident_joint_block) {
                                     ##
                                     ## ---- the joint criterion: the main rows of the endpoints in metric coordinates here (the same R code on the main
@@ -5024,8 +5294,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                     ## joint_reductions <-  resident_api$fn_persistent_burnin_joint_position_reductions_resident( worker_ptr,
                                     ## joint_reductions <-  if (burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) list(status = 2) else
                                     ## ("LQ_ESSR" needs every row of the endpoints, not per-chain sums: the same route)
-                                    joint_reductions <-  if (burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER",
-                                                                                     "LQ_ESSR")) list(status = 2) else
+                                    ## ("L_ESSR_length_response" / "LQ_ESSR_length_response" read the same rows: the same route)
+                                    ## joint_reductions <-  if (burnin_algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER",
+                                    ##                                                  "LQ_ESSR")) list(status = 2) else
+                                    joint_reductions <-  if (burnin_algorithm_needs_every_joint_endpoint_row_in_R)
+                                                             list(status = 2) else
                                                          if (identical(tau_gradient_estimator, "two_ended"))
                                                              resident_api[[resident_joint_two_ended_api_name]]( worker_ptr,
                                                                                                                  projection_R = burnin_algorithm %in% c("SNAPER", "SNAPER_time", "ESJD_SNAPER"),
@@ -5123,7 +5396,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         metric_factor = joint_metric_factor, direction = joint_direction,
                                         tau_values = tau_values, probabilities = probabilities, divergences = divergences,
                                         weight_by_probability = tau_weight_by_p_jump, tau = EHMC_args_as_Rcpp_List[[tau_name]],
-                                        learning_rate = EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
+                                        # learning_rate = EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
+                                        learning_rate = if (tau_learning_rate_held_at_learning_rate_initial_now)
+                                                learning_rate_initial else
+                                                EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
                                         iteration = tau_adaptation_iteration, adaptation_iterations = n_tau_adaptation_iterations,
                                         adam_mean = EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
                                         adam_variance = EHMC_burnin_as_Rcpp_List[[adam_variance_name]],
@@ -5145,11 +5421,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         learning_rate_schedule_length = tau_learning_rate_schedule_length,
                                         ## component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
                                         ##                           ESJD_CHESSR_component_criterion_ema)
-                                        component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
-                                                                  if (burnin_algorithm == "LQ_ESSR") LQ_ESSR_component_criterion_ema else
-                                                                  ESJD_CHESSR_component_criterion_ema,
+                                        ## component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
+                                        ##                           if (burnin_algorithm == "LQ_ESSR") LQ_ESSR_component_criterion_ema else
+                                        ##                           ESJD_CHESSR_component_criterion_ema,
+                                        ## (chosen before the "if (use_resident_joint_block)" above, with the length-response criteria)
+                                        component_criterion_ema = criterion_state_for_this_update,
                                         ## LQ_ESSR: the interest rows index the main block, which leads the main and the joint block:
-                                        interest_rows = if (is_main || is_joint) interest_rows else NULL)
+                                        ## interest_rows = if (is_main || is_joint) interest_rows else NULL)
+                                        interest_rows = if (is_main || is_joint) interest_rows else NULL,
+                                        ## "LQ_ESSR_spectral" only (NULL for every other criterion):
+                                        step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update)
                                     } else {
                                     initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
                                                     if (is_joint) c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
@@ -5176,7 +5457,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                             tau_offset_from_sampling_overhead = tau_offset_from_sampling_overhead_at_update,
                                             burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio_at_update,
                                             lag_one_autocorrelation_rho = lag_one_autocorrelation_rho_at_update,
-                                            tau_cost_offset = tau_cost_offset_at_update)
+                                            ## tau_cost_offset = tau_cost_offset_at_update)
+                                            tau_cost_offset = tau_cost_offset_at_update,
+                                            ## interest_only: the statistic over the interest rows of the main block
+                                            interest_rows = if (is_main) interest_rows else NULL)
                                     }
                                     update <- fn_metric_tau_block_update(
                                         algorithm = burnin_algorithm, theta_initial = theta_initial, theta_proposed = theta_proposed,
@@ -5185,7 +5469,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         metric_factor = trajectory_metric[[adapted_block]], direction = trajectory_direction[[adapted_block]],
                                         tau_values = tau_values, probabilities = probabilities, divergences = divergences,
                                         weight_by_probability = tau_weight_by_p_jump, tau = EHMC_args_as_Rcpp_List[[tau_name]],
-                                        learning_rate = EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
+                                        # learning_rate = EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
+                                        learning_rate = if (tau_learning_rate_held_at_learning_rate_initial_now)
+                                                learning_rate_initial else
+                                                EHMC_burnin_as_Rcpp_List[[paste0("LR_", block_name)]],
                                         iteration = tau_adaptation_iteration, adaptation_iterations = n_tau_adaptation_iterations,
                                         adam_mean = EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
                                         adam_variance = EHMC_burnin_as_Rcpp_List[[adam_variance_name]],
@@ -5208,12 +5495,41 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         learning_rate_schedule_length = tau_learning_rate_schedule_length,
                                         ## component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
                                         ##                           ESJD_CHESSR_component_criterion_ema)
-                                        component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
-                                                                  if (burnin_algorithm == "LQ_ESSR") LQ_ESSR_component_criterion_ema else
-                                                                  ESJD_CHESSR_component_criterion_ema,
+                                        ## component_criterion_ema = if (burnin_algorithm == "ESJD_SNAPER") ESJD_SNAPER_component_criterion_ema else
+                                        ##                           if (burnin_algorithm == "LQ_ESSR") LQ_ESSR_component_criterion_ema else
+                                        ##                           ESJD_CHESSR_component_criterion_ema,
+                                        ## (chosen before the "if (use_resident_joint_block)" above, with the length-response criteria)
+                                        component_criterion_ema = criterion_state_for_this_update,
                                         ## LQ_ESSR: the interest rows index the main block, which leads the main and the joint block:
-                                        interest_rows = if (is_main || is_joint) interest_rows else NULL)
+                                        ## interest_rows = if (is_main || is_joint) interest_rows else NULL)
+                                        interest_rows = if (is_main || is_joint) interest_rows else NULL,
+                                        ## "LQ_ESSR_spectral" only (NULL for every other criterion):
+                                        ## step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update)
+                                        step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update,
+                                        ## debug = TRUE, main block: also return the spectral update's
+                                        ## complete arguments and inputs (the burn-in debug record below):
+                                        return_spectral_update_inputs = debug_record && is_main)
                                     }  ## end of: if (use_resident_joint_block)
+                                    ##
+                                    ## ---- burn-in debug record of this tau update (debug = TRUE only; main or
+                                    ##      joint block; R_fn_burnin_debug_record.R; a failure never changes the
+                                    ##      burn-in):
+                                    if (debug_record && (is_main || is_joint)) {
+                                        burnin_tau_update_records <-  fn_burnin_debug_record_add_tau_update(
+                                            record = burnin_tau_update_records,
+                                            iteration = ii,
+                                            block = adapted_block,
+                                            n_rows_in_block = n_params_main + if (is_joint) n_nuisance else 0,
+                                            centre_main = c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main),
+                                            proposal_centre_main = c(snaper_m_prop_vec_all[index_main]),
+                                            metric_factor_of_block = trajectory_metric[[adapted_block]],
+                                            tau_before_update = EHMC_args_as_Rcpp_List$tau_main,
+                                            eps_used_for_trajectories = eps_main_used_for_this_burnin_iteration,
+                                            eps_now = EHMC_args_as_Rcpp_List$eps_main,
+                                            use_proposals = isTRUE(tau_weight_by_p_jump),
+                                            interest_rows = interest_rows,
+                                            update = update)
+                                    }
                                     updated <- update$updated
                                     tau_adam_update_performed <- isTRUE(update$adam_update_performed)
                                     if (is_main || is_joint) {
@@ -5225,8 +5541,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                             if (burnin_algorithm == "ESJD_SNAPER") {
                                                 ## "ESJD_SNAPER": carry its ESJD/SNAPER component moving averages to the next update.
                                                 ESJD_SNAPER_component_criterion_ema <-  update$component_criterion_ema
-                                            } else if (burnin_algorithm == "LQ_ESSR") {
-                                                ## "LQ_ESSR": carry its per-coordinate moving averages to the next update.
+                                            ## } else if (burnin_algorithm == "LQ_ESSR") {
+                                            } else if (burnin_algorithm_carries_LQ_ESSR_component_criterion_ema) {
+                                                ## "LQ_ESSR": carry its per-coordinate moving averages to the next update
+                                                ## (the length-response criteria: their bins and moving averages).
                                                 LQ_ESSR_component_criterion_ema <-  update$component_criterion_ema
                                             } else {
                                                 ESJD_CHESSR_component_criterion_ema <-  update$component_criterion_ema
@@ -5268,12 +5586,27 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                 fn_lag_one_autocorrelation_rho_statistic_from_reductions( algorithm                  = burnin_algorithm,
                                                                                                           reductions_of_accepted_end = joint_reductions_of_accepted_end)
                                             } else {
-                                                fn_lag_one_autocorrelation_rho_statistic_per_chain( algorithm      = burnin_algorithm,
-                                                                                                    theta_initial  = theta_initial,
-                                                                                                    theta_accepted = theta_accepted,
-                                                                                                    mean_initial   = if (use_resident_joint_block) joint_mean_initial else c(initial_mean),
-                                                                                                    metric_factor  = if (use_resident_joint_block) joint_metric_factor else trajectory_metric[[adapted_block]],
-                                                                                                    direction      = if (use_resident_joint_block) joint_direction else trajectory_direction[[adapted_block]])
+                                                ## fn_lag_one_autocorrelation_rho_statistic_per_chain( algorithm      = burnin_algorithm,
+                                                ##                                                     theta_initial  = theta_initial,
+                                                ##                                                     theta_accepted = theta_accepted,
+                                                ##                                                     mean_initial   = if (use_resident_joint_block) joint_mean_initial else c(initial_mean),
+                                                ##                                                     metric_factor  = if (use_resident_joint_block) joint_metric_factor else trajectory_metric[[adapted_block]],
+                                                ##                                                     direction      = if (use_resident_joint_block) joint_direction else trajectory_direction[[adapted_block]])
+                                                ## (interest_only: the statistic over the interest rows of the main block)
+                                                fn_lag_one_autocorrelation_rho_statistic_per_chain(
+                                                    algorithm      = burnin_algorithm,
+                                                    theta_initial  = theta_initial,
+                                                    theta_accepted = theta_accepted,
+                                                    mean_initial   = if (use_resident_joint_block) {
+                                                                         joint_mean_initial
+                                                                     } else c(initial_mean),
+                                                    metric_factor  = if (use_resident_joint_block) {
+                                                                         joint_metric_factor
+                                                                     } else trajectory_metric[[adapted_block]],
+                                                    direction      = if (use_resident_joint_block) {
+                                                                         joint_direction
+                                                                     } else trajectory_direction[[adapted_block]],
+                                                    interest_rows  = if (is_main) interest_rows else NULL)
                                             }
                                         }, error = function(error_object) {
                                             message(colourise(paste0("lag_one_autocorrelation_rho = \"adaptive\" at iteration ", ii, ": the criterion statistic is not available (",
@@ -5333,7 +5666,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ESJD_SNAPER_component_criterion_ema <-  c(ESJD = NA_real_, SNAPER = NA_real_)
                                     }
                                     ## "LQ_ESSR": its per-coordinate moving averages restart at a new rung for the same reason:
-                                    if (burnin_algorithm == "LQ_ESSR" &&
+                                    ## if (burnin_algorithm == "LQ_ESSR" &&
+                                    if (burnin_algorithm_carries_LQ_ESSR_component_criterion_ema &&
                                         (tau_probe_state$rung != tau_probe_rung_before_step || !tau_probe_state$probing)) {
                                         LQ_ESSR_component_criterion_ema <-  NULL
                                     }
@@ -5785,7 +6119,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         bulk_local_tuner_metadata$nominal_tau_for_sampling <-  EHMC_args_as_Rcpp_List$tau_main
         bulk_local_tuner_metadata$eps_for_sampling <-  EHMC_args_as_Rcpp_List$eps_main
     }
-    return(list(n_chains_burnin = n_chains_burnin,
+    ## return(list(n_chains_burnin = n_chains_burnin,
+    burnin_result <-  list(n_chains_burnin = n_chains_burnin,
                 bulk_local_tuner_metadata = bulk_local_tuner_metadata,
                 burnin_profile = burnin_profile,
                 burnin_schedule = resolved_burnin_schedule,
@@ -5867,6 +6202,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 tau_adam_beta1_used = tau_adam_beta1,
                 tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
                 tau_learning_rate_restart_iteration = if (tau_learning_rate_restart_active) tau_learning_rate_restart_iter else NA_real_,
+                ## tau initial-LR hold from the handover: number of tau updates held at
+                ## learning_rate_initial (0 = off):
+                learning_rate_initial_n_tau_updates_held_from_tau_handover =
+                      if (tau_learning_rate_held_at_learning_rate_initial_from_tau_handover_active)
+                            learning_rate_initial_n_tau_updates_held_from_tau_handover else 0,
                 ## tau adaptation scheme (option NicoStan_tau_adaptation_scheme) and, for "probe_then_average", the probe (end iteration, rung
                 ## and tau after every probe update) and the averaged tau handed to sampling (NA for "adam_decay"):
                 tau_adaptation_scheme = tau_adaptation_scheme,
@@ -5910,7 +6250,22 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 theta_main_vectors_all_chains_input_from_R = theta_main_vectors_all_chains_input_from_R,
                 ##
                 theta_nuisance_vectors_all_chains_input_from_R = theta_us_vectors_all_chains_input_from_R,
-                theta_us_vectors_all_chains_input_from_R = theta_us_vectors_all_chains_input_from_R))
+                ## theta_us_vectors_all_chains_input_from_R = theta_us_vectors_all_chains_input_from_R))
+                theta_us_vectors_all_chains_input_from_R = theta_us_vectors_all_chains_input_from_R)
+    ##
+    ## ---- the burn-in debug record (debug = TRUE only; see its allocation): absent otherwise, so the
+    ##      burn-in object of every run without debug is unchanged:
+    if (debug_record) {
+          burnin_result$burnin_tau_main_ii_all_chains   <-  burnin_tau_main_ii_all_chains
+          burnin_result$burnin_eps_main_all_chains      <-  burnin_eps_main_all_chains
+          burnin_result$burnin_L_main_ii_all_chains     <-  burnin_L_main_ii_all_chains
+          burnin_result$burnin_div_main_all_chains      <-  burnin_div_main_all_chains
+          burnin_result$burnin_p_jump_main_all_chains   <-  burnin_p_jump_main_all_chains
+          burnin_result$burnin_start_main_all_chains    <-  burnin_start_main_all_chains
+          burnin_result$burnin_proposal_main_all_chains <-  burnin_proposal_main_all_chains
+          burnin_result$burnin_tau_update_records       <-  burnin_tau_update_records
+    }
+    return(burnin_result)
     
   
   

@@ -98,6 +98,15 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
               current_lp_grad_valid = false;
           }
  
+         //// debug = TRUE, sampling (6 Oct 2026): the buffers of each iteration's own trajectory length and
+         //// main-parameter proposal (empty otherwise):
+         const bool debug_record = EHMC_args_as_cpp_struct.debug && !burnin_indicator;
+         if (debug_record) {
+             HMC_output_single_chain_i.diagnostics_tau_main_ii().setZero(n_iter);
+             HMC_output_single_chain_i.diagnostics_L_main_ii().setZero(n_iter);
+             HMC_output_single_chain_i.diagnostics_proposal_main().setZero(n_params_main, n_iter);
+         }
+         
          ///////////////////////////////////////// perform iterations for adaptation interval
          ////// main iteration loop:
          for (int ii = 0; ii < n_iter; ++ii) {
@@ -118,6 +127,10 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                          fn_seed_sampling_rng(rng_main_i, seed_main_chain_i, chain_id, current_iter + ii, 0);
                          fn_seed_sampling_rng(rng_nuisance_i, seed_nuisance_chain_i, chain_id, current_iter + ii, 1);
                      }
+                     
+                     //// set by the sampler that runs this iteration's main-block trajectory (output only;
+                     //// 0 = not set):
+                     if (debug_record) EHMC_args_as_cpp_struct.L_main_ii = 0;
                      
                      if (partitioned_HMC == true) {
                    
@@ -234,6 +247,18 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                                              
                                  }
                                          
+                     }
+                     
+                     //// debug = TRUE, sampling (6 Oct 2026): this iteration's jittered main-block length
+                     //// (the joint trajectory when partitioned_HMC = FALSE), its number of leapfrog steps and
+                     //// the main-parameter proposal:
+                     if (debug_record) {
+                         HMC_output_single_chain_i.diagnostics_tau_main_ii()(ii) =
+                               EHMC_args_as_cpp_struct.tau_main_ii;
+                         HMC_output_single_chain_i.diagnostics_L_main_ii()(ii) =
+                               EHMC_args_as_cpp_struct.L_main_ii;
+                         HMC_output_single_chain_i.diagnostics_proposal_main().col(ii) =
+                               result_input.main_theta_vec_proposed();
                      }
                      
                      //// store iteration ii 

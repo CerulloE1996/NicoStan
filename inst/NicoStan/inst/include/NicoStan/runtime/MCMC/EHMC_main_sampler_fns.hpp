@@ -381,6 +381,7 @@ ALWAYS_INLINE  void                                        fn_standard_HMC_main_
                 // Compute L_ii:
                 int  L_ii = std::ceil(  EHMC_args_as_cpp_struct.tau_main_ii / EHMC_args_as_cpp_struct.eps_main );
                 if (L_ii < 1) { L_ii = 1 ; }
+                EHMC_args_as_cpp_struct.L_main_ii = L_ii;  //// recorded per iteration with debug = TRUE
                 
                 //// initial lp  (and grad)
                 fn_lp_grad_InPlace(     result_input.lp_and_grad_outs(), 

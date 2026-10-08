@@ -6,6 +6,7 @@
  
 
 #include <Eigen/Core>
+#include <exception>
 #include <unsupported/Eigen/CXX11/Tensor>
 
 #include <tbb/concurrent_vector.h>
@@ -84,6 +85,12 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
                               std::vector<Eigen::Matrix<double, -1, -1>> &trace_output_log_lik,
                               Eigen::Matrix<double, -1, -1> &p_jump_main_output,
                               Eigen::Matrix<double, -1, -1> &p_jump_nuisance_output,
+                              //// debug = TRUE (6 Oct 2026; left empty otherwise): each iteration's own
+                              //// trajectory length (iterations x chains) and each chain's main-parameter
+                              //// proposals:
+                              Eigen::Matrix<double, -1, -1> &tau_main_ii_output,
+                              Eigen::Matrix<int, -1, -1> &L_main_ii_output,
+                              std::vector<Eigen::Matrix<double, -1, -1>> &proposal_main_output,
                               const int n_threads_WCP
 ) {
         
@@ -189,8 +196,13 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
         printf("Max threads available: %d\n", omp_get_max_threads());
         
         //// parallel for-loop
+        //// An exception must never leave the OpenMP region (it would end the R process through std::terminate):
+        //// each chain runs inside a try; the exception of the first failing chain (in chain order) is rethrown
+        //// on the calling thread after the region (Rcpp then returns it to R as an error).
+        std::vector<std::exception_ptr> exception_thrown_in_chain(n_threads);
         #pragma omp parallel for shared(HMC_outputs, HMC_inputs, y_copies, Model_args_as_cpp_struct_copies, EHMC_args_as_cpp_struct_copies, EHMC_Metric_as_cpp_struct_copies, theta_main_vectors_all_chains_input_from_R_RcppPar, theta_us_vectors_all_chains_input_from_R_RcppPar)
         for (int i = 0; i < n_threads; ++i) {  
+                try {
                 
                 const int chain_id_int = static_cast<int>(i);
                 // const int seed_main_int_i =     global_seed_main_int +     n_iter*(1 + chain_id_int);
@@ -318,7 +330,13 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
                   
                 }
           
+                } catch (...) {
+                      exception_thrown_in_chain[i] = std::current_exception();
+                }
         }  //// end of parallel OpenMP loop
+        for (int i = 0; i < n_threads; ++i) {
+          if (exception_thrown_in_chain[i]) std::rethrow_exception(exception_thrown_in_chain[i]);
+        }
         
         #pragma omp barrier  // Make sure all threads are done before copying
         #pragma omp flush(HMC_outputs)  // Ensure all writes to HMC_outputs are visible
@@ -330,6 +348,17 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
               p_jump_main_output.col(i) = HMC_outputs[i].diagnostics_p_jump_main();
               if (sample_nuisance) {
                   p_jump_nuisance_output.col(i) = HMC_outputs[i].diagnostics_p_jump_us();
+              }
+              //// debug = TRUE (6 Oct 2026): each iteration's own trajectory length and main-parameter proposal:
+              if (EHMC_args_as_cpp_struct_copies[i].debug) {
+                  if (i == 0) {
+                      tau_main_ii_output.resize(n_iter, n_threads);
+                      L_main_ii_output.resize(n_iter, n_threads);
+                      proposal_main_output.resize(n_threads);
+                  }
+                  tau_main_ii_output.col(i) = HMC_outputs[i].diagnostics_tau_main_ii();
+                  L_main_ii_output.col(i) = HMC_outputs[i].diagnostics_L_main_ii();
+                  proposal_main_output[i] = HMC_outputs[i].diagnostics_proposal_main();
               }
           
               for (int ii = 0; ii < n_iter; ++ii) {

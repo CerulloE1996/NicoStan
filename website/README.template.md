@@ -14,6 +14,7 @@
 [How NicoStan works](#how-nicostan-works) ·
 [NicoStan's efficient burnin algorithms (SNAPER-HMC and ChEES-R-HMC)](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc) ·
 [LQ_ESSR trajectory-length criterion](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) ·
+[Spectral LQ_ESSR trajectory-length criterion](#spectral-lq_essr-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) ·
 [Custom AVX2 and AVX-512 functions](#custom-avx2-and-avx-512-functions) ·
 [How to cite NicoStan](#how-to-cite-nicostan) ·
 [How to cite BayesMVP](#how-to-cite-bayesmvp) ·
@@ -431,6 +432,159 @@ as well as convergence diagnostics (e.g., R-hat and nested R-hat [nR-hat]; [Marg
 alongside the computational settings.
 
 
+### Stan vs NicoStan (diffusion HMC and standard HMC) on eight general models
+
+
+We compared NicoStan with Stan (i.e., NUTS, via cmdstanr) on eight models,
+using the same Stan model files, data and initial values.
+Five of these models have a nuisance block -
+a stochastic volatility model (T = 1,000; SV), a shared-frailty Cox model (N = 250; COX),
+a latent diffusion survival model (N = 200; LDS), a joint longitudinal and survival model (N = 75; JLS)
+and a hierarchical logistic regression (N = 1,200; HLR) -
+and three do not -
+a Gaussian process regression (N = 80; GP), a Weibull survival model (N = 250; WEI)
+and a robust regression with t₄ errors (N = 1,000; RT4).
+For the models with a nuisance block, NicoStan sampled the nuisance block using either diffusion HMC
+(i.e., hybrid HMC; NicoStan's default) or standard HMC;
+for the models without one, NicoStan samples all of the parameters using standard HMC.
+
+
+Stan used 4 chains, each with 1,000 warm-up and 1,000 sampling iterations
+(adapt_delta = 0.9, or 0.999 for SV; maximum tree depth 10; diagonal metric).
+NicoStan used 4 burnin chains (with burnins of 500, 250 or 125 iterations),
+followed by 16 sampling chains of 250 iterations each (i.e., 4,000 draws in total, the same as for Stan),
+with its default trajectory-length criterion (ChEES-R).
+
+
+The table below shows, for each model and NicoStan burnin length,
+the number of gradient evaluations (in thousands, including the burnin or warm-up) needed to reach
+a minimum ESS of 1,000 / the minimum ESS per 1,000 sampling gradient evaluations
+(geometric means over 10 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
+i.e., of the SD, of the main parameters).
+**Bold**: the best of the row for each endpoint (and any within 1% of it).
+
+
+| Model | NicoStan burnin | Stan (NUTS, 1,000 warm-up) | NicoStan, diffusion HMC | NicoStan, standard HMC |
+|---|---|---|---|---|
+| SV | 500 | 1162.0 / 1.4 | **86.7** / **15.3** | 114.3 / 10.8 |
+|  | 250 |  | **85.7** / **13.6** | 116.5 / 9.7 |
+|  | 125 |  | **83.0** / **13.3** | 134.1 / 7.9 |
+| COX | 500 | 123.1 / 18.7 | **39.6** / **38.9** | 52.3 / 27.5 |
+|  | 250 |  | **43.2** / **29.3** | 53.4 / 22.4 |
+|  | 125 |  | **39.2** / **30.4** | 44.2 / 25.6 |
+| LDS | 500 | 919.5¹ / 1.6 | 213.5 / 5.4 | **179.1** / **6.7** |
+|  | 250 |  | 206.0 / 5.3 | **148.7** / **7.6** |
+|  | 125 |  | 220.0 / 4.8 | **209.2** / **5.0** |
+| JLS | 500 | 549.0 / 6.2 | **133.6** / **9.4** | 175.2 / 6.7 |
+|  | 250 |  | **120.4** / **9.6** | **121.3** / **9.5** |
+|  | 125 |  | 100.4 / 11.0 | **98.9** / **11.2** |
+| HLR | 500 | 251.3 / 8.2 | **80.4** / **16.4** | 84.6 / 15.3 |
+|  | 250 |  | **71.1** / **16.7** | 75.5 / 15.5 |
+|  | 125 |  | **65.7** / **16.8** | 75.4 / 14.6 |
+| GP | 500 | 48.0 / 57.0 | (no nuisance block) | **20.2** / **96.4** |
+|  | 250 |  | (no nuisance block) | **15.7** / **106.8** |
+|  | 125 |  | (no nuisance block) | **15.5** / **90.5** |
+| WEI | 500 | 42.8 / 68.2 | (no nuisance block) | **18.2** / **108.5** |
+|  | 250 |  | (no nuisance block) | **14.5** / **116.8** |
+|  | 125 |  | (no nuisance block) | **14.5** / **100.7** |
+| RT4 | 500 | 35.2 / 76.2 | (no nuisance block) | **13.4** / **201.2** |
+|  | 250 |  | (no nuisance block) | **10.7** / **196.3** |
+|  | 125 |  | (no nuisance block) | **10.5** / **169.1** |
+
+
+¹ One of Stan's 10 LDS fits did not converge (maximum R-hat 1.31) and needed 24.3 million gradient evaluations;
+without it, Stan's geometric mean for LDS is 639.0 thousand.
+
+
+NicoStan needed fewer gradient evaluations than Stan to reach a minimum ESS of 1,000
+for every model, burnin length and sampler:
+between 2.4× and 3.4× fewer for the models without a nuisance block,
+and between 2.3× and 14.0× fewer for the models with one
+(the largest difference being for SV, for which Stan used adapt_delta = 0.999).
+
+
+Furthermore, diffusion HMC needed fewer gradient evaluations than standard HMC for SV, COX and HLR
+at every burnin length (up to 1.62× fewer), and for JLS with a 500-iteration burnin (1.31× fewer);
+however, for JLS with the two shorter burnins, the two samplers were within 1.5% of each other,
+and for LDS, standard HMC was better at every burnin length.
+
+
+Note that:
+
+- We counted Stan's gradient evaluations as its number of leapfrog steps,
+and NicoStan's as the expected number of leapfrog steps of its (jittered) trajectories,
+plus one for every iteration in which the sampler evaluates the gradient at the start of the trajectory
+(i.e., during the burnin, for standard HMC, and for the models without a nuisance block).
+- NicoStan's chains are short (16 chains of 250 draws); hence, its (plain) R-hat values are above 1 even at stationarity.
+More specifically, the median of each fit's maximum R-hat (1.006 to 1.041, per model and sampler)
+was close to the value implied at stationarity by the fit's own ESS (1.003 to 1.051).
+- NicoStan had divergent transitions in 14 (diffusion HMC) and 9 (standard HMC) of its 150 LDS fits
+(22 and 10 in total, out of 4,000 draws per fit), and in 5 of its 600 HLR and SV fits (6 in total);
+Stan had none.
+
+
+### Trajectory-length criteria within NicoStan
+
+
+On the same eight models, we also compared NicoStan's trajectory-length criteria:
+the spectral LQ_ESSR criterion (see [Spectral LQ_ESSR](#spectral-lq_essr-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below),
+ChEES-R (NicoStan's default), ESJD, SNAPER and the geometric mean of ESJD and SNAPER (`"ESJD_SNAPER"`).
+For the models with a nuisance block, we ran every criterion with both diffusion HMC and standard HMC;
+hence, with burnins of 500, 250 and 125 iterations,
+there were 39 cells (i.e., combinations of model, sampler and burnin length), with 10 seeds per cell.
+
+
+For each cell, we computed each criterion's loss relative to the best criterion of the cell
+(for the gradient evaluations needed to reach a minimum ESS of 1,000, the criterion's divided by the best;
+for the minimum ESS per gradient, the best divided by the criterion's),
+and whether it was within noise of the best
+(i.e., whether the 95% interval of its matched-seed ratio to the best criterion included 1).
+The tables below give the geometric mean of the losses over the 39 cells ("mean loss"), the worst loss,
+and the number of cells in which the criterion was best or within noise of the best.
+
+
+**Ordered by the gradient evaluations needed to reach the target:**
+
+| Criterion | Gradients to target: mean loss | worst loss | best or within noise | ESS per gradient: mean loss | worst loss | best or within noise |
+|---|---|---|---|---|---|---|
+| ESJD | 1.086 | 1.56 | 34/39 | 1.105 | 1.69 | 35/39 |
+| spectral LQ_ESSR | 1.088 | 1.50 | 35/39 | 1.085 | 1.55 | 37/39 |
+| ESJD_SNAPER | 1.098 | 1.42 | 34/39 | 1.128 | 1.49 | 33/39 |
+| SNAPER | 1.130 | 1.65 | 31/39 | 1.166 | 1.76 | 31/39 |
+| ChEES-R (default) | 1.141 | 1.71 | 30/39 | 1.188 | 2.04 | 30/39 |
+
+**Ordered by the minimum ESS per gradient:**
+
+| Criterion | Gradients to target: mean loss | worst loss | best or within noise | ESS per gradient: mean loss | worst loss | best or within noise |
+|---|---|---|---|---|---|---|
+| spectral LQ_ESSR | 1.088 | 1.50 | 35/39 | 1.085 | 1.55 | 37/39 |
+| ESJD | 1.086 | 1.56 | 34/39 | 1.105 | 1.69 | 35/39 |
+| ESJD_SNAPER | 1.098 | 1.42 | 34/39 | 1.128 | 1.49 | 33/39 |
+| SNAPER | 1.130 | 1.65 | 31/39 | 1.166 | 1.76 | 31/39 |
+| ChEES-R (default) | 1.141 | 1.71 | 30/39 | 1.188 | 2.04 | 30/39 |
+
+
+The spectral LQ_ESSR criterion and ESJD were essentially joint-best for the gradient evaluations
+needed to reach the target (1.088 vs. 1.086; within 1% of each other),
+and the spectral LQ_ESSR criterion had the smallest loss for the minimum ESS per gradient
+(1.085, vs. 1.105 for ESJD);
+it was also best or within noise of the best in the most cells (35 and 37 of the 39 cells, respectively).
+
+
+However, no criterion was uniformly best:
+ESJD_SNAPER had the smallest worst-case losses (1.42 and 1.49, vs. 1.50 and 1.55 for the spectral LQ_ESSR criterion);
+ESJD and ESJD_SNAPER were essentially joint-best for the models without a nuisance block;
+and, when the nuisance block was sampled using standard HMC,
+ESJD was best for the gradient evaluations needed to reach the target (1.110, vs. 1.128),
+whilst the spectral LQ_ESSR criterion was best for the minimum ESS per gradient (1.119, vs. 1.130).
+
+
+On the other hand, when the nuisance block was sampled using diffusion HMC,
+the spectral LQ_ESSR criterion was best on average for both endpoints
+(1.083 and 1.075, vs. 1.104 and 1.125 for ESJD),
+with the smallest worst-case losses (1.20 and 1.19).
+
+
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## Models with nuisance parameters (diffusion-pathspace HMC)
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -663,21 +817,25 @@ Use `burnin_algorithm` to choose the trajectory-length adaptation algorithm:
 
 
 - `CHEESR` (**ChEES-R**): The original ChEES-rate criterion,
-using the squared change in the main block's centred squared radius per realised trajectory length.
+using the squared change in the monitored parameters' centred squared radius per realised trajectory length.
 Proposed by [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
 - `SNAPER` (**SNAPER**): Learns a difficult main-parameter direction,
 and adapts the trajectory length using squared changes along that direction per unit length.
 Proposed by [Sountsov and Hoffman, 2022](https://arxiv.org/abs/2110.11576v3).
-- `ChEES` (**ChEES**): Uses the squared change in the main block's centred squared radius,
+- `ChEES` (**ChEES**): Uses the squared change in the monitored parameters' centred squared radius,
 without dividing by trajectory length.
 Proposed by [Hoffman et al., 2021](https://proceedings.mlr.press/v130/hoffman21a.html).
-- `ESJD` (**ESJD rate**): Uses the squared jumped distance of the adapted parameters
+- `ESJD` (**ESJD rate**): Uses the squared jumped distance of the monitored parameters
 (in the coordinates defined by the current mass matrix) per unit trajectory length,
 i.e., each trajectory's squared jump divided by its own length.
 Based on the expected squared jumped distance of Pasarica and Gelman, 2010.
 - `LQ_ESSR` (**LQ_ESSR**): Experimental; the soft minimum, over the monitored parameters,
 of the lag-one ESS bounds of the linear and quadratic statistics, per unit trajectory length
 (see [LQ_ESSR](#lq_essr-a-linearquadratic-ess-rate-trajectory-length-criterion) below).
+- `LQ_ESSR_spec_bins99_evid_expand` (**spectral LQ_ESSR**): Experimental; LQ_ESSR with the ESS of the linear
+statistics estimated from the spectrum of each parameter's motion
+(i.e., from how quickly it decorrelates as a function of the trajectory length), per gradient evaluation
+(see [Spectral LQ_ESSR](#spectral-lq_essr-a-spectral-linearquadratic-ess-rate-trajectory-length-criterion) below).
 
 
 ChEES measures squared changes in the centred squared radius of the parameter vector
@@ -694,6 +852,21 @@ The position-based criteria use the main parameters in coordinates defined by th
 <!-- If `BᵀB = M`, these coordinates are `z = B(θ - μ)`.  -->
 <!-- Both diagonal and dense main-parameter metrics are supported, -->
 <!-- and SNAPER-HMC learns its direction in the same coordinates. -->
+
+
+By default, the trajectory-length criterion monitors every main parameter;
+however, for the LC-MVP and LC-MVOP models of the [BayesMVP extension](#bayesmvp-multivariate-probit-models)
+(`Model_type = "LC_MVP"` and `"LC_MVOP"`),
+it instead monitors the parameters which test sensitivity, specificity and disease prevalence depend on -
+more specifically, `beta` and `p_raw` for the LC-MVP, and `beta`, `p_raw` and `C_unc_vec` for the LC-MVOP.
+Note that `beta` contains the class-specific coefficients of the latent test variables
+(i.e., their means, when there are no covariates), which give each test's sensitivity and specificity,
+and `p_raw` is the disease prevalence (on the unconstrained scale);
+for the ordinal tests of the LC-MVOP, the sensitivity and specificity at each threshold
+also depend on the cutpoints (`C_unc_vec`, on the unconstrained scale).
+For any model and any `burnin_algorithm`, `interest_only` (e.g., `interest_only = c("beta", "p_raw")`)
+restricts the criterion to the named main-parameter families,
+whilst `tau_adaptation_block = "main"` (without `interest_only`) monitors every main parameter.
 
 
 We checked NicoStan's SNAPER and ChEES-R implementations against the authors' own JAX implementation
@@ -737,7 +910,8 @@ you can instead set $\tau$ manually, by specifying `manual_tau = TRUE`, and it's
 
 
 NicoStan also offers an experimental criterion, `burnin_algorithm = "LQ_ESSR"` (the linear/quadratic ESS rate),
-which targets the **worst**-mixing parameter, rather than a single summary of the whole parameter vector
+which targets the **worst**-mixing monitored parameters - via a soft minimum -
+rather than a single summary of all of them
 (as ESJD, ChEES-R and SNAPER do):
 
 - For each monitored parameter (in the coordinates defined by the current mass matrix),
@@ -750,10 +924,9 @@ the bound is exact along the normal modes of a Gaussian target with exact dynami
 - The criterion is the soft minimum of all of these bounds (i.e., of two bounds per parameter),
 divided by the mean trajectory length; hence, good mixing of the posterior means cannot compensate
 for poor mixing of the squared deviations, and the best-mixing parameters cannot hide the worst ones.
-- By default, every parameter of the adapted block is monitored;
-alternatively, `interest_only` (e.g., `interest_only = c("beta", "p_raw")`) restricts the criterion
-to the named main-parameter families (with `tau_adaptation_block = "main"`).
-- On our binary LC-MVP model (N = 10,000; 3 seeds per configuration), with a 125-iteration burnin,
+- The monitored parameters are chosen in the same way as for the other criteria
+(see [Trajectory-length adaptation algorithms](#hmc-trajectory-length-tau-adaptation-algorithms) above).
+<!-- - On our binary LC-MVP model (N = 10,000; 3 seeds per configuration), with a 125-iteration burnin,
 LQ_ESSR needed fewer gradients than ESJD to reach a minimum ESS of 1,000
 (0.87 [95% CI: 0.82, 0.92] times, averaged over the grid) and had a higher minimum ESS per 1,000 gradients
 (1.17 [1.10, 1.25] times); however, the single best configuration was an ESJD one
@@ -763,7 +936,7 @@ With a 500-iteration burnin, LQ_ESSR was level with ESJD on average
 (1.00 [0.93, 1.07] times the gradients; 0.99 [0.92, 1.07] times the minimum ESS per 1,000 gradients),
 whilst its best configuration was the best of all on both endpoints
 (85.3 thousand gradients; 16.34 minimum ESS per 1,000 gradients),
-although the best configuration of every other criterion was within seed noise of it.
+although the best configuration of every other criterion was within seed noise of it. -->
 
 
 The table below compares LQ_ESSR with the other trajectory-length criteria in NicoStan.
@@ -774,17 +947,56 @@ by default, every criterion weights each chain's proposal by its acceptance prob
 
 | `burnin_algorithm` | What it maximises | Per unit trajectory length? | Statistic used | Means (bulk) vs. second moments (tail)¹ | τ gradient estimator | Cost normalisation |
 | --- | --- | --- | --- | --- | --- | --- |
-| `"ESJD"` | Expected squared jumped distance rate | Yes (each trajectory's jump ÷ its own t) | Jump distance, ‖z′ − z₀‖², over all coordinates | Means (linear), averaged over all coordinates | End-point (default) or both ends (`tau_gradient_estimator = "two_ended"`) | ÷ t (optional step offset² and `tau_cost_exponent`) |
-| `"ChEES"` | Expected squared change in the centred squared radius, ½‖z − m‖² | No (per iteration) | Squared radius of all coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | None |
-| `"CHESSR"` (ChEES-R) | ChEES per unit trajectory length | Yes (÷ its own t) | Squared radius of all coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
+| `"ESJD"` | Expected squared jumped distance rate | Yes (each trajectory's jump ÷ its own t) | Jump distance, ‖z′ − z₀‖², over all monitored coordinates | Means (linear), averaged over all monitored coordinates | End-point (default) or both ends (`tau_gradient_estimator = "two_ended"`) | ÷ t (optional step offset² and `tau_cost_exponent`) |
+| `"ChEES"` | Expected squared change in the centred squared radius, ½‖z − m‖² | No (per iteration) | Squared radius of all monitored coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | None |
+| `"CHESSR"` (ChEES-R) | ChEES per unit trajectory length | Yes (÷ its own t) | Squared radius of all monitored coordinates | Second moments (quadratic), weighted towards the largest-variance directions | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
 | `"SNAPER"` | Expected squared change in (wᵀ(z − m))² per unit trajectory length | Yes (÷ its own t) | Squared projection onto a learned leading principal direction, w | Second moments (quadratic), along one direction | End-point (default) or both ends | ÷ t (optional step offset² and `tau_cost_exponent`) |
 | `"LQ_ESSR"` | Soft minimum of the lag-one ESS bounds, (1 − ρ)/(1 + ρ), per unit trajectory length | Yes (÷ the mean t over the chains) | Per-coordinate jumps of z and of its squared deviation, converted into ESS bounds | Both (linear and quadratic), for the worst coordinate | End-point only | ÷ mean t (optional step offset² and `tau_cost_exponent`) |
+| `"LQ_ESSR_spec_bins99_evid_expand"` (spectral LQ_ESSR) | Soft minimum of the per-coordinate ESS fractions, per gradient evaluation | Per gradient evaluation (÷ the expected number of leapfrog steps) | Per-coordinate squared jumps of z, binned by trajectory length and fitted by a mixture of cosines (linear); jumps of the squared deviation, as for LQ_ESSR (quadratic) | Both (linear and quadratic), for the worst coordinate | None (a grid of candidate lengths; τ moves part of the way towards the best) | ÷ expected leapfrog steps |
 
 
 ¹ "Second moments" refers to the squared (quadratic) statistics, which are closer to the tail ESS than the means;
 however, they are not the same as the quantile-based tail ESS.
 
 ² Via the R option `NicoStan_rate_criterion_cost_offset_steps` (0, i.e., no offset, by default).
+
+
+### Spectral LQ_ESSR: a spectral linear/quadratic ESS-rate trajectory-length criterion
+
+
+NicoStan also offers a spectral version of LQ_ESSR, `burnin_algorithm = "LQ_ESSR_spec_bins99_evid_expand"`
+(the spectral LQ_ESSR), which keeps the soft minimum over the monitored parameters
+(and over the linear and quadratic statistics),
+but estimates the ESS of the linear statistics from the **spectrum** of each parameter's motion -
+i.e., from how quickly it decorrelates as a function of the trajectory length -
+rather than from its lag-one autocorrelation alone:
+
+- The proposals of the burnin chains are binned by their (jittered) trajectory length, t
+(in bins a quarter of a doubling wide), and each monitored parameter's mean squared jump is tracked per bin,
+with older updates down-weighted (by a factor of 0.99 per update).
+- For each parameter, a mixture of cosines, m(t) = Σₖ wₖ (1 − cos ωₖt) (with Σₖ wₖ = 1),
+is fitted to these binned jumps by non-negative least squares;
+in other words, each parameter's motion is split into "modes", with frequencies ωₖ and weights wₖ.
+- The autocorrelation of each mode at a candidate trajectory length, λₖ,
+follows from the (running) mean acceptance probability and the jitter,
+and the ESS per draw of the parameter is then 1 / Σₖ wₖ (1 + λₖ)/(1 − λₖ).
+For a Gaussian target with exact dynamics, this is exact for each normal mode;
+furthermore, it corrects the optimism of the lag-one bound for parameters which combine fast and slow modes.
+- The quadratic statistics (squared deviations) keep the lag-one ESS bound of LQ_ESSR.
+- The criterion is the soft minimum of all of these ESS fractions, divided by the expected number of leapfrog steps
+(i.e., per gradient evaluation), over a grid of candidate trajectory lengths;
+τ then moves part of the way towards the best candidate at each burnin iteration,
+and moves beyond the longest trajectory lengths tried so far only if a (parametric) bootstrap
+shows evidence that the criterion is still rising.
+
+
+In our benchmark on eight models
+(see [Trajectory-length criteria within NicoStan](#trajectory-length-criteria-within-nicostan)),
+the spectral LQ_ESSR criterion was essentially joint-best with ESJD
+for the number of gradient evaluations needed to reach a minimum ESS of 1,000,
+and it was best on average for the minimum ESS per gradient,
+as well as when the nuisance block was sampled using diffusion HMC;
+however, no criterion was uniformly best.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->

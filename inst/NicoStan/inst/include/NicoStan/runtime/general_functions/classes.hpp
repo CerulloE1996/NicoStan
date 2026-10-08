@@ -247,6 +247,12 @@ class HMC_output_single_chain {
                 Eigen::Matrix<int, -1, 1> div_main;
                 Eigen::Matrix<double, -1, 1> p_jump_us;
                 Eigen::Matrix<double, -1, 1> p_jump_main;
+                //// debug = TRUE only (6 Oct 2026; empty otherwise): each iteration's jittered main-block
+                //// length tau_main_ii, its number of leapfrog steps L_main_ii and the main-parameter proposal
+                //// (the end of the trajectory, before the accept / reject step; parameters x iterations):
+                Eigen::Matrix<double, -1, 1> tau_main_ii;
+                Eigen::Matrix<int, -1, 1> L_main_ii;
+                Eigen::Matrix<double, -1, -1> proposal_main;
                 
                 DiagnosticBuffers(int n_iter)
                   : div_us(Eigen::Matrix<int, -1, 1>::Zero(n_iter))
@@ -394,6 +400,9 @@ class HMC_output_single_chain {
           Eigen::Matrix<int, -1, 1> &diagnostics_div_main() { return diagnostics_.div_main; }
           Eigen::Matrix<double, -1, 1> &diagnostics_p_jump_us() { return diagnostics_.p_jump_us; }
           Eigen::Matrix<double, -1, 1> &diagnostics_p_jump_main() { return diagnostics_.p_jump_main; }
+          Eigen::Matrix<double, -1, 1> &diagnostics_tau_main_ii() { return diagnostics_.tau_main_ii; }
+          Eigen::Matrix<int, -1, 1> &diagnostics_L_main_ii() { return diagnostics_.L_main_ii; }
+          Eigen::Matrix<double, -1, -1> &diagnostics_proposal_main() { return diagnostics_.proposal_main; }
           
           //// More getters:
           bool using_disk() const { return use_disk_; }

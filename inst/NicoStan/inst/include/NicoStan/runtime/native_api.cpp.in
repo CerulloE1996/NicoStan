@@ -540,6 +540,11 @@ EHMC_fn_args_struct convert_R_List_EHMC_fn_args_struct(Rcpp::List R_List) {
         if (R_List.containsElementNamed("store_log_lik_trace")) {
           EHMC_args_as_cpp_struct.store_log_lik_trace = Rcpp::as<bool>(R_List["store_log_lik_trace"]);
         }
+        //// debug = TRUE (optional list element; FALSE if absent): the sampling phase records each
+        //// iteration's own trajectory length and main-parameter proposal (6 Oct 2026):
+        if (R_List.containsElementNamed("debug")) {
+          EHMC_args_as_cpp_struct.debug = Rcpp::as<bool>(R_List["debug"]);
+        }
         
         return EHMC_args_as_cpp_struct;
 
@@ -2370,6 +2375,16 @@ Rcpp::List Rcpp_fn_RcppParallel_EHMC_sampling( const int n_threads_R,
 
     const auto chains_done_time = std::chrono::steady_clock::now();
 
+    //// debug = TRUE (6 Oct 2026): each iteration's own trajectory length and main-parameter proposal, copied
+    //// before move_results_to_output() clears the chains' outputs:
+    Eigen::Matrix<double, -1, -1> tau_main_ii_output;
+    Eigen::Matrix<int, -1, -1> L_main_ii_output;
+    std::vector<Eigen::Matrix<double, -1, -1>> proposal_main_output;
+    if (EHMC_args_as_cpp_struct.debug) {
+        parallel_hmc_sampling.copy_debug_record_to_output(tau_main_ii_output, L_main_ii_output,
+                                                          proposal_main_output);
+    }
+
     ////  copy / store trace:
     Eigen::Matrix<double, -1, -1> p_jump_main_output, p_jump_nuisance_output;
     parallel_hmc_sampling.move_results_to_output(p_jump_main_output, p_jump_nuisance_output);
@@ -2385,6 +2400,19 @@ Rcpp::List Rcpp_fn_RcppParallel_EHMC_sampling( const int n_threads_R,
     const double zero_dbl = 0.0;
    
     //// Return results:
+    //// sampling diagnostics: the acceptance probabilities and, with debug = TRUE (6 Oct 2026), each iteration's
+    //// own trajectory length (iterations x chains), the step size of every sampling trajectory and each chain's
+    //// main-parameter proposals (parameters x iterations):
+    Rcpp::List sampling_diagnostics = Rcpp::List::create(
+        Rcpp::Named("p_jump_main") = p_jump_main_output,
+        Rcpp::Named("p_jump_nuisance") = p_jump_nuisance_output);
+    if (EHMC_args_as_cpp_struct.debug) {
+        sampling_diagnostics["tau_main_ii"] = tau_main_ii_output;
+        sampling_diagnostics["L_main_ii"] = L_main_ii_output;
+        sampling_diagnostics["eps_main"] = EHMC_args_as_cpp_struct.eps_main;
+        sampling_diagnostics["proposal_main"] = proposal_main_output;
+    }
+
     Rcpp::List sampling_results_list = Rcpp::List::create( trace_output,
                                trace_output_divs,
                                trace_output_nuisance,
@@ -2392,9 +2420,12 @@ Rcpp::List Rcpp_fn_RcppParallel_EHMC_sampling( const int n_threads_R,
                                zero_dbl,
                                trace_output_log_lik,
                                // Append only: existing positional result entries 1 .. 6 are unchanged.
-                               Rcpp::Named("sampling_diagnostics") = Rcpp::List::create(
-                                   Rcpp::Named("p_jump_main") = p_jump_main_output,
-                                   Rcpp::Named("p_jump_nuisance") = p_jump_nuisance_output)
+                               // Rcpp::Named("sampling_diagnostics") = Rcpp::List::create(
+                               //     Rcpp::Named("p_jump_main") = p_jump_main_output,
+                               //     Rcpp::Named("p_jump_nuisance") = p_jump_nuisance_output)
+                               // );
+                               //// (6 Oct 2026: the same list, built above, with the debug record)
+                               Rcpp::Named("sampling_diagnostics") = sampling_diagnostics
                                );
 
     //// ---- where the sampling wall time went. Chain start/end times are relative to the start of parallelFor;
@@ -4599,6 +4630,10 @@ Rcpp::List                                   Rcpp_fn_OpenMP_EHMC_sampling(      
             // PinningObserver pin_observer(core_ids);
 
             Eigen::Matrix<double, -1, -1> p_jump_main_output, p_jump_nuisance_output;
+            //// debug = TRUE (6 Oct 2026): each iteration's own trajectory length and main-parameter proposal:
+            Eigen::Matrix<double, -1, -1> tau_main_ii_output;
+            Eigen::Matrix<int, -1, -1> L_main_ii_output;
+            std::vector<Eigen::Matrix<double, -1, -1>> proposal_main_output;
             EHMC_sampling_OpenMP(    n_threads_R,
                                      global_seed_R_uint64_t,
                                      n_iter_R,
@@ -4626,6 +4661,9 @@ Rcpp::List                                   Rcpp_fn_OpenMP_EHMC_sampling(      
                                      trace_output_log_lik,
                                      p_jump_main_output,
                                      p_jump_nuisance_output,
+                                     tau_main_ii_output,
+                                     L_main_ii_output,
+                                     proposal_main_output,
                                      ////
                                      n_threads_WCP);
 
@@ -4634,6 +4672,19 @@ Rcpp::List                                   Rcpp_fn_OpenMP_EHMC_sampling(      
           //
           // //// Reset everything:
           // parallel_hmc_sampling.reset();
+
+          //// sampling diagnostics: the acceptance probabilities and, with debug = TRUE (6 Oct 2026), each
+          //// iteration's own trajectory length, the sampling step size and each chain's main-parameter
+          //// proposals:
+          Rcpp::List sampling_diagnostics = Rcpp::List::create(
+              Rcpp::Named("p_jump_main") = p_jump_main_output,
+              Rcpp::Named("p_jump_nuisance") = p_jump_nuisance_output);
+          if (EHMC_args_as_cpp_struct.debug) {
+              sampling_diagnostics["tau_main_ii"] = tau_main_ii_output;
+              sampling_diagnostics["L_main_ii"] = L_main_ii_output;
+              sampling_diagnostics["eps_main"] = EHMC_args_as_cpp_struct.eps_main;
+              sampling_diagnostics["proposal_main"] = proposal_main_output;
+          }
 
           const double zero_dbl = 0.0;
 
@@ -4645,9 +4696,11 @@ Rcpp::List                                   Rcpp_fn_OpenMP_EHMC_sampling(      
                                      zero_dbl,
                                      trace_output_log_lik,
                                      // Append only: same diagnostic layout as the RcppParallel backend.
-                                     Rcpp::Named("sampling_diagnostics") = Rcpp::List::create(
-                                         Rcpp::Named("p_jump_main") = p_jump_main_output,
-                                         Rcpp::Named("p_jump_nuisance") = p_jump_nuisance_output));
+                                     // Rcpp::Named("sampling_diagnostics") = Rcpp::List::create(
+                                     //     Rcpp::Named("p_jump_main") = p_jump_main_output,
+                                     //     Rcpp::Named("p_jump_nuisance") = p_jump_nuisance_output));
+                                     //// (6 Oct 2026: the same list, built above, with the debug record)
+                                     Rcpp::Named("sampling_diagnostics") = sampling_diagnostics);
 
 }
 

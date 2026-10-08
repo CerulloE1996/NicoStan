@@ -266,6 +266,7 @@ ALWAYS_INLINE  void                         fn_standard_HMC_dual_single_iter_InP
           //
           int    L_ii = std::ceil( EHMC_args_as_cpp_struct.tau_main_ii / EHMC_args_as_cpp_struct.eps_main );
           if (L_ii < 1) { L_ii = 1 ; }
+          EHMC_args_as_cpp_struct.L_main_ii = L_ii;  //// recorded per iteration with debug = TRUE
           
           
           //// initial lp  
@@ -952,6 +953,7 @@ ALWAYS_INLINE void fn_diffusion_HMC_dual_single_iter_InPlace_process(    HMCResu
           }
           int L_ii = std::ceil(EHMC_args_as_cpp_struct.tau_main_ii / EHMC_args_as_cpp_struct.eps_main);
           if (L_ii < 1) { L_ii = 1; }
+          EHMC_args_as_cpp_struct.L_main_ii = L_ii;  //// recorded per iteration with debug = TRUE
           
           // ---- Initial lp: BOTH orderings reuse the current-state evaluation within a caller-owned
           // sequence of trajectories for the same target. It is valid for KFK exactly as for FKF: the

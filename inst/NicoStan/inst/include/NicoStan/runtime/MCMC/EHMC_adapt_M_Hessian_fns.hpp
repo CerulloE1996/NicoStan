@@ -4,6 +4,7 @@
  
 
 #include <Eigen/Dense>
+#include <exception>
  
  
  
@@ -176,6 +177,11 @@ Eigen::Matrix<double, -1, -1> num_diff_Hessian_main_given_nuisance_parallel(   c
           
           Eigen::Matrix<double, -1, -1> Hessian(n_params_main, n_params_main);
           
+          //// An exception must never leave the OpenMP region (it would end the R process through
+          //// std::terminate): the per-thread set-up and each column j run inside a try; the exception of the
+          //// first failing column (in column order) is rethrown on the calling thread after the region, as the
+          //// serial loop would throw it.
+          std::vector<std::exception_ptr> exception_thrown_in_column(n_params_main);
           #pragma omp parallel num_threads(n_threads)
           {
                 stan::math::ChainableStack ad_tape;
@@ -183,17 +189,39 @@ Eigen::Matrix<double, -1, -1> num_diff_Hessian_main_given_nuisance_parallel(   c
                 const int tid = omp_get_thread_num();
                 
                 // Thread-local buffers
-                Eigen::Matrix<double, -1, 1> lp_and_grad_outs = Eigen::Matrix<double, -1, 1>::Zero(1 + N + n_params);
-                Eigen::Matrix<double, -1, 1> theta_perturbed = theta_main_vec_ref;
-                Eigen::Matrix<double, -1, 1> grad_plus(n_params_main);
-                Eigen::Matrix<double, -1, 1> grad_minus(n_params_main);
+             // Eigen::Matrix<double, -1, 1> lp_and_grad_outs = Eigen::Matrix<double, -1, 1>::Zero(1 + N + n_params);
+             // Eigen::Matrix<double, -1, 1> theta_perturbed = theta_main_vec_ref;
+             // Eigen::Matrix<double, -1, 1> grad_plus(n_params_main);
+             // Eigen::Matrix<double, -1, 1> grad_minus(n_params_main);
+                //// (the 4 buffers above, now allocated inside the try below)
+                Eigen::Matrix<double, -1, 1> lp_and_grad_outs;
+                Eigen::Matrix<double, -1, 1> theta_perturbed;
+                Eigen::Matrix<double, -1, 1> grad_plus;
+                Eigen::Matrix<double, -1, 1> grad_minus;
                 
                 // Thread-local workspace (wrapped in vector for fn_lp_grad_InPlace signature)
-                std::vector<LC_MVP_workspace_struct> ws_vec(1);
-                ws_vec[0] = LC_MVP_ws_structs_per_thread[tid];
+             // std::vector<LC_MVP_workspace_struct> ws_vec(1);
+             // ws_vec[0] = LC_MVP_ws_structs_per_thread[tid];
+                std::vector<LC_MVP_workspace_struct> ws_vec;
+                std::exception_ptr exception_thrown_in_set_up_of_this_thread;
+                try {
+                      lp_and_grad_outs = Eigen::Matrix<double, -1, 1>::Zero(1 + N + n_params);
+                      theta_perturbed = theta_main_vec_ref;
+                      grad_plus.resize(n_params_main);
+                      grad_minus.resize(n_params_main);
+                      ws_vec.resize(1);
+                      ws_vec[0] = LC_MVP_ws_structs_per_thread[tid];
+                } catch (...) {
+                      exception_thrown_in_set_up_of_this_thread = std::current_exception();
+                }
                 
                 #pragma omp for schedule(dynamic)
                 for (int j = 0; j < n_params_main; ++j) {
+                  if (exception_thrown_in_set_up_of_this_thread) {
+                        exception_thrown_in_column[j] = exception_thrown_in_set_up_of_this_thread;
+                        continue;
+                  }
+                  try {
                   
                       // g(x + h*e_j)
                       theta_perturbed(j) = theta_main_vec_ref(j) + num_diff_e;
@@ -229,7 +257,13 @@ Eigen::Matrix<double, -1, -1> num_diff_Hessian_main_given_nuisance_parallel(   c
                       // Reset
                       theta_perturbed(j) = theta_main_vec_ref(j);
                   
+                  } catch (...) {
+                        exception_thrown_in_column[j] = std::current_exception();
+                  }
                 }
+          }
+          for (int j = 0; j < n_params_main; ++j) {
+            if (exception_thrown_in_column[j]) std::rethrow_exception(exception_thrown_in_column[j]);
           }
         
         Hessian = (Hessian + Hessian.transpose()) * 0.5;

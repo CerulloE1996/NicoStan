@@ -473,6 +473,26 @@ public:
 
     }  //// end of all parallel work// Definition of static thread_local variable
     
+    //// debug = TRUE (6 Oct 2026): each iteration's own trajectory length (rows = iterations, columns = chains:
+    //// the jittered main-block length tau_main_ii and its leapfrog steps L_main_ii) and each chain's
+    //// main-parameter proposals (parameters x iterations). Call it BEFORE move_results_to_output(), which
+    //// clears HMC_outputs:
+    void copy_debug_record_to_output(Eigen::Matrix<double, -1, -1> &tau_main_ii_output,
+                                     Eigen::Matrix<int, -1, -1> &L_main_ii_output,
+                                     std::vector<Eigen::Matrix<double, -1, -1>> &proposal_main_output) {
+      
+            const int n_iter_recorded = HMC_outputs[0].diagnostics_tau_main_ii().size();
+            tau_main_ii_output.resize(n_iter_recorded, n_threads);
+            L_main_ii_output.resize(n_iter_recorded, n_threads);
+            proposal_main_output.resize(n_threads);
+            for (int i = 0; i < n_threads; ++i) {
+                    tau_main_ii_output.col(i) = HMC_outputs[i].diagnostics_tau_main_ii();
+                    L_main_ii_output.col(i) = HMC_outputs[i].diagnostics_L_main_ii();
+                    proposal_main_output[i] = HMC_outputs[i].diagnostics_proposal_main();
+            }
+        
+    }
+    
     // Copy results directly to R matrices
     void move_results_to_output(Eigen::Matrix<double, -1, -1> &p_jump_main_output,
                                 Eigen::Matrix<double, -1, -1> &p_jump_nuisance_output) {

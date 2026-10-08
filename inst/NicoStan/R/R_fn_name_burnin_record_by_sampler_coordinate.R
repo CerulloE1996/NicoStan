@@ -229,6 +229,12 @@ fn_burnin_record_with_names_of_sampler_coordinates <-  function( burnin_object,
             dim(burnin_object$burnin_trace_main_all_chains)[2] == n_main) {
               dimnames(burnin_object$burnin_trace_main_all_chains) <-  list(NULL, main_names, NULL)
         }
+        ## (the burn-in debug record's trajectory starts and proposals, debug = TRUE only, the same way)
+        for (field in c("burnin_start_main_all_chains", "burnin_proposal_main_all_chains")) {
+              if (length(dim(burnin_object[[field]])) == 3 && dim(burnin_object[[field]])[2] == n_main) {
+                    dimnames(burnin_object[[field]]) <-  list(NULL, main_names, NULL)
+              }
+        }
         if (length(dim(burnin_object$burnin_metric_main_variance_history)) == 2 &&
             ncol(burnin_object$burnin_metric_main_variance_history) == n_main) {
               colnames(burnin_object$burnin_metric_main_variance_history) <-  main_names

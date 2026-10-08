@@ -267,6 +267,14 @@ struct   Model_fn_args_struct {
     //// TRUE if absent). FALSE when nothing will read it (create_summary_and_traces(save_log_lik_trace = FALSE)):
     //// at N = 10,000, 180 chains, 50 iterations it is 720 MB zero-filled up front and copied into R for nothing.
     bool store_log_lik_trace = true;
+    //// debug = TRUE (R_fn_sample_model; the R list element "debug", FALSE if absent; 6 Oct 2026): the sampling
+    //// phase records each iteration's own trajectory length and main-parameter proposal (sampling_diagnostics):
+    bool debug = false;
+    //// OUTPUT ONLY (6 Oct 2026): the number of leapfrog steps of the current iteration's main-block
+    //// trajectory (the joint trajectory when partitioned_HMC = FALSE), L_ii = max(1, ceiling(tau_main_ii /
+    //// eps_main)), set by the samplers where they compute it and recorded per iteration with debug = TRUE;
+    //// no sampler reads it:
+    int L_main_ii = 0;
     
     /////// constructor
     EHMC_fn_args_struct(

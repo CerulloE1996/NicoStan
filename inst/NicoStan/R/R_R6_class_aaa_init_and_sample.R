@@ -411,7 +411,20 @@ MVP_model <- R6Class("MVP_model",
                           #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an experimental unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
                           #'@param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in. FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in and skips that search; no effect when no pre-burnin runs.
                           #'@param eps_acceptance_mean NULL/"harmonic" (default) adapts the burn-in step size so that the harmonic mean over the burn-in chains of the per-chain acceptance probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC (Hoffman, Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero acceptance (a divergent proposal, which includes |log ratio| > 1000 in either direction, or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic" uses the arithmetic mean, the rule used before this option existed. "geometric" uses exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between the harmonic and the arithmetic mean.
-                          #'@param tau_adaptation_block "main" (default; unchanged behaviour): the trajectory-length criterion uses the main parameters only. "joint": main and nuisance parameters concatenated, still adapting the one joint tau. EXPERIMENTAL, for testing only; models without a sampled nuisance block fall back to "main".
+                          #'@param tau_adaptation_block NULL (default, not set): "main", except for the built-in
+                          #'   latent-class models LC_MVP and LC_MVOP, which monitor the parameters Se, Sp and
+                          #'   prevalence depend on (interest_only = beta, p_raw for LC_MVP; beta, p_raw,
+                          #'   C_unc_vec for LC_MVOP) when interest_only is also NULL and tau is adapted. "main":
+                          #'   the trajectory-length criterion uses the main parameters only (every main parameter
+                          #'   unless interest_only is given). "joint": main and nuisance parameters concatenated,
+                          #'   still adapting the one joint tau. EXPERIMENTAL, for testing only; models without a
+                          #'   sampled nuisance block fall back to "main".
+                          #'@param interest_only NULL (default) or a character vector of parameter families (the
+                          #'   names before "[" or "."), e.g. c("beta", "p_raw"): every trajectory criterion
+                          #'   computes its statistic over the main-block rows of these families only (with
+                          #'   tau_adaptation_block "main" or NULL; not with "joint"). A family that matches no
+                          #'   main parameter stops. NULL: every main parameter, or the built-in set for LC_MVP /
+                          #'   LC_MVOP (see tau_adaptation_block).
                           #'@param manual_tau If \code{FALSE}, then the selected burnin_algorithm will be used to adapt \eqn{\tau} during the burnin phase. Otherwise if \code{TRUE}, \eqn{\tau} will be
                           #' fixed to the value given in the \code{tau_if_manual} argument. 
                           #'@param tau_if_manual The HMC path length (\eqn{\tau}) to use for the HMC sampling. This will be used for both the burnin and sampling phases. 
@@ -523,6 +536,30 @@ MVP_model <- R6Class("MVP_model",
                           #'"LQ_ESSR" selects the experimental soft minimum, over the monitored coordinates, of the lag-one ESS
                           #'bounds of the linear and the centred squared statistics, per unit trajectory length (exact for Gaussian
                           #'normal modes).
+                          #'"L_ESSR_length_response" / "LQ_ESSR_length_response" select the experimental soft
+                          #'minimum of the lag-one ESS bounds of the linear statistics / of the linear and centred
+                          #'squared statistics, per unit trajectory length, maximised over tau directly from the
+                          #'length response of the jittered trajectories (no tau derivative and no ADAM;
+                          #'R_fn_length_response_tau_criterion.R).
+                          #'"LQ_ESSR_spectral" selects the same with a spectral linear term (per monitored
+                          #'coordinate, a non-negative cosine mixture fitted to the flow's decorrelation over
+                          #'the explored trajectory lengths, composed with the acceptance), per expected
+                          #'leapfrog step (R_fn_spectral_ESS_tau_criterion.R).
+                          #'"LQ_ESSR_spectral_long_bin_memory" selects "LQ_ESSR_spectral" with its length bins
+                          #'forgetting at 0.99 per update instead of 0.95.
+                          #'"LQ_ESSR_spec_bins99_evid_expand" selects that with the doubling of tau at the
+                          #'upper end of the candidates only on evidence that the objective still rises there.
+                          #'"ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand" selects the equal-weight geometric
+                          #'mean of ESJD and that, with the finite-run ESS of the run's n_iter draws.
+                          #'"LQ_ESSR_spec_bins99_evid_expand_jump_accept" selects
+                          #'"LQ_ESSR_spec_bins99_evid_expand" with the jump-weighted acceptance per
+                          #'monitored row and length bin in the spectral term.
+                          #'"ESJD_w20_LQ_ESSR_spec_bins99_evid_expand" and
+                          #'"ESJD_w33_LQ_ESSR_spec_bins99_evid_expand" select the geometric mean of ESJD and
+                          #'"LQ_ESSR_spec_bins99_evid_expand" with ESJD weight 0.20 and 0.33
+                          #'("ESJD_LQ_ESSR_spec_bins99_evid_expand": 0.5).
+                          #'"ESJD_LQ_ESSR_spec_bins99_evid_expand" selects the same geometric mean without the
+                          #'finite-run ESS.
                           #'@param time_criterion_settings For burnin_algorithm = "CHESSR_time" / "SNAPER_time": NULL (default) or a named list of the
                           #'time-to-target-ESS criterion settings (sampling timing probe, previous saved run(s), user-supplied times, ESS target);
                           #'see fn_default_time_criterion_settings(). Ignored by the other criteria.
@@ -712,14 +749,19 @@ MVP_model <- R6Class("MVP_model",
                                               tau_gradient_estimator = "forward",
                                               tau_cost_exponent = 1,
                                               esjd_jump_power = 2,
-                                              ## burnin_algorithm = "LQ_ESSR" only: the parameter families (names before "[") whose ESS
-                                              ## the criterion targets, e.g. c("beta", "p_raw"); NULL = every row of the adapted block:
+                                              ## every trajectory criterion: the parameter families (names before
+                                              ## "[") whose main-block rows the criterion monitors, e.g. c("beta",
+                                              ## "p_raw"); NULL = every row of the adapted block, or the built-in
+                                              ## LC_MVP / LC_MVOP set (see tau_adaptation_block):
                                               interest_only = NULL,
                                               tau_jitter_burnin = "uniform",
                                               tau_sampling_scale = "none",
                                               tau_jitter_sampling_type = "uniform",
                                               bulk_local_tuner = NULL,
-                                              tau_adaptation_block = "main",
+                                              ## NULL = not set: "main", or the built-in interest_only set for
+                                              ## LC_MVP / LC_MVOP (R_fn_sample_model; 6 Oct 2026):
+                                              ## tau_adaptation_block = "main",
+                                              tau_adaptation_block = NULL,
                                               burnin_TBB_pool_equals_n_chains = NULL,
                                               store_log_lik_trace = NULL,
                                               use_disk_path = "/tmp/hmc_traces",

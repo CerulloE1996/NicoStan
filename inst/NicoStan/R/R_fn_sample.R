@@ -493,7 +493,12 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         tau_gradient_estimator,
                                         tau_cost_exponent,
                                         esjd_jump_power,
-                                        ## burnin_algorithm = "LQ_ESSR" only: parameter families whose ESS the criterion targets (NULL = all rows):
+                                        ## every trajectory criterion: the parameter families whose main-block
+                                        ## rows the criterion monitors (NULL = all rows of the adapted block; with
+                                        ## tau_adaptation_block also NULL, LC_MVP / LC_MVOP use
+                                        ## parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs(); see
+                                        ## tau_adaptation_block):
+                                        ## (6 Oct 2026: every trajectory criterion computes its statistic over these families' main-block rows)
                                         interest_only = NULL,
                                         tau_jitter_burnin,
                                         ##   tau_sampling_scale                   - multiply the adapted tau ONCE at the burn-in -> sampling switch,
@@ -515,7 +520,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          main + nuisance concatenated, still adapting the one joint tau.
                                         ##                                          EXPERIMENTAL, for testing only;
                                         ##                                          models without a sampled nuisance block fall back to "main".
-                                        tau_adaptation_block = "main",
+                                        ## tau_adaptation_block NULL (default, not set; 6 Oct 2026): "main"; for
+                                        ## LC_MVP / LC_MVOP with interest_only also NULL and tau adapted,
+                                        ## interest_only = the parameters Se, Sp and prevalence depend on (LC_MVP
+                                        ## beta, p_raw; LC_MVOP beta, p_raw, C_unc_vec). An explicit "main" /
+                                        ## "joint" or interest_only always wins.
+                                        ## tau_adaptation_block = "main",
+                                        tau_adaptation_block = NULL,
                                         ##   burnin_TBB_pool_equals_n_chains      - NULL defaults to TRUE for built-in models (separate OpenMP WCP teams).
                                         ##                                          Stan models FORCE FALSE, even if TRUE is supplied: nested TBB work
                                         ##                                          shares the n_threads_WCP_burnin * n_chains_burnin thread budget.
@@ -986,6 +997,23 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 manual_tau <- if_null_then_set_to(manual_tau, FALSE)
                 tau_if_manual <- if_null_then_set_to(tau_if_manual, 3.0)
+                ##
+                ## ---- tau_adaptation_block NULL (not set; 6 Oct 2026): "main". For the built-in latent-class
+                ##      models (LC_MVP, LC_MVOP), with interest_only also NULL and tau adapted (manual_tau =
+                ##      FALSE), the criterion monitors the parameters Se, Sp and prevalence depend on
+                ##      (parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs()), restricted below to the
+                ##      families this model has. An explicit tau_adaptation_block ("main" = every main row, or
+                ##      "joint") or interest_only always wins; every other model is unchanged ("main", every main
+                ##      row):
+                interest_only_from_built_in_default_for_LCMs <-  FALSE
+                if (is.null(tau_adaptation_block)) {
+                      tau_adaptation_block <-  "main"
+                      if (is.null(interest_only) && !isTRUE(manual_tau)) {
+                            interest_only <-  parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs(
+                                  Model_type = init_object$Model_type)
+                            interest_only_from_built_in_default_for_LCMs <-  !is.null(interest_only)
+                      }
+                }
                 ##
                 ## ---- Trajectory-length adaptation selected by burnin_algorithm.
                 ##      The frozen legacy package preserves the historical defaults.
@@ -1817,6 +1845,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     ##
                     pre_burnin_object <-             fn_burnin(  init_object = init_object,
                                                                  debug_burnin_timing = debug_burnin_timing,
+                                                                 ## (7 Oct 2026) n_iter, for the
+                                                                 ## finite-run ESS of a burnin_algorithm:
+                                                                 n_iter_sampling_per_chain = n_iter,
                                                                  ##
                                                                  Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
                                                                  ##
@@ -2863,7 +2894,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 }
                 ##
                 ##
-                ## ---- interest_only (burnin_algorithm = "LQ_ESSR"): the main-block rows of the named parameter families. The parameter
+                ## ---- interest_only (every tau criterion since 6 Oct 2026; before, burnin_algorithm = "LQ_ESSR" only): the main-block
+                ##      rows of the named parameter families, over which the trajectory criterion computes its statistic. The parameter
                 ##      vector is (nuisance, main), so the main names are the last n_params_main BridgeStan names; a family is the name
                 ##      before its first "." or "[" (e.g. "beta.1.2.1" -> "beta"). NULL = every row of the adapted block:
                 interest_rows <-  NULL
@@ -2876,13 +2908,36 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 if (!is.null(interest_only)) {
                       main_parameter_names <-  utils::tail(init_object$bs_main_param_names, n_params_main)
                       main_parameter_families <-  sub(pattern = "[.\\[].*$", replacement = "", x = main_parameter_names)
+                      ## a family that matches no main parameter (e.g. a misspelt name) stops for a user-supplied
+                      ## interest_only; the built-in LC_MVP / LC_MVOP default keeps the families this model has
+                      ## (e.g. no C_unc_vec without ordinal tests):
+                      families_matching_no_main_parameter <-  setdiff(interest_only, main_parameter_families)
+                      if (isTRUE(interest_only_from_built_in_default_for_LCMs)) {
+                            interest_only <-  intersect(interest_only, main_parameter_families)
+                      } else if (length(families_matching_no_main_parameter) > 0) {
+                            stop(paste0("interest_only: ",
+                                        paste(families_matching_no_main_parameter, collapse = ", "),
+                                        " match(es) no main parameter; the main parameter families are: ",
+                                        paste(unique(main_parameter_families), collapse = ", "), "."))
+                      }
                       interest_rows <-  which(main_parameter_families %in% interest_only)
                       if (length(interest_rows) == 0) {
                             stop(paste0("interest_only matches no main parameter; the main parameter families are: ",
                                         paste(unique(main_parameter_families), collapse = ", "), "."))
                       }
+                      ## message(colourise(paste0("interest_only = ", paste(interest_only, collapse = ", "), ": ", length(interest_rows), " of ",
+                      ##                          n_params_main, " main parameters monitored by the LQ_ESSR criterion."), "cyan"))
                       message(colourise(paste0("interest_only = ", paste(interest_only, collapse = ", "), ": ", length(interest_rows), " of ",
-                                               n_params_main, " main parameters monitored by the LQ_ESSR criterion."), "cyan"))
+                                               n_params_main, " main parameters monitored by the ",
+                                               burnin_algorithm, " trajectory criterion."), "cyan"))
+                      if (isTRUE(interest_only_from_built_in_default_for_LCMs)) {
+                            message(colourise(paste0("interest_only is the built-in default for ",
+                                                     init_object$Model_type,
+                                                     " (the parameters Se, Sp and prevalence depend on); ",
+                                                     "tau_adaptation_block = \"main\" monitors every main ",
+                                                     "parameter."),
+                                              "cyan"))
+                      }
                 }
                 bulk_local_tuner_names <-  NULL
                 bulk_local_tuner_cost_contract <-  NULL
@@ -2920,6 +2975,12 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             n_iter_sampling = n_iter)
                 }
                 burnin_object <-                 fn_burnin(  init_object = init_object,
+                                                             ## debug = TRUE: the burn-in keeps its debug record
+                                                             ## (R_fn_init_and_run_burnin_CHESS.R):
+                                                             debug = debug,
+                                                             ## (7 Oct 2026) n_iter, for the finite-run
+                                                             ## ESS of a burnin_algorithm:
+                                                             n_iter_sampling_per_chain = n_iter,
                                                              bulk_local_tuner = bulk_local_tuner,
                                                              bulk_local_tuner_names = bulk_local_tuner_names,
                                                              bulk_local_tuner_cost_contract =
@@ -3321,6 +3382,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           }
                 EHMC_args_as_Rcpp_List$store_log_lik_trace <- store_log_lik_trace
                 EHMC_args_as_Rcpp_List$record_kinetic_energy_tau_derivatives <- FALSE
+                ## debug = TRUE: the sampler records each iteration's own trajectory length and main-parameter
+                ## proposal (sampling_diagnostics; read by the C++ as an optional list element, absent otherwise):
+                if (isTRUE(debug)) EHMC_args_as_Rcpp_List$debug <- TRUE
                           ##
                           tictoc::tic("post-burnin timer")
                           ##
@@ -3523,6 +3587,63 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                           if (burnin_algorithm == "ESJD_SNAPER") "geometric_mean_of_ESJD_and_SNAPER_per_trajectory_rates" else
                                           if (burnin_algorithm == "LQ_ESSR")
                                               "soft_minimum_of_linear_and_quadratic_lag_one_ESS_bounds_per_unit_trajectory_length" else
+                                          if (burnin_algorithm == "L_ESSR_length_response")
+                                              paste0("soft_minimum_of_linear_lag_one_ESS_bounds_",
+                                                     "per_unit_trajectory_length_maximised_over_tau_",
+                                                     "from_the_length_response_of_jittered_trajectories") else
+                                          if (burnin_algorithm == "LQ_ESSR_length_response")
+                                              paste0("soft_minimum_of_linear_and_quadratic_lag_one_ESS_bounds_",
+                                                     "per_unit_trajectory_length_maximised_over_tau_",
+                                                     "from_the_length_response_of_jittered_trajectories") else
+                                          if (burnin_algorithm == "LQ_ESSR_spectral")
+                                              paste0("soft_minimum_of_spectral_linear_ESS_and_quadratic_lag_one_",
+                                                     "ESS_bound_per_expected_leapfrog_step_maximised_over_tau_",
+                                                     "from_the_length_response_of_jittered_trajectories") else
+                                          if (burnin_algorithm == "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand")
+                                              paste0("weighted_geometric_mean_of_ESJD_weight_0.20_and_",
+                                                     "the_soft_minimum_of_spectral_linear_ESS_and_",
+                                                     "quadratic_lag_one_ESS_per_expected_leapfrog_step_",
+                                                     "maximised_over_tau_with_length_bins_forgetting_",
+                                                     "at_0.99_per_update_doubling_at_the_upper_end_",
+                                                     "only_on_evidence") else
+                                          if (burnin_algorithm == "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")
+                                              paste0("weighted_geometric_mean_of_ESJD_weight_0.33_and_",
+                                                     "the_soft_minimum_of_spectral_linear_ESS_and_",
+                                                     "quadratic_lag_one_ESS_per_expected_leapfrog_step_",
+                                                     "maximised_over_tau_with_length_bins_forgetting_",
+                                                     "at_0.99_per_update_doubling_at_the_upper_end_",
+                                                     "only_on_evidence") else
+                                          if (burnin_algorithm == "LQ_ESSR_spec_bins99_evid_expand_jump_accept")
+                                              paste0("soft_minimum_of_spectral_linear_ESS_and_quadratic_lag_one_",
+                                                     "ESS_bound_per_expected_leapfrog_step_maximised_over_tau_",
+                                                     "from_the_length_response_of_jittered_trajectories_",
+                                                     "with_length_bins_forgetting_at_0.99_per_update_",
+                                                     "doubling_at_the_upper_end_only_on_evidence_",
+                                                     "with_jump_weighted_acceptance_per_row_and_length_bin") else
+                                          if (burnin_algorithm == "LQ_ESSR_spec_bins99_evid_expand")
+                                              paste0("soft_minimum_of_spectral_linear_ESS_and_quadratic_lag_one_",
+                                                     "ESS_bound_per_expected_leapfrog_step_maximised_over_tau_",
+                                                     "from_the_length_response_of_jittered_trajectories_",
+                                                     "with_length_bins_forgetting_at_0.99_per_update_",
+                                                     "doubling_at_the_upper_end_only_on_evidence") else
+                                          if (burnin_algorithm == "ESJD_LQ_ESSR_spec_bins99_evid_expand")
+                                              paste0("geometric_mean_of_ESJD_and_the_soft_minimum_of_",
+                                                     "spectral_linear_ESS_and_quadratic_lag_one_ESS_",
+                                                     "per_expected_leapfrog_step_maximised_over_tau_",
+                                                     "with_length_bins_forgetting_at_0.99_per_update_",
+                                                     "doubling_at_the_upper_end_only_on_evidence") else
+                                          if (burnin_algorithm ==
+                                              "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")
+                                              paste0("geometric_mean_of_ESJD_and_the_soft_minimum_of_",
+                                                     "finite_run_spectral_linear_ESS_and_quadratic_lag_one_ESS_",
+                                                     "per_expected_leapfrog_step_maximised_over_tau_",
+                                                     "with_length_bins_forgetting_at_0.99_per_update_",
+                                                     "doubling_at_the_upper_end_only_on_evidence") else
+                                          if (burnin_algorithm == "LQ_ESSR_spectral_long_bin_memory")
+                                              paste0("soft_minimum_of_spectral_linear_ESS_and_quadratic_lag_one_",
+                                                     "ESS_bound_per_expected_leapfrog_step_maximised_over_tau_",
+                                                     "from_the_length_response_of_jittered_trajectories_",
+                                                     "with_length_bins_forgetting_at_0.99_per_update") else
                                           if (burnin_algorithm == "ChEES")
                                               "expected_squared_position_statistic_change" else NA_character_,
                    trajectory_coordinates = "mass_metric",

@@ -98,6 +98,64 @@ fn_transport_snaper_direction <-  function( direction,
 
 }
 
+##
+## ---- interest_only (6 Oct 2026): every trajectory criterion computes its statistic over the INTEREST ROWS only, i.e. the rows of
+##      the adapted block (main-block indices; the main rows lead every block) of the parameter families named in interest_only
+##      (R_fn_sample.R). NULL = every row of the block, the behaviour before this option reached the non-LQ criteria (unchanged,
+##      bit for bit). The rows are those of the metric coordinates z = B (theta - m): for a diagonal metric row j is parameter j;
+##      for a dense metric (upper Cholesky factor B) row j is a whitened combination of parameters j, j + 1, ..., d, as for
+##      LQ_ESSR. "LQ_ESSR" and the length-response criteria keep their own row selection in fn_metric_tau_block_update()
+##      (applied to their per-coordinate statistics), so they are not restricted twice:
+##
+fn_tau_criterion_algorithm_selects_interest_rows_itself <-  function(algorithm) {
+
+        ## return(algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response"))
+        ## return(algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+        ##                         "LQ_ESSR_spectral"))
+     ## return(algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                             ## "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory"))
+        return(algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                                "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                                "LQ_ESSR_spec_bins99_evid_expand",
+                                ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand"))
+                                "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                                ## "ESJD_LQ_ESSR_spec_bins99_evid_expand"))
+                                "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                                ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept"))
+                                "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                                "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand"))
+
+}
+fn_rows_of_the_tau_criterion_statistic <-  function( values_in_metric_coordinates,
+                                                     interest_rows) {
+
+        if (is.null(interest_rows)) return(values_in_metric_coordinates)
+        values_in_metric_coordinates <-  as.matrix(values_in_metric_coordinates)
+        if (length(interest_rows) < 1 || anyNA(interest_rows) || any(interest_rows < 1) ||
+            any(interest_rows > nrow(values_in_metric_coordinates)) || anyDuplicated(interest_rows)) {
+                stop("interest_rows must be distinct row indices of the adapted block.")
+        }
+        return(values_in_metric_coordinates[interest_rows, , drop = FALSE])
+
+}
+## the SNAPER direction (a unit vector over the block's rows) restricted to the interest rows and normalised again; NULL rows =
+## the direction unchanged:
+fn_snaper_direction_on_the_interest_rows <-  function( direction,
+                                                       interest_rows) {
+
+        if (is.null(interest_rows) || is.null(direction)) return(direction)
+        ## every row, in order: the direction itself (no renormalisation, so the full set equals no selection bit for bit)
+        if (length(interest_rows) == length(direction) && all(interest_rows == seq_along(direction))) return(direction)
+        restricted <-  c(direction)[interest_rows]
+        magnitude <-  sqrt(sum(restricted^2))
+        if (!is.finite(magnitude) || magnitude == 0) {
+                return(rep(1 / sqrt(length(interest_rows)), length(interest_rows)))
+        }
+        return(restricted / magnitude)
+
+}
+
 fn_metric_position_criterion <-  function( algorithm,
                                            theta_initial,
                                            theta_proposed,
@@ -124,7 +182,12 @@ fn_metric_position_criterion <-  function( algorithm,
                                            ##      trajectory, eps x E[ceil(t / eps)] + the endpoint evaluation = t + offset, instead of t alone
                                            ##      (4 Oct 2026; 0 = the earlier behaviour, valid only when L is large). The _time criteria add it to
                                            ##      tau_offset_from_sampling_overhead:
-                                           tau_cost_offset                        = 0) {
+                                           ## tau_cost_offset                        = 0) {
+                                           tau_cost_offset                        = 0,
+                                           ##
+                                           ## ---- interest_only: the rows over which the statistic is computed (fn_rows_of_the_tau_criterion_statistic);
+                                           ##      NULL = every row. Ignored by "LQ_ESSR" and the length-response criteria (their own selection):
+                                           interest_rows                          = NULL) {
 
         theta_initial <-  as.matrix(theta_initial)
         theta_proposed <-  as.matrix(theta_proposed)
@@ -136,8 +199,28 @@ fn_metric_position_criterion <-  function( algorithm,
         ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER")) stop("Unknown position-based trajectory algorithm.")
         ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time")) stop("Unknown position-based trajectory algorithm.")
         ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
-        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
-                              "ESJD_SNAPER", "LQ_ESSR")) {
+        ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+        ##                       "ESJD_SNAPER", "LQ_ESSR")) {
+        ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+        ##                       "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response")) {
+        ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+        ##                       "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+        ##                       "LQ_ESSR_spectral")) {
+     ## if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD", "ESJD_CHESSR",
+                           ## "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                           ## "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")) {
+        if (!algorithm %in% c("ChEES", "CHESSR", "CHESSR_log", "SNAPER", "CHESSR_time", "SNAPER_time", "ESJD",
+                              "ESJD_CHESSR", "ESJD_SNAPER", "LQ_ESSR", "L_ESSR_length_response",
+                              "LQ_ESSR_length_response", "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                              "LQ_ESSR_spec_bins99_evid_expand",
+                              ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                              "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                              ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                              "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                              ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) {
+                              "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                              "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                              "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
                 stop("Unknown position-based trajectory algorithm.")
         }
         ##
@@ -145,6 +228,17 @@ fn_metric_position_criterion <-  function( algorithm,
         proposed <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - mean_proposed)
         velocity <-  fn_apply_trajectory_metric(metric_factor, velocity_proposed)
         ## velocity already equals d(theta)/dt. No additional M_inv belongs here.
+        ##
+        ## ---- interest_only: the statistic over the interest rows only (every criterion below except "LQ_ESSR" and the
+        ##      length-response criteria, which select their rows in fn_metric_tau_block_update()):
+        restrict_to_interest_rows <-  !is.null(interest_rows) &&
+                                      !fn_tau_criterion_algorithm_selects_interest_rows_itself(algorithm)
+        if (restrict_to_interest_rows) {
+                initial <-  fn_rows_of_the_tau_criterion_statistic(initial, interest_rows)
+                proposed <-  fn_rows_of_the_tau_criterion_statistic(proposed, interest_rows)
+                velocity <-  fn_rows_of_the_tau_criterion_statistic(velocity, interest_rows)
+                direction <-  fn_snaper_direction_on_the_interest_rows(direction, interest_rows)
+        }
         ##
         ## ---- LQ_ESSR: per chain (columns) and monitored coordinate (rows), in the metric coordinates z = B (theta - m), the statistics
         ##      of the lag-one ESS bounds of the linear statistic z_j and of the centred squared statistic z_j^2
@@ -159,7 +253,25 @@ fn_metric_position_criterion <-  function( algorithm,
         ##      other criteria). For a dense metric the coordinates are those of z (whitened combinations of the parameters), not the
         ##      parameters themselves:
         ##
-        if (algorithm == "LQ_ESSR") {
+        ## (the length-response criteria, R_fn_length_response_tau_criterion.R, read the same per-coordinate statistics)
+        ## ("LQ_ESSR_spectral", R_fn_spectral_ESS_tau_criterion.R, too)
+        ## if (algorithm == "LQ_ESSR") {
+        ## if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response")) {
+        ## if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+        ##                      "LQ_ESSR_spectral")) {
+     ## if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                          ## "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")) {
+        if (algorithm %in% c("LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response",
+                             "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                             "LQ_ESSR_spec_bins99_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                             "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                             "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                             ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) {
+                             "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                             "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                             "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
                 ## monitored_rows <-  if (is.list(metric_factor)) seq_len(metric_factor$n_main) else seq_len(nrow(initial))
                 monitored_rows <-  seq_len(nrow(initial))
                 jump_in_metric_coordinates <-  fn_apply_trajectory_metric(metric_factor,
@@ -205,6 +317,12 @@ fn_metric_position_criterion <-  function( algorithm,
         ##
         if (algorithm %in% c("ESJD", "ESJD_CHESSR", "ESJD_SNAPER")) {
                 jump_in_metric_coordinates <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - theta_initial)
+                ## interest_only: the jump over the interest rows only:
+                if (restrict_to_interest_rows) {
+                        jump_in_metric_coordinates <-  fn_rows_of_the_tau_criterion_statistic(
+                                values_in_metric_coordinates = jump_in_metric_coordinates,
+                                interest_rows                = interest_rows)
+                }
                 ESJD_numerator <-  colSums(jump_in_metric_coordinates^2)
                 ESJD_numerator_gradient <-  2 * colSums(jump_in_metric_coordinates * velocity) * tau_values
                 ## cost = t + tau_cost_offset: d/dlog(tau) of N / (t + o) = (N' t - N t / (t + o)) / (t + o):
@@ -434,10 +552,28 @@ fn_metric_tau_block_update <-  function( algorithm,
                                          component_criterion_ema,
                                          ##
                                          ## ---- "LQ_ESSR" only: the rows (main-block indices) the criterion monitors; NULL = every row of the block:
+                                         ## (6 Oct 2026: every criterion; the non-LQ criteria pass it to fn_metric_position_criterion() when they
+                                         ##  compute their statistic here; a position_criterion supplied from elsewhere was restricted where it was
+                                         ##  computed)
                                          interest_rows                          = NULL,
                                          ##
                                          ## ---- the trajectory cost offset of the rate criteria (fn_metric_position_criterion; 4 Oct 2026):
-                                         tau_cost_offset                        = 0) {
+                                         ## tau_cost_offset                        = 0) {
+                                         tau_cost_offset                        = 0,
+                                         ##
+                                         ## ---- "LQ_ESSR_spectral" only (6 Oct 2026): the step sizes,
+                                         ##      list(eps_used_for_trajectories = the eps of this update's
+                                         ##      trajectories (their executed lengths L eps), eps_now = the eps of
+                                         ##      the next trajectories); NULL for every other criterion:
+                                         ## step_sizes_for_spectral_ESS            = NULL) {
+                                         step_sizes_for_spectral_ESS            = NULL,
+                                         ##
+                                         ## ---- "LQ_ESSR_spectral" only (6 Oct 2026): TRUE returns, with
+                                         ##      the result, the update's complete arguments and per-coordinate
+                                         ##      criterion inputs (spectral_update_inputs; the burn-in debug
+                                         ##      record, debug = TRUE, R_fn_burnin_debug_record.R); FALSE
+                                         ##      (default): the result alone:
+                                         return_spectral_update_inputs          = FALSE) {
 
         use_proposals <-  isTRUE(weight_by_probability)
         if (!is.null(position_criterion)) {
@@ -458,7 +594,11 @@ fn_metric_tau_block_update <-  function( algorithm,
             ## burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio)
             burnin_to_sampling_leapfrog_time_ratio = burnin_to_sampling_leapfrog_time_ratio,
             lag_one_autocorrelation_rho = lag_one_autocorrelation_rho,
-            tau_cost_offset = tau_cost_offset)
+            ## tau_cost_offset = tau_cost_offset)
+            tau_cost_offset = tau_cost_offset,
+            ## interest_only: the non-LQ criteria compute their statistic over the interest rows (LQ selects its rows below):
+            interest_rows = if (fn_tau_criterion_algorithm_selects_interest_rows_itself(algorithm)) NULL else
+                                                                                                  interest_rows)
         }  ## end of: if (!is.null(position_criterion))
         ##
         if (length(probabilities) != ncol(as.matrix(theta_initial)) ||
@@ -499,6 +639,197 @@ fn_metric_tau_block_update <-  function( algorithm,
         ##      component_criterion_ema; the derivatives use this update's chain means, divided by the smoothed levels, as for
         ##      ESJD_CHESSR. The update is skipped (tau and the ADAM moments unchanged) when no chain is valid or the gradient is not
         ##      finite:
+        ## ---- "L_ESSR_length_response" / "LQ_ESSR_length_response": the same soft minimum of lag-one ESS bounds (linear
+        ##      statistics only, or linear and centred squared statistics), maximised over tau directly from the length
+        ##      response of the jittered trajectories, without any tau derivative or ADAM
+        ##      (R_fn_length_response_tau_criterion.R); component_criterion_ema carries its state between updates:
+        ## ---- "LQ_ESSR_spectral": the same with the spectral linear term (the flow's fitted cosine mixture per
+        ##      coordinate, composed with the acceptance laziness), per expected gradient
+        ##      (R_fn_spectral_ESS_tau_criterion.R):
+        ## ---- "LQ_ESSR_spectral_long_bin_memory" (7 Oct 2026): the same update with the length bins
+        ##      forgetting at 0.99 per update instead of 0.95 (R_fn_spectral_ESS_tau_criterion.R):
+        ## if (identical(algorithm, "LQ_ESSR_spectral")) {
+        ## ---- "LQ_ESSR_spec_bins99_evid_expand" (7 Oct 2026): "LQ_ESSR_spectral_long_bin_memory" with
+        ##      the upper-end doubling only on evidence; "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand": the
+        ##      equal-weight geometric mean of ESJD and that, with the finite-run ESS of the run's n_iter draws
+        ##      (R_fn_spectral_ESS_tau_criterion.R):
+     ## if (algorithm %in% c("LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory")) {
+             ## spectral_bin_forgetting_factor <-  if (identical(algorithm, "LQ_ESSR_spectral_long_bin_memory")) {
+                     ## 0.99
+             ## } else 0.95
+        if (algorithm %in% c("LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory",
+                             "LQ_ESSR_spec_bins99_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                             "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                             ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                             "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                             ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) {
+                             "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                             "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                             "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
+                spectral_bin_forgetting_factor <-  if (identical(algorithm, "LQ_ESSR_spectral")) 0.95 else 0.99
+                spectral_expansion_rule <-  if (algorithm %in% c(
+                      "LQ_ESSR_spec_bins99_evid_expand",
+                      ## "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) "evidence" else "as_built"
+                      "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                      ## "ESJD_LQ_ESSR_spec_bins99_evid_expand")) "evidence" else "as_built"
+                      "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                      ## "LQ_ESSR_spec_bins99_evid_expand_jump_accept")) "evidence" else "as_built"
+                      "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                      "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                      "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) "evidence" else "as_built"
+                ## spectral_objective_mix <-  if (identical(algorithm,
+                ##                                          "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                ## spectral_objective_mix <-  if (algorithm %in% c(
+                ##       "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                ##       "ESJD_LQ_ESSR_spec_bins99_evid_expand")) {
+                spectral_objective_mix <-  if (algorithm %in% c("ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                                                                 "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                                                                 "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                                                 "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
+                        "geometric_mean_with_ESJD"
+                } else "none"
+                spectral_finite_run_draws <-  NULL
+                spectral_jump_weighted_acceptance <-  identical(algorithm,
+                                                                "LQ_ESSR_spec_bins99_evid_expand_jump_accept")
+                spectral_objective_mix_ESJD_weight <-  c(0.2, 0.33, 0.5)[match(algorithm,
+                                                                   c("ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                                                                     "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand",
+                                                                     algorithm))]
+                if (identical(algorithm, "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand")) {
+                        spectral_finite_run_draws <-  step_sizes_for_spectral_ESS$n_iter_sampling_per_chain
+                        if (is.null(spectral_finite_run_draws) || !isTRUE(is.finite(spectral_finite_run_draws)) ||
+                            spectral_finite_run_draws < 2) {
+                                stop(paste0("burnin_algorithm = '", algorithm, "' needs the planned sampling ",
+                                            "iterations per chain (n_iter >= 2) in step_sizes_for_spectral_ESS."))
+                        }
+                }
+                if (!is.list(step_sizes_for_spectral_ESS) || is.null(step_sizes_for_spectral_ESS$eps_now)) {
+                        stop("burnin_algorithm = 'LQ_ESSR_spectral' needs step_sizes_for_spectral_ESS (eps_now).")
+                }
+                spectral_state <-  if (is.list(component_criterion_ema)) component_criterion_ema else NULL
+                ## debug = TRUE (return_spectral_update_inputs): the same update, called with its complete
+                ## argument list, which is returned with the result, with the arguments left at their defaults
+                ## (evaluated here) and the per-coordinate criterion inputs; otherwise the call below, unchanged:
+                if (isTRUE(return_spectral_update_inputs)) {
+                        eps_used_for_trajectories_now <-  step_sizes_for_spectral_ESS$eps_used_for_trajectories
+                        if (is.null(eps_used_for_trajectories_now)) eps_used_for_trajectories_now <-  NA_real_
+                        spectral_update_arguments <-  list(
+                              state                            = spectral_state,
+                              tau                              = tau,
+                              tau_values                       = tau_values,
+                              eps_used_for_trajectories        = eps_used_for_trajectories_now,
+                              eps_now                          = step_sizes_for_spectral_ESS$eps_now,
+                              probabilities                    = probabilities,
+                              divergences                      = divergences,
+                              use_proposals                    = use_proposals,
+                              learning_rate                    = learning_rate,
+                              iteration                        = iteration,
+                              adaptation_iterations            = adaptation_iterations,
+                              learning_rate_schedule_iteration = learning_rate_schedule_iteration,
+                              learning_rate_schedule_length    = learning_rate_schedule_length,
+                              adam_mean                        = adam_mean,
+                              adam_variance                    = adam_variance,
+                              interest_rows                    = interest_rows,
+                              bin_forgetting_factor            = spectral_bin_forgetting_factor,
+                              finite_run_draws                 = spectral_finite_run_draws,
+                              expansion_rule                   = spectral_expansion_rule,
+                              ## objective_mix                    = spectral_objective_mix)
+                              objective_mix                    = spectral_objective_mix,
+                              ## jump_weighted_acceptance         = spectral_jump_weighted_acceptance)
+                              jump_weighted_acceptance         = spectral_jump_weighted_acceptance,
+                              objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight)
+                        spectral_update <-  with(spectral_update_arguments,
+                              fn_spectral_ESS_soft_minimum_tau_update(
+                                    criterion                        = criterion,
+                                    state                            = state,
+                                    tau                              = tau,
+                                    tau_values                       = tau_values,
+                                    eps_used_for_trajectories        = eps_used_for_trajectories,
+                                    eps_now                          = eps_now,
+                                    probabilities                    = probabilities,
+                                    divergences                      = divergences,
+                                    use_proposals                    = use_proposals,
+                                    learning_rate                    = learning_rate,
+                                    iteration                        = iteration,
+                                    adaptation_iterations            = adaptation_iterations,
+                                    learning_rate_schedule_iteration = learning_rate_schedule_iteration,
+                                    learning_rate_schedule_length    = learning_rate_schedule_length,
+                                    adam_mean                        = adam_mean,
+                                    adam_variance                    = adam_variance,
+                                    interest_rows                    = interest_rows,
+                                    bin_forgetting_factor            = bin_forgetting_factor,
+                                    finite_run_draws                 = finite_run_draws,
+                                    expansion_rule                   = expansion_rule,
+                                    ## objective_mix                    = objective_mix))
+                                    objective_mix                    = objective_mix,
+                                    ## jump_weighted_acceptance         = jump_weighted_acceptance))
+                                    jump_weighted_acceptance         = jump_weighted_acceptance,
+                                    objective_mix_ESJD_weight        = objective_mix_ESJD_weight))
+                        update_formals <-  formals(fn_spectral_ESS_soft_minimum_tau_update)
+                        arguments_at_default <-  setdiff(names(update_formals),
+                                                         c("criterion", names(spectral_update_arguments)))
+                        defaults_evaluated <-  lapply(update_formals[arguments_at_default], eval,
+                                                      envir = environment(
+                                                            fn_spectral_ESS_soft_minimum_tau_update))
+                        spectral_update$spectral_update_inputs <-  list(
+                              tau_update_arguments  = c(spectral_update_arguments, defaults_evaluated),
+                              live_criterion_inputs = criterion[c("linear_jump_squared",
+                                                                  "quadratic_jump_squared",
+                                                                  "initial_second_moment",
+                                                                  "initial_fourth_moment")])
+                        return(spectral_update)
+                }
+                return(fn_spectral_ESS_soft_minimum_tau_update(
+                        criterion                        = criterion,
+                        state                            = spectral_state,
+                        tau                              = tau,
+                        tau_values                       = tau_values,
+                        eps_used_for_trajectories        = if (is.null(
+                                step_sizes_for_spectral_ESS$eps_used_for_trajectories)) NA_real_ else
+                                step_sizes_for_spectral_ESS$eps_used_for_trajectories,
+                        eps_now                          = step_sizes_for_spectral_ESS$eps_now,
+                        probabilities                    = probabilities,
+                        divergences                      = divergences,
+                        use_proposals                    = use_proposals,
+                        learning_rate                    = learning_rate,
+                        iteration                        = iteration,
+                        adaptation_iterations            = adaptation_iterations,
+                        learning_rate_schedule_iteration = learning_rate_schedule_iteration,
+                        learning_rate_schedule_length    = learning_rate_schedule_length,
+                        adam_mean                        = adam_mean,
+                        adam_variance                    = adam_variance,
+                        interest_rows                    = interest_rows,
+                        bin_forgetting_factor            = spectral_bin_forgetting_factor,
+                        finite_run_draws                 = spectral_finite_run_draws,
+                        expansion_rule                   = spectral_expansion_rule,
+                        ## objective_mix                    = spectral_objective_mix))
+                        objective_mix                    = spectral_objective_mix,
+                        ## jump_weighted_acceptance         = spectral_jump_weighted_acceptance))
+                        jump_weighted_acceptance         = spectral_jump_weighted_acceptance,
+                        objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight))
+        }
+        if (algorithm %in% c("L_ESSR_length_response", "LQ_ESSR_length_response")) {
+                length_response_state <-  if (is.list(component_criterion_ema)) component_criterion_ema else NULL
+                return(fn_length_response_soft_minimum_ESS_bound_tau_update(
+                        criterion                          = criterion,
+                        include_centred_squared_statistics = identical(algorithm, "LQ_ESSR_length_response"),
+                        state                              = length_response_state,
+                        tau                                = tau,
+                        tau_values                         = tau_values,
+                        probabilities                      = probabilities,
+                        divergences                        = divergences,
+                        use_proposals                      = use_proposals,
+                        learning_rate                      = learning_rate,
+                        iteration                          = iteration,
+                        adaptation_iterations              = adaptation_iterations,
+                        learning_rate_schedule_iteration   = learning_rate_schedule_iteration,
+                        learning_rate_schedule_length      = learning_rate_schedule_length,
+                        adam_mean                          = adam_mean,
+                        adam_variance                      = adam_variance,
+                        interest_rows                      = interest_rows,
+                        tau_cost_offset                    = tau_cost_offset))
+        }
         if (algorithm == "LQ_ESSR") {
                 ##
                 soft_minimum_power <-  8

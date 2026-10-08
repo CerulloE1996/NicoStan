@@ -29,12 +29,24 @@ fn_update_snaper_w_minibatch <-  function( X,
                                            snaper_m_vec,
                                            snaper_w_vec,
                                            eta_w,
-                                           metric_factor) {
+                                           ## metric_factor) {
+                                           metric_factor,
+                                           ##
+                                           ## ---- interest_only (6 Oct 2026): the leading eigen-direction of the covariance of the INTEREST ROWS of
+                                           ##      the metric coordinates: the other rows of the states are set to 0 and the direction is 0 on them
+                                           ##      (the vector keeps the block's length). NULL = every row, as before (unchanged):
+                                           interest_rows = NULL) {
 
         X <-  as.matrix(X)
         if (nrow(X) != length(snaper_m_vec) || nrow(X) != length(snaper_w_vec)) stop("SNAPER direction dimensions do not agree.")
         X <-  fn_apply_trajectory_metric(metric_factor, X - snaper_m_vec)
         direction <-  c(snaper_w_vec)
+        if (!is.null(interest_rows)) {
+                X <-  as.matrix(X)
+                X[-interest_rows, ] <-  0
+                direction[-interest_rows] <-  0
+                if (!any(direction != 0)) direction[interest_rows] <-  1 / sqrt(length(interest_rows))
+        }
         norm <-  sqrt(sum(direction^2))
         if (!is.finite(norm) || norm == 0) direction <-  fn_initialise_snaper_direction(nrow(X)) else direction <-  direction / norm
         candidate <-  c(X %*% crossprod(X, direction))
@@ -101,8 +113,25 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
         if (length(burnin_algorithm) != 1L || is.na(burnin_algorithm)) {
             ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'.")
             ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'.")
+            ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', ",
+            ##             "'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', 'ESJD_SNAPER' or 'LQ_ESSR'."))
+            ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', ",
+            ##             "'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', 'ESJD_SNAPER', 'LQ_ESSR', ",
+            ##             "'L_ESSR_length_response' or 'LQ_ESSR_length_response'."))
+            ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', ",
+            ##             "'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', 'ESJD_SNAPER', 'LQ_ESSR', ",
+            ##             "'L_ESSR_length_response', 'LQ_ESSR_length_response' or 'LQ_ESSR_spectral'."))
+         ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', ",
+                     ## "'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', 'ESJD_SNAPER', 'LQ_ESSR', ",
+                     ## "'L_ESSR_length_response', 'LQ_ESSR_length_response', 'LQ_ESSR_spectral' or ",
+                     ## "'LQ_ESSR_spectral_long_bin_memory'."))
             stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', ",
-                        "'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', 'ESJD_SNAPER' or 'LQ_ESSR'."))
+                        "'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', 'ESJD_SNAPER', 'LQ_ESSR', ",
+                        "'L_ESSR_length_response', 'LQ_ESSR_length_response', 'LQ_ESSR_spectral', ",
+                        "'LQ_ESSR_spectral_long_bin_memory', 'LQ_ESSR_spec_bins99_evid_expand' or ",
+                        ## "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand'."))
+                        "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
+                        "'ESJD_LQ_ESSR_spec_bins99_evid_expand'."))
         }
         algorithm_key <- tolower(trimws(as.character(burnin_algorithm)))
         ##
@@ -156,13 +185,72 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            lq_essr = "LQ_ESSR",
                            lqessr = "LQ_ESSR",
                            `lq-essr` = "LQ_ESSR",
+                           ##
+                           ## ---- the soft minimum of the linear ("L_") or the linear and quadratic ("LQ_") lag-one ESS
+                           ##      bounds per unit trajectory length, maximised over tau from the length response of the
+                           ##      jittered trajectories (R_fn_length_response_tau_criterion.R):
+                           ##
+                           l_essr_length_response = "L_ESSR_length_response",
+                           `l-essr-length-response` = "L_ESSR_length_response",
+                           lq_essr_length_response = "LQ_ESSR_length_response",
+                           `lq-essr-length-response` = "LQ_ESSR_length_response",
+                           ##
+                           ## ---- the same with a spectral linear term (the flow's fitted cosine mixture per
+                           ##      coordinate, composed with the acceptance laziness), per expected gradient
+                           ##      (R_fn_spectral_ESS_tau_criterion.R; 6 Oct 2026):
+                           ##
+                           lq_essr_spectral = "LQ_ESSR_spectral",
+                           `lq-essr-spectral` = "LQ_ESSR_spectral",
+                           ##
+                           ## ---- the same with the length bins forgetting at 0.99 per update instead of 0.95
+                           ##      (R_fn_spectral_ESS_tau_criterion.R; 7 Oct 2026):
+                           ##
+                           lq_essr_spectral_long_bin_memory = "LQ_ESSR_spectral_long_bin_memory",
+                           `lq-essr-spectral-long-bin-memory` = "LQ_ESSR_spectral_long_bin_memory",
+                           ##
+                           ## ---- (7 Oct 2026; R_fn_spectral_ESS_tau_criterion.R) the same with the
+                           ##      upper-end doubling only on evidence; and the equal-weight geometric mean of
+                           ##      ESJD and that, with the finite-run ESS of the run's n_iter draws:
+                           ##
+                           lq_essr_spec_bins99_evid_expand = "LQ_ESSR_spec_bins99_evid_expand",
+                           esjd_lq_essr_spec_bins99_finite_n_evid_expand =
+                                 "ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand",
+                           esjd_lq_essr_spec_bins99_evid_expand = "ESJD_LQ_ESSR_spec_bins99_evid_expand",
+                           lq_essr_spec_bins99_evid_expand_jump_accept =
+                                 "LQ_ESSR_spec_bins99_evid_expand_jump_accept",
+                           esjd_w20_lq_essr_spec_bins99_evid_expand = "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
+                           esjd_w33_lq_essr_spec_bins99_evid_expand = "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand",
                            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'; got: ", burnin_algorithm))
                            ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'; got: ", burnin_algorithm))
                            ## stop(paste0("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time', 'SNAPER_time', ",
                            ##             "'ESJD', 'ESJD_CHESSR' or 'ESJD_SNAPER'; got: ", burnin_algorithm)))
+                           ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                           ##             "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                           ##             "'ESJD_SNAPER' or 'LQ_ESSR'; got: ", burnin_algorithm)))
+                           ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                           ##             "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                           ##             "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response' or ",
+                           ##             "'LQ_ESSR_length_response'; got: ", burnin_algorithm)))
+                           ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                           ##             "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                           ##             "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response', ",
+                           ##             "'LQ_ESSR_length_response' or 'LQ_ESSR_spectral'; got: ",
+                           ##             burnin_algorithm)))
+                        ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                                    ## "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                                    ## "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response', ",
+                                    ## "'LQ_ESSR_length_response', 'LQ_ESSR_spectral' or ",
+                                    ## "'LQ_ESSR_spectral_long_bin_memory'; got: ", burnin_algorithm)))
                            stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
                                        "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
-                                       "'ESJD_SNAPER' or 'LQ_ESSR'; got: ", burnin_algorithm)))
+                                       "'ESJD_SNAPER', 'LQ_ESSR', 'L_ESSR_length_response', ",
+                                       "'LQ_ESSR_length_response', 'LQ_ESSR_spectral', ",
+                                       "'LQ_ESSR_spectral_long_bin_memory', ",
+                                       "'LQ_ESSR_spec_bins99_evid_expand' or ",
+                                       ## "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand'; got: ",
+                                       "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
+                                       "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
+                                       burnin_algorithm)))
         return(algorithm)
 
 }

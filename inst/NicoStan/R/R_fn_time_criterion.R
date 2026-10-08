@@ -839,7 +839,10 @@ fn_lag_one_autocorrelation_rho_statistic_per_chain <-  function( algorithm,
                                                                  theta_accepted,
                                                                  mean_initial,
                                                                  metric_factor,
-                                                                 direction = NULL) {
+                                                                 ## direction = NULL) {
+                                                                 direction = NULL,
+                                                                 ## interest_only: the rows of the statistic (NULL = every row; 6 Oct 2026):
+                                                                 interest_rows = NULL) {
 
         theta_initial <-  as.matrix(theta_initial)
         theta_accepted <-  as.matrix(theta_accepted)
@@ -848,6 +851,15 @@ fn_lag_one_autocorrelation_rho_statistic_per_chain <-  function( algorithm,
         }
         initial_in_metric_coordinates <-  fn_apply_trajectory_metric(metric_factor, theta_initial - mean_initial)
         accepted_in_metric_coordinates <-  fn_apply_trajectory_metric(metric_factor, theta_accepted - mean_initial)
+        if (!is.null(interest_rows)) {
+              initial_in_metric_coordinates <-  fn_rows_of_the_tau_criterion_statistic(
+                    values_in_metric_coordinates = initial_in_metric_coordinates,
+                    interest_rows                = interest_rows)
+              accepted_in_metric_coordinates <-  fn_rows_of_the_tau_criterion_statistic(
+                    values_in_metric_coordinates = accepted_in_metric_coordinates,
+                    interest_rows                = interest_rows)
+              direction <-  fn_snaper_direction_on_the_interest_rows(direction, interest_rows)
+        }
         if (algorithm %in% c("SNAPER", "SNAPER_time")) {
               if (length(direction) != nrow(initial_in_metric_coordinates) || any(!is.finite(direction))) stop("Invalid SNAPER direction.")
               return(list( criterion_statistic_at_trajectory_start = c(crossprod(direction, initial_in_metric_coordinates))^2,
