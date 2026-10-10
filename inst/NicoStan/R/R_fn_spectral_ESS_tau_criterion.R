@@ -497,7 +497,15 @@ fn_spectral_LQ_ESSR_update_cpp_function <-  function() {
                     !exists(cpp_function_name, envir = update_env, mode = "function", inherits = FALSE)) {
                         return(list(update_function = NULL, error = trimws(as.character(load_result))))
                 }
+                ## return(list(update_function = get(cpp_function_name, envir = update_env, inherits = FALSE),
+                ##             error = NA_character_))
+                ## (and the function returning a state with its bin matrices in R, from the same compiled file)
                 return(list(update_function = get(cpp_function_name, envir = update_env, inherits = FALSE),
+                            state_with_bin_matrices_in_R_function = get(
+                                  "fn_spectral_LQ_ESSR_state_with_bin_matrices_in_R", envir = update_env,
+                                  inherits = FALSE),
+                            statistics_function = get("fn_spectral_LQ_ESSR_statistics_cpp", envir = update_env,
+                                                      inherits = FALSE),
                             error = NA_character_))
         }
         cache_dir <-  getOption("NicoStan_src_extra_cache_dir",
@@ -515,9 +523,51 @@ fn_spectral_LQ_ESSR_update_cpp_function <-  function() {
                 stop(paste0("the spectral LQ_ESSR criterion: ", cpp_file, " did not compile or load (",
                             loaded$error, ")."))
         }
-        options(NicoStan_spectral_LQ_ESSR_update_loaded = list(cpp_file = cpp_file, cpp_file_md5 = cpp_file_md5,
-                                                              update_function = loaded$update_function))
+        ## options(NicoStan_spectral_LQ_ESSR_update_loaded = list(cpp_file = cpp_file,
+        ##                                                       cpp_file_md5 = cpp_file_md5,
+        ##                                                       update_function = loaded$update_function))
+        options(NicoStan_spectral_LQ_ESSR_update_loaded = list(
+              cpp_file                              = cpp_file,
+              cpp_file_md5                          = cpp_file_md5,
+              update_function                       = loaded$update_function,
+              state_with_bin_matrices_in_R_function = loaded$state_with_bin_matrices_in_R_function,
+              statistics_function                   = loaded$statistics_function))
         return(loaded$update_function)
+
+}
+##
+## ---- the criterion's state with its four bin matrices in R (copies of the matrices that the C++ update holds in
+##      C++ memory between updates; see spectral_LQ_ESSR_update.cpp), as the update returned it before it held
+##      them; a NULL state, or one with its matrices in R already, is returned as it is. The R code of the update
+##      (options(NicoStan_spectral_LQ_ESSR_update_in_R = TRUE)) and the burn-in debug record use it, and the C++
+##      update accepts this form too (a state saved with saveRDS() must be saved in this form):
+##
+fn_spectral_LQ_ESSR_state_with_bin_matrices_in_R <-  function(state) {
+
+        if (!is.list(state) || is.null(state[["bin_matrices_held_in_cpp_between_updates"]])) return(state)
+        fn_spectral_LQ_ESSR_update_cpp_function()
+        session_loaded <-  getOption("NicoStan_spectral_LQ_ESSR_update_loaded", default = NULL)
+        if (!is.function(session_loaded$state_with_bin_matrices_in_R_function)) {
+                stop(paste0("the spectral LQ_ESSR criterion: the compiled update in this R session has no ",
+                            "fn_spectral_LQ_ESSR_state_with_bin_matrices_in_R() (an older .cpp); start a new R ",
+                            "session."))
+        }
+        return(session_loaded$state_with_bin_matrices_in_R_function(state))
+
+}
+##
+## ---- the C++ function of SpESS-R's per-coordinate statistics for a diagonal trajectory metric (the same numbers
+##      as the R code of fn_metric_position_criterion(); spectral_LQ_ESSR_update.cpp):
+##
+fn_spectral_LQ_ESSR_statistics_cpp_function <-  function() {
+
+        fn_spectral_LQ_ESSR_update_cpp_function()
+        session_loaded <-  getOption("NicoStan_spectral_LQ_ESSR_update_loaded", default = NULL)
+        if (!is.function(session_loaded$statistics_function)) {
+                stop(paste0("the spectral LQ_ESSR criterion: the compiled update in this R session has no ",
+                            "fn_spectral_LQ_ESSR_statistics_cpp() (an older .cpp); start a new R session."))
+        }
+        return(session_loaded$statistics_function)
 
 }
 ##
@@ -550,17 +600,35 @@ fn_spectral_LQ_ESSR_update_in_cpp <-  function( criterion,
                                                upper_end_zone_in_doublings,
                                                bin_forgetting_factor,
                                                expansion_rule,
-                                               n_bootstrap_draws) {
+                                               ## n_bootstrap_draws) {
+                                               n_bootstrap_draws,
+                                               ## the threads over which the C++ update spreads its loops over the
+                                               ## parameters (and candidates); its results are the same with any
+                                               ## number of threads (1 = the serial loops):
+                                               n_threads_for_update_loops = 1,
+                                               ## at most this many rows fitted and scored per update (the
+                                               ## slowest-moving ones; 0 = every row), and whether the bins decay
+                                               ## lazily (spectral_LQ_ESSR_update.cpp):
+                                               largest_number_of_rows_fitted_per_update = 0,
+                                               bins_decay_lazily = FALSE) {
 
         rows <-  if (is.null(interest_rows)) seq_len(nrow(criterion$linear_jump_squared)) else interest_rows
         ## global_environment <-  globalenv()
         ## had_seed <-  exists(".Random.seed", envir = global_environment, inherits = FALSE)
         ## if (had_seed) saved_seed <-  get(".Random.seed", envir = global_environment, inherits = FALSE)
         update_function <-  fn_spectral_LQ_ESSR_update_cpp_function()
-        out <-  update_function(state, criterion$linear_jump_squared[rows, , drop = FALSE],
-                                criterion$quadratic_jump_squared[rows, , drop = FALSE],
-                                criterion$initial_second_moment[rows, , drop = FALSE],
-                                criterion$initial_fourth_moment[rows, , drop = FALSE],
+        ## (every row: the matrices themselves, not copies of them)
+        fn_rows_used <-  function(statistic) {
+                if (is.null(interest_rows)) statistic else statistic[rows, , drop = FALSE]
+        }
+        ## out <-  update_function(state, criterion$linear_jump_squared[rows, , drop = FALSE],
+        ##                         criterion$quadratic_jump_squared[rows, , drop = FALSE],
+        ##                         criterion$initial_second_moment[rows, , drop = FALSE],
+        ##                         criterion$initial_fourth_moment[rows, , drop = FALSE],
+        out <-  update_function(state, fn_rows_used(criterion$linear_jump_squared),
+                                fn_rows_used(criterion$quadratic_jump_squared),
+                                fn_rows_used(criterion$initial_second_moment),
+                                fn_rows_used(criterion$initial_fourth_moment),
                                 tau, as.numeric(tau_values),
                                 if (isTRUE(is.finite(eps_used_for_trajectories))) {
                                         eps_used_for_trajectories
@@ -569,7 +637,12 @@ fn_spectral_LQ_ESSR_update_in_cpp <-  function( criterion,
                                 isTRUE(use_proposals),
                                 learning_rate, schedule_iteration, schedule_length, soft_minimum_power,
                                 minimum_bin_count, grid_step_in_doublings, upper_end_zone_in_doublings,
-                                bin_forgetting_factor, identical(expansion_rule, "evidence"), n_bootstrap_draws)
+                                ## bin_forgetting_factor, identical(expansion_rule, "evidence"),
+                                ## n_bootstrap_draws)
+                                bin_forgetting_factor, identical(expansion_rule, "evidence"), n_bootstrap_draws,
+                                max(1, floor(n_threads_for_update_loops)),
+                                max(0, floor(largest_number_of_rows_fitted_per_update)),
+                                isTRUE(bins_decay_lazily))
         ## if (isTRUE(out$bootstrap_ran)) {
         ##         if (had_seed) {
         ##                 assign(".Random.seed", saved_seed, envir = global_environment)
@@ -633,7 +706,14 @@ fn_spectral_ESS_soft_minimum_tau_update <-  function( criterion,
                                                       n_bootstrap_draws                = 32,
                                                       ## jump_weighted_acceptance         = FALSE) {
                                                       jump_weighted_acceptance         = FALSE,
-                                                      objective_mix_ESJD_weight        = 0.5) {
+                                                      ## objective_mix_ESJD_weight        = 0.5) {
+                                                      objective_mix_ESJD_weight        = 0.5,
+                                                      ## threads for the C++ update's loops:
+                                                      n_threads_for_update_loops       = 1,
+                                                      ## the C++ update's limit on the rows fitted per update (0 =
+                                                      ## every row) and its lazily decaying bins:
+                                                      largest_number_of_rows_fitted_per_update = 0,
+                                                      bins_decay_lazily                = FALSE) {
 
         required_fields <-  c("linear_jump_squared", "quadratic_jump_squared", "initial_second_moment",
                               "initial_fourth_moment")
@@ -677,8 +757,14 @@ fn_spectral_ESS_soft_minimum_tau_update <-  function( criterion,
                       upper_end_zone_in_doublings = upper_end_zone_in_doublings,
                       bin_forgetting_factor       = bin_forgetting_factor,
                       expansion_rule              = expansion_rule,
-                      n_bootstrap_draws           = n_bootstrap_draws))
+                      ## n_bootstrap_draws           = n_bootstrap_draws))
+                      n_bootstrap_draws           = n_bootstrap_draws,
+                      n_threads_for_update_loops  = n_threads_for_update_loops,
+                      largest_number_of_rows_fitted_per_update = largest_number_of_rows_fitted_per_update,
+                      bins_decay_lazily           = bins_decay_lazily))
         }
+        ## (the R code below needs the state's bin matrices in R; the C++ update may hold them in C++ memory)
+        state <-  fn_spectral_LQ_ESSR_state_with_bin_matrices_in_R(state)
         ## interest_only: keep only the rows of the parameters of interest (the main rows lead every block):
         if (!is.null(interest_rows)) {
                 if (any(interest_rows > nrow(criterion$linear_jump_squared))) {

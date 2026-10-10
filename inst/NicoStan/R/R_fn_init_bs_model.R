@@ -249,9 +249,24 @@ init_bs_model_external <- function( stream = NULL,
                                                   seed = 123,
                                                   stanc_args = stanc_args,
                                                   make_args = make_args)
-        if (page_release_linux) {
+        ## the fingerprint is written only when it differs, and through a temporary file renamed over
+        ## it: several processes start fits of the same model at once, and rewriting it in place (writeLines()
+        ## empties the file first) let another process read it empty, take the model as stale, delete its .so and
+        ## rebuild it whilst other fits were loading it
+        # if (page_release_linux) {
+        #       writeLines(text = page_release_fingerprint,
+        #                  con = page_release_fingerprint_file)
+        # }
+        if (page_release_linux &&
+            !(file.exists(page_release_fingerprint_file) &&
+              identical(x = readLines(con = page_release_fingerprint_file, warn = FALSE),
+                        y = page_release_fingerprint))) {
+              temporary_fingerprint_file <- tempfile(pattern = "page_release_fingerprint_",
+                                                     tmpdir = dirname(page_release_fingerprint_file),
+                                                     fileext = ".txt.tmp")
               writeLines(text = page_release_fingerprint,
-                         con = page_release_fingerprint_file)
+                         con = temporary_fingerprint_file)
+              stopifnot(file.rename(from = temporary_fingerprint_file, to = page_release_fingerprint_file))
         }
         
         json_file_path <- normalizePath(json_file_path)

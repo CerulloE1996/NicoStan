@@ -187,7 +187,11 @@ fn_metric_position_criterion <-  function( algorithm,
                                            ##
                                            ## ---- interest_only: the rows over which the statistic is computed (fn_rows_of_the_tau_criterion_statistic);
                                            ##      NULL = every row. Ignored by "LQ_ESSR" and the length-response criteria (their own selection):
-                                           interest_rows                          = NULL) {
+                                           ## interest_rows                          = NULL) {
+                                           interest_rows                          = NULL,
+                                           ## SpESS-R with a diagonal metric only: the threads of its
+                                           ## statistics in C++
+                                           n_threads_for_spectral_LQ_ESSR_statistics = 1) {
 
         theta_initial <-  as.matrix(theta_initial)
         theta_proposed <-  as.matrix(theta_proposed)
@@ -224,6 +228,20 @@ fn_metric_position_criterion <-  function( algorithm,
                 stop("Unknown position-based trajectory algorithm.")
         }
         ##
+        ## ---- SpESS-R with a diagonal metric: every statistic it uses computed in C++ from the endpoints (the
+        ##      same numbers as the R code below; spectral_LQ_ESSR_update.cpp), without the three matrices below:
+        if (identical(algorithm, "LQ_ESSR_spec_bins99_evid_expand")) {
+                metric_vector <-  if (is.list(metric_factor) && !is.matrix(metric_factor$main)) {
+                        c(metric_factor$main, metric_factor$us)
+                } else if (!is.list(metric_factor) && !is.matrix(metric_factor)) metric_factor else NULL
+                if (!is.null(metric_vector) && length(metric_vector) == nrow(theta_initial)) {
+                        statistics_function <-  fn_spectral_LQ_ESSR_statistics_cpp_function()
+                        return(statistics_function(theta_initial, theta_proposed, velocity_proposed,
+                                                   as.numeric(mean_initial), as.numeric(metric_vector),
+                                                   as.numeric(tau_values),
+                                                   max(1, floor(n_threads_for_spectral_LQ_ESSR_statistics))))
+                }
+        }
         initial <-  fn_apply_trajectory_metric(metric_factor, theta_initial - mean_initial)
         proposed <-  fn_apply_trajectory_metric(metric_factor, theta_proposed - mean_proposed)
         velocity <-  fn_apply_trajectory_metric(metric_factor, velocity_proposed)
@@ -274,6 +292,49 @@ fn_metric_position_criterion <-  function( algorithm,
                              "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand")) {
                 ## monitored_rows <-  if (is.list(metric_factor)) seq_len(metric_factor$n_main) else seq_len(nrow(initial))
                 monitored_rows <-  seq_len(nrow(initial))
+                ## (SpESS-R, whose C++ update reads neither log-tau derivative: the products of a diagonal
+                ##  metric without rbind(), no copies of every row and no quadratic derivative; every value it
+                ##  uses is the same number)
+                if (identical(algorithm, "LQ_ESSR_spec_bins99_evid_expand")) {
+                        ## (a diagonal metric: computed in C++ above, before the three matrices; the
+                        ##  earlier call here, with the three matrices built:)
+                        ## metric_vector <-  if (is.list(metric_factor) && !is.matrix(metric_factor$main)) {
+                        ##         c(metric_factor$main, metric_factor$us)
+                        ## } else if (!is.list(metric_factor) && !is.matrix(metric_factor)) {
+                        ##         metric_factor
+                        ## } else NULL
+                        ## if (!is.null(metric_vector) && length(metric_vector) == nrow(initial) &&
+                        ##     length(mean_initial) == nrow(initial)) {
+                        ##         statistics_function <-  fn_spectral_LQ_ESSR_statistics_cpp_function()
+                        ##         return(statistics_function(theta_initial, theta_proposed,
+                        ##                                    as.numeric(mean_initial),
+                        ##                                    as.numeric(metric_vector), initial, velocity,
+                        ##                                    as.numeric(tau_values),
+                        ##                                    max(1, floor(
+                        ##                                        n_threads_for_spectral_LQ_ESSR_statistics))))
+                        ## }
+                        fn_metric_times <-  function(values) {
+                                if (is.list(metric_factor) && !is.matrix(metric_factor$main) &&
+                                    nrow(values) == metric_factor$n_main + length(metric_factor$us)) {
+                                        return(c(metric_factor$main, metric_factor$us) * values)
+                                }
+                                fn_apply_trajectory_metric(metric_factor, values)
+                        }
+                        jump_in_metric_coordinates <-  fn_metric_times(theta_proposed - theta_initial)
+                        proposed_monitored <-  fn_metric_times(theta_proposed - mean_initial)
+                        trajectory_length_per_entry <-  matrix(tau_values, nrow = nrow(initial),
+                                                               ncol = length(tau_values), byrow = TRUE)
+                        squared_statistic_change <-  proposed_monitored^2 - initial^2
+                        linear_jump_squared_log_tau_derivative <-  2 * jump_in_metric_coordinates * velocity *
+                                                                   trajectory_length_per_entry
+                        return(list(linear_jump_squared     = jump_in_metric_coordinates^2,
+                                    quadratic_jump_squared  = squared_statistic_change^2,
+                                    initial_second_moment   = initial^2,
+                                    initial_fourth_moment   = initial^4,
+                                    numerator               = colSums(jump_in_metric_coordinates^2),
+                                    numerator_gradient      = colSums(linear_jump_squared_log_tau_derivative),
+                                    tau_cost_exponent       = 1))
+                }
                 jump_in_metric_coordinates <-  fn_apply_trajectory_metric(metric_factor,
                                                                           theta_proposed - theta_initial)[monitored_rows, , drop = FALSE]
                 initial_monitored <-  initial[monitored_rows, , drop = FALSE]
@@ -573,7 +634,19 @@ fn_metric_tau_block_update <-  function( algorithm,
                                          ##      criterion inputs (spectral_update_inputs; the burn-in debug
                                          ##      record, debug = TRUE, R_fn_burnin_debug_record.R); FALSE
                                          ##      (default): the result alone:
-                                         return_spectral_update_inputs          = FALSE) {
+                                         ## return_spectral_update_inputs          = FALSE) {
+                                         return_spectral_update_inputs          = FALSE,
+                                         ##
+                                         ## ---- "LQ_ESSR_spectral" (C++ update) only: the threads over which the
+                                         ##      update spreads its loops over the parameters and candidates (its
+                                         ##      results are the same with any number; 1 = the serial loops):
+                                         n_threads_for_spectral_LQ_ESSR_update_loops = 1,
+                                         ##
+                                         ## ---- SpESS-R (C++ update) only: the largest number of rows
+                                         ##      fitted per update (0 = every row) and whether the bins
+                                         ##      decay lazily:
+                                         SpESS_R_max_rows_fitted_per_update = 0,
+                                         SpESS_R_bins_decay_lazily = FALSE) {
 
         use_proposals <-  isTRUE(weight_by_probability)
         if (!is.null(position_criterion)) {
@@ -598,7 +671,8 @@ fn_metric_tau_block_update <-  function( algorithm,
             tau_cost_offset = tau_cost_offset,
             ## interest_only: the non-LQ criteria compute their statistic over the interest rows (LQ selects its rows below):
             interest_rows = if (fn_tau_criterion_algorithm_selects_interest_rows_itself(algorithm)) NULL else
-                                                                                                  interest_rows)
+                                                                                                  interest_rows,
+            n_threads_for_spectral_LQ_ESSR_statistics = n_threads_for_spectral_LQ_ESSR_update_loops)
         }  ## end of: if (!is.null(position_criterion))
         ##
         if (length(probabilities) != ncol(as.matrix(theta_initial)) ||
@@ -715,7 +789,11 @@ fn_metric_tau_block_update <-  function( algorithm,
                         eps_used_for_trajectories_now <-  step_sizes_for_spectral_ESS$eps_used_for_trajectories
                         if (is.null(eps_used_for_trajectories_now)) eps_used_for_trajectories_now <-  NA_real_
                         spectral_update_arguments <-  list(
-                              state                            = spectral_state,
+                              ## state                            = spectral_state,
+                              ## (a copy with its bin matrices in R: the C++ update changes the matrices it holds
+                              ##  in place, so the recorded state must not be the live one)
+                              state                            = fn_spectral_LQ_ESSR_state_with_bin_matrices_in_R(
+                                                                       spectral_state),
                               tau                              = tau,
                               tau_values                       = tau_values,
                               eps_used_for_trajectories        = eps_used_for_trajectories_now,
@@ -738,7 +816,12 @@ fn_metric_tau_block_update <-  function( algorithm,
                               objective_mix                    = spectral_objective_mix,
                               ## jump_weighted_acceptance         = spectral_jump_weighted_acceptance)
                               jump_weighted_acceptance         = spectral_jump_weighted_acceptance,
-                              objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight)
+                              ## objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight)
+                              objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight,
+                              n_threads_for_update_loops       = n_threads_for_spectral_LQ_ESSR_update_loops,
+                              largest_number_of_rows_fitted_per_update =
+                                    SpESS_R_max_rows_fitted_per_update,
+                              bins_decay_lazily                = SpESS_R_bins_decay_lazily)
                         spectral_update <-  with(spectral_update_arguments,
                               fn_spectral_ESS_soft_minimum_tau_update(
                                     criterion                        = criterion,
@@ -765,7 +848,12 @@ fn_metric_tau_block_update <-  function( algorithm,
                                     objective_mix                    = objective_mix,
                                     ## jump_weighted_acceptance         = jump_weighted_acceptance))
                                     jump_weighted_acceptance         = jump_weighted_acceptance,
-                                    objective_mix_ESJD_weight        = objective_mix_ESJD_weight))
+                                    ## objective_mix_ESJD_weight        = objective_mix_ESJD_weight))
+                                    objective_mix_ESJD_weight        = objective_mix_ESJD_weight,
+                                    n_threads_for_update_loops       = n_threads_for_update_loops,
+                                    largest_number_of_rows_fitted_per_update =
+                                          largest_number_of_rows_fitted_per_update,
+                                    bins_decay_lazily                = bins_decay_lazily))
                         update_formals <-  formals(fn_spectral_ESS_soft_minimum_tau_update)
                         arguments_at_default <-  setdiff(names(update_formals),
                                                          c("criterion", names(spectral_update_arguments)))
@@ -807,7 +895,12 @@ fn_metric_tau_block_update <-  function( algorithm,
                         objective_mix                    = spectral_objective_mix,
                         ## jump_weighted_acceptance         = spectral_jump_weighted_acceptance))
                         jump_weighted_acceptance         = spectral_jump_weighted_acceptance,
-                        objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight))
+                        ## objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight))
+                        objective_mix_ESJD_weight        = spectral_objective_mix_ESJD_weight,
+                        n_threads_for_update_loops       = n_threads_for_spectral_LQ_ESSR_update_loops,
+                        largest_number_of_rows_fitted_per_update =
+                              SpESS_R_max_rows_fitted_per_update,
+                        bins_decay_lazily                = SpESS_R_bins_decay_lazily))
         }
         if (algorithm %in% c("L_ESSR_length_response", "LQ_ESSR_length_response")) {
                 length_response_state <-  if (is.list(component_criterion_ema)) component_criterion_ema else NULL

@@ -527,6 +527,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## "joint" or interest_only always wins.
                                         ## tau_adaptation_block = "main",
                                         tau_adaptation_block = NULL,
+                                        ## SpESS-R only (see the R6 sample() method): the largest number
+                                        ## of rows fitted per tau update (0 = every row), and whether the
+                                        ## bins decay lazily:
+                                        SpESS_R_max_rows_fitted_per_update = 0,
+                                        SpESS_R_bins_decay_lazily = FALSE,
                                         ##   burnin_TBB_pool_equals_n_chains      - NULL defaults to TRUE for built-in models (separate OpenMP WCP teams).
                                         ##                                          Stan models FORCE FALSE, even if TRUE is supplied: nested TBB work
                                         ##                                          shares the n_threads_WCP_burnin * n_chains_burnin thread budget.
@@ -627,9 +632,79 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         num_chunks_burnin = NULL,
                                         num_chunks_sampling = NULL,
                                         diffusion_HMC_integrator = "kick_flow_kick",
+                                        ##
+                                        ## ---- burn-in adaptation settings (documented in $sample()):
+                                        tau_initial_moments_window_fraction = 0.5,
+                                        tau_initial_moments_window_min_iter = 1,
+                                        tau_adam_beta1 = NULL,
+                                        tau_adam_beta2 = NULL,
+                                        tau_adam_epsilon = NULL,
+                                        eps_adam_beta1 = NULL,
+                                        eps_adam_beta2 = NULL,
+                                        eps_adam_epsilon = NULL,
+                                        tau_adaptation_scheme = "adam_decay",
+                                        tau_learning_rate_restart_at_metric_end = FALSE,
+                                        eps_adam_reset_at_metric_end = TRUE,
+                                        eps_learning_rate_restart_at_metric_end = TRUE,
+                                        rate_criterion_cost_offset_steps = 0,
+                                        pooled_metric_warm_up = 8,
+                                        pooled_metric_soft_full_weight_draws = NULL,
+                                        pooled_metric_weight_k_draws = 5,
+                                        pooled_metric_signal_to_noise_centred = FALSE,
+                                        metric_update_rescales_eps_and_tau = TRUE,
+                                        learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
+                                        resident_burnin = TRUE,
+                                        resident_burnin_joint_block = TRUE,
+                                        tau_initial_resident_moments = TRUE,
+                                        record_burnin_metric_nuisance_variance_quantiles_history = TRUE,
+                                        burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step = FALSE,
+                                        ## NULL = TRUE for the latent_trait model, FALSE for the others:
+                                        autodiff_fallback = NULL,
+                                        ##
                                         debug_burnin_timing = FALSE,
                                         run_in_fresh_R_process = TRUE
 ) {
+                ## ---- global R options are not read for sampler settings: each of these is an argument of this
+                ##      function (and of $sample()), so a session that still sets one of the options stops here
+                ##      instead of having it ignored:
+                global_R_option_names_that_the_sampler_does_not_read <-  paste0("NicoStan_", c(
+                      "tau_initial_moments_window_fraction",
+                      "tau_initial_moments_window_min_iter",
+                      "tau_adam_beta1",
+                      "tau_adam_beta2",
+                      "tau_adam_epsilon",
+                      "eps_adam_beta1",
+                      "eps_adam_beta2",
+                      "eps_adam_epsilon",
+                      "tau_adaptation_scheme",
+                      "tau_learning_rate_restart_at_metric_end",
+                      "eps_adam_reset_at_metric_end",
+                      "eps_learning_rate_restart_at_metric_end",
+                      "rate_criterion_cost_offset_steps",
+                      "pooled_metric_warm_up",
+                      "pooled_metric_soft_full_weight_draws",
+                      "pooled_metric_weight_k_draws",
+                      "pooled_metric_signal_to_noise_centred",
+                      "metric_update_rescales_eps_and_tau",
+                      "learning_rate_initial_n_tau_updates_held_from_tau_handover",
+                      "resident_burnin",
+                      "resident_burnin_joint_block",
+                      "tau_initial_resident_moments",
+                      "record_burnin_metric_nuisance_variance_quantiles_history"),
+                      ## (and the two BayesMVP options that were read the same way:)
+                      "BayesMVP_autodiff_fallback", "BayesMVP_force_L1")
+                global_R_options_set_that_the_sampler_does_not_read <-
+                      global_R_option_names_that_the_sampler_does_not_read[
+                            !vapply(X = global_R_option_names_that_the_sampler_does_not_read,
+                                    FUN.VALUE = logical(1),
+                                    FUN = function(option_name) is.null(getOption(option_name)))]
+                if (length(global_R_options_set_that_the_sampler_does_not_read) > 0) {
+                    stop(paste0("These global R options are not read by the sampler: ",
+                                paste(global_R_options_set_that_the_sampler_does_not_read, collapse = ", "),
+                                ". Give each setting as the $sample() argument of the same name without the ",
+                                "\"NicoStan_\" prefix, and remove the option, e.g. options(",
+                                global_R_options_set_that_the_sampler_does_not_read[1], " = NULL)."))
+                }
                 if (!is.logical(run_in_fresh_R_process) || length(run_in_fresh_R_process) != 1L || is.na(run_in_fresh_R_process)) {
                     stop("run_in_fresh_R_process must be TRUE or FALSE.")
                 }
@@ -1056,7 +1131,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         !identical(tau_jitter_burnin, "uniform") || isTRUE(manual_tau) ||
                         isTRUE(tau_if_manual_in_L_units) || !identical(tau_sampling_scale, "none") ||
                         isTRUE(tau_shrink_on_divergence) ||
-                        !identical(getOption("NicoStan_tau_adaptation_scheme", "adam_decay"), "adam_decay")) {
+                        !identical(tau_adaptation_scheme, "adam_decay")) {
                         stop(paste0("bulk_local_tuner requires ESJD uniform-jitter adaptive tau ",
                                     "without extra tau schemes."))
                     }
@@ -1157,10 +1232,12 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 force_PartialLog <- if_null_then_set_to(force_PartialLog, FALSE)
                 multi_attempts <- if_null_then_set_to(multi_attempts, TRUE)
                 ##
-                autodiff_fallback <-  getOption(x = "BayesMVP_autodiff_fallback", default = identical(init_object$Model_type, "latent_trait"))
+                if (is.null(autodiff_fallback)) {
+                    autodiff_fallback <-  identical(init_object$Model_type, "latent_trait")
+                }
                 ##
                 if (!is.logical(autodiff_fallback) || length(autodiff_fallback) != 1 || is.na(autodiff_fallback)) {
-                    stop("BayesMVP_autodiff_fallback must be a single TRUE or FALSE.")
+                    stop("autodiff_fallback must be NULL or a single TRUE or FALSE.")
                 }
                 ##
                 autodiff_fallback <-  init_object$Model_type %in% c("LC_MVP", "MVP", "LC_MVOP", "MVOP", "latent_trait") && isTRUE(multi_attempts) && autodiff_fallback
@@ -1392,6 +1469,47 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 # if (is.null(Stan_data_list$test_perm))      Stan_data_list$test_perm      <- 1:model_args_list$n_tests
                 # if (is.null(Stan_data_list$n_cat_per_test)) Stan_data_list$n_cat_per_test <- model_args_list$n_cat_per_test
+                ##
+                ## ---- Burn-in within-chain threads and chunks of an external Stan model with the N / chunk_size
+                ##      data contract (reduce_sum_static), when neither n_threads_WCP_burnin nor
+                ##      num_chunks_burnin is given: chosen by fn_compute_burnin_n_threads_WCP_and_num_chunks()
+                ##      (Paper 1's burn-in rule) for the CPUs of this process and the measured M_bytes/chain.
+                ##      A value given is used as given; otherwise (a built-in model, or a Stan model without
+                ##      the contract) n_threads_WCP_burnin = 1, as before:
+                ##
+                burnin_n_threads_WCP_and_num_chunks_rule <-  NULL
+                if (is.null(n_threads_WCP_burnin)) {
+                    if (identical(Model_type, "Stan") && is.null(num_chunks_burnin) &&
+                        fn_Stan_data_has_N_and_chunk_size(Stan_data_list = Stan_data_list)) {
+                        model_so_file_for_burnin_rule <-
+                              if (is.character(init_object$model_so_file) &&
+                                  (length(init_object$model_so_file) == 1) &&
+                                  file.exists(init_object$model_so_file)) init_object$model_so_file else
+                              normalizePath(transform_stan_path(Stan_model_file_path))
+                        burnin_n_threads_WCP_and_num_chunks_rule <-
+                              fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model(
+                                    model_so_file   = model_so_file_for_burnin_rule,
+                                    Stan_data_list  = Stan_data_list,
+                                    n_chains_burnin = n_chains_burnin,
+                                    init_object     = init_object)
+                        n_threads_WCP_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$n_threads_WCP_burnin
+                        num_chunks_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$num_chunks_burnin
+                        M_MiB_per_chain <-  burnin_n_threads_WCP_and_num_chunks_rule$M_bytes_per_chain / 1024^2
+                        how_chosen <-  if (isTRUE(burnin_n_threads_WCP_and_num_chunks_rule$reused_saved_choice)) {
+                              "reused: the choice saved for this model, N, burn-in chains and CPUs"
+                        } else {
+                              paste0("chosen in ",
+                                     round(burnin_n_threads_WCP_and_num_chunks_rule$seconds_spent_choosing, 1),
+                                     " s, not counted in the burn-in time")
+                        }
+                        message(paste0("\033[36mBurn-in: ", n_chains_burnin, " chains x ", n_threads_WCP_burnin,
+                                       " within-chain threads, ", num_chunks_burnin, " chunks (M_bytes/chain = ",
+                                       round(M_MiB_per_chain, 2), " MiB; ", how_chosen,
+                                       "; fn_compute_burnin_n_threads_WCP_and_num_chunks())\033[0m"))
+                    } else {
+                        n_threads_WCP_burnin <-  1
+                    }
+                }
                 ##
                 ## ---- Explicit phase chunk counts for external Stan models use the model's N / chunk_size data contract:
                 ##
@@ -1845,6 +1963,34 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     ##
                     pre_burnin_object <-             fn_burnin(  init_object = init_object,
                                                                  debug_burnin_timing = debug_burnin_timing,
+                        ## ---- burn-in adaptation settings:
+                        tau_initial_moments_window_fraction = tau_initial_moments_window_fraction,
+                        tau_initial_moments_window_min_iter = tau_initial_moments_window_min_iter,
+                        tau_adam_beta1 = tau_adam_beta1,
+                        tau_adam_beta2 = tau_adam_beta2,
+                        tau_adam_epsilon = tau_adam_epsilon,
+                        eps_adam_beta1 = eps_adam_beta1,
+                        eps_adam_beta2 = eps_adam_beta2,
+                        eps_adam_epsilon = eps_adam_epsilon,
+                        tau_adaptation_scheme = tau_adaptation_scheme,
+                        tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
+                        eps_adam_reset_at_metric_end = eps_adam_reset_at_metric_end,
+                        eps_learning_rate_restart_at_metric_end = eps_learning_rate_restart_at_metric_end,
+                        rate_criterion_cost_offset_steps = rate_criterion_cost_offset_steps,
+                        pooled_metric_warm_up = pooled_metric_warm_up,
+                        pooled_metric_soft_full_weight_draws = pooled_metric_soft_full_weight_draws,
+                        pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
+                        pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
+                        metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                        learning_rate_initial_n_tau_updates_held_from_tau_handover =
+                              learning_rate_initial_n_tau_updates_held_from_tau_handover,
+                        resident_burnin = resident_burnin,
+                        resident_burnin_joint_block = resident_burnin_joint_block,
+                        tau_initial_resident_moments = tau_initial_resident_moments,
+                        record_burnin_metric_nuisance_variance_quantiles_history =
+                              record_burnin_metric_nuisance_variance_quantiles_history,
+                        burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
+                              burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step,
                                                                  ## (7 Oct 2026) n_iter, for the
                                                                  ## finite-run ESS of a burnin_algorithm:
                                                                  n_iter_sampling_per_chain = n_iter,
@@ -2944,7 +3090,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 if (!is.null(bulk_local_tuner)) {
                       bulk_local_tuner <-  fn_bulk_local_tuner_settings(bulk_local_tuner)
                       if (isTRUE(tau_shrink_on_divergence) ||
-                          !identical(getOption("NicoStan_tau_adaptation_scheme", "adam_decay"), "adam_decay")) {
+                          !identical(tau_adaptation_scheme, "adam_decay")) {
                             stop("bulk_local_tuner excludes divergence shrink and probe/averaging tau schemes.")
                       }
                       if (!identical(burnin_algorithm, "ESJD") || isTRUE(partitioned_HMC) ||
@@ -2986,6 +3132,34 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              bulk_local_tuner_cost_contract =
                                                                    bulk_local_tuner_cost_contract,
                                                              debug_burnin_timing = debug_burnin_timing,
+                        ## ---- burn-in adaptation settings:
+                        tau_initial_moments_window_fraction = tau_initial_moments_window_fraction,
+                        tau_initial_moments_window_min_iter = tau_initial_moments_window_min_iter,
+                        tau_adam_beta1 = tau_adam_beta1,
+                        tau_adam_beta2 = tau_adam_beta2,
+                        tau_adam_epsilon = tau_adam_epsilon,
+                        eps_adam_beta1 = eps_adam_beta1,
+                        eps_adam_beta2 = eps_adam_beta2,
+                        eps_adam_epsilon = eps_adam_epsilon,
+                        tau_adaptation_scheme = tau_adaptation_scheme,
+                        tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
+                        eps_adam_reset_at_metric_end = eps_adam_reset_at_metric_end,
+                        eps_learning_rate_restart_at_metric_end = eps_learning_rate_restart_at_metric_end,
+                        rate_criterion_cost_offset_steps = rate_criterion_cost_offset_steps,
+                        pooled_metric_warm_up = pooled_metric_warm_up,
+                        pooled_metric_soft_full_weight_draws = pooled_metric_soft_full_weight_draws,
+                        pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
+                        pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
+                        metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                        learning_rate_initial_n_tau_updates_held_from_tau_handover =
+                              learning_rate_initial_n_tau_updates_held_from_tau_handover,
+                        resident_burnin = resident_burnin,
+                        resident_burnin_joint_block = resident_burnin_joint_block,
+                        tau_initial_resident_moments = tau_initial_resident_moments,
+                        record_burnin_metric_nuisance_variance_quantiles_history =
+                              record_burnin_metric_nuisance_variance_quantiles_history,
+                        burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
+                              burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step,
                                                              ##
                                                              ## CHESSR_time / SNAPER_time only (NULL otherwise):
                                                              time_criterion_sampling_quantities = time_criterion_sampling_quantities,
@@ -3044,6 +3218,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              interest_rows = interest_rows,
                                                              tau_jitter_burnin = tau_jitter_burnin,
                                                              tau_adaptation_block = tau_adaptation_block,
+                                                             SpESS_R_max_rows_fitted_per_update =
+                                                                   SpESS_R_max_rows_fitted_per_update,
+                                                             SpESS_R_bins_decay_lazily =
+                                                                   SpESS_R_bins_decay_lazily,
                                                              ##
                                                              burnin_algorithm = burnin_algorithm,
                                                              diffusion_HMC = diffusion_HMC,
@@ -3708,6 +3886,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    n_chains_burnin = n_chains_burnin,
                    burnin_TBB_pool_equals_n_chains = burnin_TBB_pool_equals_n_chains,
                    n_burnin = n_burnin,
+                   ## the pre-burn-in actually run (0 iterations when it did not run), for the gradient count:
+                   pre_burnin_n_iter_run = if (!exists("pre_burnin_object", inherits = FALSE) ||
+                                               is.null(pre_burnin_object)) 0 else pre_burnin_params$n_burnin,
+                   pre_burnin_L = pre_burnin_L,
+                   pre_burnin_L_main_during_burnin_vec = if (!exists("pre_burnin_object", inherits = FALSE) ||
+                                                             is.null(pre_burnin_object)) NULL else
+                                                             pre_burnin_object$L_main_during_burnin_vec,
                    metric_type_main = metric_type_main,
                    metric_shape_main = metric_shape_main,
                    metric_type_nuisance = metric_type_nuisance,
@@ -3729,7 +3914,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    ##
                    time_burnin = time_burnin,
                    time_sampling = time_sampling,
-                   time_total = time_total)
+                   time_total = time_total,
+                   ##
+                   n_threads_WCP_burnin = n_threads_WCP_burnin,
+                   num_chunks_burnin = num_chunks_burnin,
+                   burnin_n_threads_WCP_and_num_chunks_rule = burnin_n_threads_WCP_and_num_chunks_rule)
   
   
   return(out_list)

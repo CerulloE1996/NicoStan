@@ -181,6 +181,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##
                                            tau_adaptation_block = "main",
                                            ##
+                                           ## ---- SpESS-R only: the largest number of rows fitted per tau
+                                           ##      update (0 = every row; above it, the slowest-moving
+                                           ##      rows), and whether the bins decay lazily (see the R6
+                                           ##      sample() method):
+                                           SpESS_R_max_rows_fitted_per_update = 0,
+                                           SpESS_R_bins_decay_lazily = FALSE,
+                                           ##
                                            ## Sole trajectory-length selector. Canonical values are
                                            ## "KE", "ChEES", "CHESSR", "CHESSR_log" and "SNAPER".
                                            ## "CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion (different criteria).
@@ -286,6 +293,33 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            eps_initial_iter = NULL,
                                            ##
                                            diffusion_HMC_integrator = "kick_flow_kick",
+                                           ##
+                                           ## ---- burn-in adaptation settings (arguments of $sample(), documented there):
+                                           tau_initial_moments_window_fraction = 0.5,
+                                           tau_initial_moments_window_min_iter = 1,
+                                           tau_adam_beta1 = NULL,
+                                           tau_adam_beta2 = NULL,
+                                           tau_adam_epsilon = NULL,
+                                           eps_adam_beta1 = NULL,
+                                           eps_adam_beta2 = NULL,
+                                           eps_adam_epsilon = NULL,
+                                           tau_adaptation_scheme = "adam_decay",
+                                           tau_learning_rate_restart_at_metric_end = FALSE,
+                                           eps_adam_reset_at_metric_end = TRUE,
+                                           eps_learning_rate_restart_at_metric_end = TRUE,
+                                           rate_criterion_cost_offset_steps = 0,
+                                           pooled_metric_warm_up = 8,
+                                           pooled_metric_soft_full_weight_draws = NULL,
+                                           pooled_metric_weight_k_draws = 5,
+                                           pooled_metric_signal_to_noise_centred = FALSE,
+                                           metric_update_rescales_eps_and_tau = TRUE,
+                                           learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
+                                           resident_burnin = TRUE,
+                                           resident_burnin_joint_block = TRUE,
+                                           tau_initial_resident_moments = TRUE,
+                                           record_burnin_metric_nuisance_variance_quantiles_history = TRUE,
+                                           burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step = FALSE,
+                                           ##
                                            debug_burnin_timing = FALSE
 ) {
   if (!is.logical(debug_burnin_timing) || length(debug_burnin_timing) != 1 || is.na(debug_burnin_timing)) {
@@ -772,6 +806,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      a build without it gets the original single-threaded call.
   eps_search_has_n_threads <- isTRUE(tryCatch("n_threads" %in% names(formals(fn_find_initial_eps_main_and_us)), error = function(e) FALSE))
   eps_search_n_threads <- if (is.numeric(n_threads_WCP) && (length(n_threads_WCP) == 1) && is.finite(n_threads_WCP) && (n_threads_WCP >= 1)) floor(n_threads_WCP) else 1
+  ##
+  ## ---- the threads of the "LQ_ESSR_spectral" C++ tau update's loops over the parameters and candidates: the
+  ##      burn-in's own threads (n_chains_burnin x n_threads_WCP, idle during the update), at most 16 (one L3
+  ##      cache of the local-HPC: at 50,000 rows, 64 threads measured slower than 16, as the update starts its
+  ##      threads for each loop). The update's results are the same with any number of threads:
+  n_threads_for_spectral_LQ_ESSR_update_loops_in_burnin <-  if (is.numeric(n_threads_WCP) &&
+                                                               (length(n_threads_WCP) == 1) &&
+                                                               is.finite(n_threads_WCP) && (n_threads_WCP >= 1)) {
+          min(16, n_chains_burnin * floor(n_threads_WCP))
+  } else 1
 
 
   ## INITIAL VALUE(S) FOR EPSILON (I.E. THE HMC STEP-SIZE(S)) ---- BOOKMARK ------------------------------------------------------------------------------:
@@ -1088,6 +1132,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   burnin_metric_main_variance_history <-  matrix(data = NA_real_, nrow = n_burnin, ncol = n_params_main)
   burnin_metric_nuisance_variance_quantiles_history <-  matrix(data = NA_real_, nrow = n_burnin, ncol = 5,
                                                               dimnames = list(NULL, c("q05", "q25", "q50", "q75", "q95")))
+  ## ---- record_burnin_metric_nuisance_variance_quantiles_history (default TRUE): FALSE skips this
+  ##      diagnostic record (5 quantiles of the nuisance metric variances, one sort of M_inv_us_vec per burn-in
+  ##      iteration, inside the timed burn-in) and leaves its rows NA; the sampler is unchanged either way:
+  record_burnin_metric_nuisance_variance_quantiles_history <-
+        isTRUE(record_burnin_metric_nuisance_variance_quantiles_history)
   ## Burn-in debug record (debug = TRUE only; 6 Oct 2026; saved with the run, for offline tests of
   ## trajectory-length criteria on the real models), read from the per-chain output of the native call and from
   ## the tau updates; nothing in the burn-in reads it. Per iteration x burn-in chain (main block; the joint
@@ -1252,7 +1301,6 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      and never starts before clip_iter:
   ##
   # tau_initial_moments_window_fraction <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_fraction", default = 1))
-  tau_initial_moments_window_fraction <-  getOption("NicoStan_tau_initial_moments_window_fraction", default = 0.5)
   tau_initial_moments_all <-  identical(tau_initial_moments_window_fraction, "all")
   ##
   if (tau_initial_moments_all) {
@@ -1265,13 +1313,13 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
         tau_initial_moments_window_fraction <-  as.numeric(tau_initial_moments_window_fraction)
         # tau_initial_moments_window_min_iter <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_min_iter", default = 30))
-        tau_initial_moments_window_min_iter <-  as.numeric(getOption("NicoStan_tau_initial_moments_window_min_iter", default = 1))
+        tau_initial_moments_window_min_iter <-  as.numeric(tau_initial_moments_window_min_iter)
         if (length(tau_initial_moments_window_fraction) != 1 || !is.finite(tau_initial_moments_window_fraction) ||
             tau_initial_moments_window_fraction <= 0 || tau_initial_moments_window_fraction > 1) {
-              stop("NicoStan_tau_initial_moments_window_fraction must be \"all\" or a single number in (0, 1].")
+              stop("tau_initial_moments_window_fraction must be \"all\" or a single number in (0, 1].")
         }
         if (length(tau_initial_moments_window_min_iter) != 1 || !is.finite(tau_initial_moments_window_min_iter) || tau_initial_moments_window_min_iter < 1) {
-              stop("NicoStan_tau_initial_moments_window_min_iter must be a single number >= 1.")
+              stop("tau_initial_moments_window_min_iter must be a single number >= 1.")
         }
         tau_initial_moments_window_length <-  max(tau_initial_moments_window_min_iter,
                                                   ceiling(tau_initial_moments_window_fraction * (gap - clip_iter + 1)))
@@ -1305,11 +1353,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      first moment and its bias correction; every trajectory criterion, block and path). The step-size (eps) ADAM keeps
   ##      beta1_adam:
   ##
-  tau_adam_beta1_option <-  getOption("NicoStan_tau_adam_beta1", default = NULL)
+  tau_adam_beta1_option <-  tau_adam_beta1
     if (!is.null(bulk_local_tuner)) {
         bulk_local_tuner <-  fn_bulk_local_tuner_settings(bulk_local_tuner)
         if (isTRUE(tau_shrink_on_divergence) ||
-            !identical(getOption("NicoStan_tau_adaptation_scheme", "adam_decay"), "adam_decay")) {
+            !identical(tau_adaptation_scheme, "adam_decay")) {
             stop("bulk_local_tuner excludes divergence shrink and probe/averaging tau schemes.")
         }
         if (!identical(burnin_algorithm, "ESJD") || isTRUE(partitioned_HMC) || isTRUE(manual_tau) ||
@@ -1359,7 +1407,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   if (!is.null(tau_adam_beta1_option) &&
       (!is.numeric(tau_adam_beta1_option) || length(tau_adam_beta1_option) != 1 || !is.finite(tau_adam_beta1_option) ||
        tau_adam_beta1_option < 0 || tau_adam_beta1_option >= 1)) {
-        stop(paste0("NicoStan_tau_adam_beta1 must be NULL (tau uses beta1_adam) or a single number in [0, 1); got: ",
+        stop(paste0("tau_adam_beta1 must be NULL (tau uses beta1_adam) or a single number in [0, 1); got: ",
                     paste(as.character(tau_adam_beta1_option), collapse = ", "), "."))
   }
   tau_adam_beta1 <-  if (is.null(tau_adam_beta1_option)) beta1_adam else as.numeric(tau_adam_beta1_option)
@@ -1368,41 +1416,42 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      before). A number in [0, 1) replaces beta1_adam in both step-size (eps) ADAM updates (main and nuisance); the tau ADAM
   ##      keeps beta1_adam (or NicoStan_tau_adam_beta1 when that is set):
   ##
-  eps_adam_beta1_option <-  getOption("NicoStan_eps_adam_beta1", default = NULL)
+  eps_adam_beta1_option <-  eps_adam_beta1
   if (!is.null(eps_adam_beta1_option) &&
       (!is.numeric(eps_adam_beta1_option) || length(eps_adam_beta1_option) != 1 || !is.finite(eps_adam_beta1_option) ||
        eps_adam_beta1_option < 0 || eps_adam_beta1_option >= 1)) {
-        stop(paste0("NicoStan_eps_adam_beta1 must be NULL (eps uses beta1_adam) or a single number in [0, 1); got: ",
+        stop(paste0("eps_adam_beta1 must be NULL (eps uses beta1_adam) or a single number in [0, 1); got: ",
                     paste(as.character(eps_adam_beta1_option), collapse = ", "), "."))
   }
   eps_adam_beta1 <-  if (is.null(eps_adam_beta1_option)) beta1_adam else as.numeric(eps_adam_beta1_option)
   message(colourise(paste0("step-size (eps) ADAM beta1 = ", eps_adam_beta1,
-                           if (is.null(eps_adam_beta1_option)) " (beta1_adam)" else " (NicoStan_eps_adam_beta1)"), "cyan"))
+                           if (is.null(eps_adam_beta1_option)) " (beta1_adam)" else " (eps_adam_beta1)"), "cyan"))
   ##
   ## ---- second-moment decay and denominator constant, separately for the step-size (eps) and the trajectory-length (tau) ADAM updates.
   ##      Options NicoStan_eps_adam_beta2, NicoStan_eps_adam_epsilon, NicoStan_tau_adam_beta2 and NicoStan_tau_adam_epsilon; default NULL =
   ##      the sampler arguments beta2_adam / eps_adam, so a caller that sets none of them is unchanged. A beta2 is a number in [0, 1), a
   ##      denominator constant a positive number:
   ##
-  fn_adam_option_or_argument <-  function(option_name,
-                                          argument_value,
-                                          is_decay) {
+  fn_adam_setting_or_argument <-  function(setting_name,
+                                           setting_value,
+                                           argument_value,
+                                           is_decay) {
 
-        option_value <-  getOption(option_name, default = NULL)
-        if (is.null(option_value)) return(argument_value)
-        value_is_valid <-  is.numeric(option_value) && length(option_value) == 1 && is.finite(option_value) &&
-                           (if (is_decay) (option_value >= 0 && option_value < 1) else option_value > 0)
+        if (is.null(setting_value)) return(argument_value)
+        value_is_valid <-  is.numeric(setting_value) && length(setting_value) == 1 && is.finite(setting_value) &&
+                           (if (is_decay) (setting_value >= 0 && setting_value < 1) else setting_value > 0)
         if (!value_is_valid) {
-              stop(paste0(option_name, " must be NULL (the sampler argument) or a single ", if (is_decay) "number in [0, 1)" else "positive number",
-                          "; got: ", paste(as.character(option_value), collapse = ", "), "."))
+              stop(paste0(setting_name, " must be NULL (the sampler argument) or a single ",
+                          if (is_decay) "number in [0, 1)" else "positive number",
+                          "; got: ", paste(as.character(setting_value), collapse = ", "), "."))
         }
-        return(as.numeric(option_value))
+        return(as.numeric(setting_value))
 
   }
-  eps_adam_beta2   <-  fn_adam_option_or_argument("NicoStan_eps_adam_beta2",   beta2_adam, is_decay = TRUE)
-  eps_adam_epsilon <-  fn_adam_option_or_argument("NicoStan_eps_adam_epsilon", eps_adam,   is_decay = FALSE)
-  tau_adam_beta2   <-  fn_adam_option_or_argument("NicoStan_tau_adam_beta2",   beta2_adam, is_decay = TRUE)
-  tau_adam_epsilon <-  fn_adam_option_or_argument("NicoStan_tau_adam_epsilon", eps_adam,   is_decay = FALSE)
+  eps_adam_beta2   <-  fn_adam_setting_or_argument("eps_adam_beta2",   eps_adam_beta2,   beta2_adam, is_decay = TRUE)
+  eps_adam_epsilon <-  fn_adam_setting_or_argument("eps_adam_epsilon", eps_adam_epsilon, eps_adam,   is_decay = FALSE)
+  tau_adam_beta2   <-  fn_adam_setting_or_argument("tau_adam_beta2",   tau_adam_beta2,   beta2_adam, is_decay = TRUE)
+  tau_adam_epsilon <-  fn_adam_setting_or_argument("tau_adam_epsilon", tau_adam_epsilon, eps_adam,   is_decay = FALSE)
   message(colourise(paste0("eps ADAM: beta1 = ", eps_adam_beta1, ", beta2 = ", eps_adam_beta2, ", denominator constant = ", eps_adam_epsilon), "cyan"))
   ##
   ## ---- tau learning-rate restart at the metric freeze. Option NicoStan_tau_learning_rate_restart_at_metric_end (default FALSE = one
@@ -1421,7 +1470,6 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      the metric freeze. tau_v_adam, tau_m_adam and the bias-correction counter are kept (see above), which keeps the bias
   ##      correction consistent (it counts the updates applied to the moments it corrects).
   ##
-  tau_learning_rate_restart_at_metric_end <-  getOption("NicoStan_tau_learning_rate_restart_at_metric_end", default = FALSE)
   ## ---- Step-size ADAM at the final metric update (4 Oct 2026). Two switches, main burn-in only (the pre-burn-in
   ##      stage
   ##      runs this function with manual_tau = TRUE and is left as it was):
@@ -1448,10 +1496,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      [1.06, 1.43], tail 1.27 [1.07, 1.50]; b250 within-chain ESS per gradient 1.11 [1.04, 1.18]; b500
   ##      unchanged.
   ##      FALSE restores the previous behaviour.
-  eps_adam_reset_at_metric_end <-  isTRUE(getOption("NicoStan_eps_adam_reset_at_metric_end", default = TRUE)) &&
+  eps_adam_reset_at_metric_end <-  isTRUE(eps_adam_reset_at_metric_end) &&
                                    !isTRUE(manual_tau)
-  eps_learning_rate_restart_at_metric_end <-  isTRUE(getOption("NicoStan_eps_learning_rate_restart_at_metric_end",
-                                                               default = TRUE)) && !isTRUE(manual_tau)
+  eps_learning_rate_restart_at_metric_end <-  isTRUE(eps_learning_rate_restart_at_metric_end) && !isTRUE(manual_tau)
   if (eps_adam_reset_at_metric_end || eps_learning_rate_restart_at_metric_end) {
         message(colourise(paste0("step-size ADAM at the final metric update (iteration ",
                                  metric_adaptation_end_iter, "): moments ",
@@ -1475,7 +1522,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      regression it puts CHESSR on the ESS-per-gradient optimum (0.116 vs 0.100) but lowers SNAPER (0.094 vs 0.112) and
   ##      ESJD (0.055 vs 0.084). The offset is eps_<block> x c at every tau update (tau_cost_offset_vec records it).
   ##
-  rate_criterion_cost_offset_steps_setting <-  getOption("NicoStan_rate_criterion_cost_offset_steps", default = 0)
+  rate_criterion_cost_offset_steps_setting <-  rate_criterion_cost_offset_steps
   rate_criterion_cost_offset_steps <-  if (identical(rate_criterion_cost_offset_steps_setting, "auto")) {
         has_nuisance_block_for_cost <-  isTRUE(sample_nuisance) && isTRUE(n_nuisance > 0)
         endpoint_gradient_reused <-  has_nuisance_block_for_cost && isTRUE(diffusion_HMC) && !isTRUE(partitioned_HMC) &&
@@ -1486,7 +1533,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   }
   if (length(rate_criterion_cost_offset_steps) != 1 || !is.finite(rate_criterion_cost_offset_steps) ||
       rate_criterion_cost_offset_steps < 0) {
-        stop("NicoStan_rate_criterion_cost_offset_steps must be \"auto\" or one number >= 0.")
+        stop("rate_criterion_cost_offset_steps must be \"auto\" or one number >= 0.")
   }
   tau_cost_offset_vec <-  rep(x = NA_real_, times = n_burnin)
   tau_cost_offset_at_update <-  0
@@ -1508,14 +1555,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   }
   if (!is.logical(tau_learning_rate_restart_at_metric_end) || length(tau_learning_rate_restart_at_metric_end) != 1 ||
       is.na(tau_learning_rate_restart_at_metric_end)) {
-        stop("NicoStan_tau_learning_rate_restart_at_metric_end must be TRUE or FALSE.")
+        stop("tau_learning_rate_restart_at_metric_end must be TRUE or FALSE.")
   }
   # tau_learning_rate_restart_iter <-  metric_adaptation_end_iter + 1
   tau_learning_rate_restart_iter <-  metric_adaptation_end_iter
   tau_learning_rate_restart_active <-  tau_learning_rate_restart_at_metric_end && !isTRUE(manual_tau) &&
                                        (metric_adaptation_end_iter > gap) && (tau_learning_rate_restart_iter < n_adapt)
   if (tau_learning_rate_restart_at_metric_end && !isTRUE(manual_tau) && !tau_learning_rate_restart_active) {
-        message(colourise(paste0("NicoStan_tau_learning_rate_restart_at_metric_end = TRUE has no effect in this burn-in: metric_adaptation_end_iter (",
+        message(colourise(paste0("tau_learning_rate_restart_at_metric_end = TRUE has no effect in this burn-in: metric_adaptation_end_iter (",
                                  metric_adaptation_end_iter, ") must be after the tau handover (iteration ", gap,
                                  ## ") and before the last tau update (iteration ", n_adapt - 1, ")."), "cyan"))
                                  ") and at or before the last tau update (iteration ", n_adapt - 1, ")."), "cyan"))
@@ -1554,12 +1601,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##                              Only tau_main is probed and averaged: tau_us follows it for the joint sampler; with partitioned_HMC = TRUE
   ##                              tau_us is not adapted in this burn-in and is left as it is.
   ##
-  tau_adaptation_scheme <-  getOption("NicoStan_tau_adaptation_scheme", default = "adam_decay")
   # if (!is.character(tau_adaptation_scheme) || length(tau_adaptation_scheme) != 1 || !tau_adaptation_scheme %in% c("adam_decay", "probe_then_average")) {
   #       stop(paste0("NicoStan_tau_adaptation_scheme must be \"adam_decay\" or \"probe_then_average\"; got: ",
   if (!is.character(tau_adaptation_scheme) || length(tau_adaptation_scheme) != 1 ||
       !tau_adaptation_scheme %in% c("adam_decay", "probe_then_average", "fixed_length_probe_then_decay_and_average")) {
-        stop(paste0("NicoStan_tau_adaptation_scheme must be \"adam_decay\", \"probe_then_average\" or \"fixed_length_probe_then_decay_and_average\"; got: ",
+        stop(paste0("tau_adaptation_scheme must be \"adam_decay\", \"probe_then_average\" or \"fixed_length_probe_then_decay_and_average\"; got: ",
                     paste(as.character(tau_adaptation_scheme), collapse = ", "), "."))
   }
   # tau_probe_then_average <-  identical(tau_adaptation_scheme, "probe_then_average") && !isTRUE(manual_tau)
@@ -1982,11 +2028,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   }
   ##
   use_resident_burnin <-  resident_api_available &&
-                          isTRUE(getOption("NicoStan_resident_burnin", TRUE)) &&
+                          isTRUE(resident_burnin) &&
                           isTRUE(sample_nuisance) && (n_nuisance > 0) &&
                           (identical(tau_adaptation_block_effective, "main") ||
                            (identical(tau_adaptation_block_effective, "joint") && resident_joint_api_available &&
-                            isTRUE(getOption("NicoStan_resident_burnin_joint_block", TRUE)))) &&
+                            isTRUE(resident_burnin_joint_block))) &&
                           identical(getOption("matprod", "default"), "default")
   ## the joint trajectory block on the resident interface (every nuisance-sized quantity of its criterion is computed in the worker):
   use_resident_joint_block <-  use_resident_burnin && identical(tau_adaptation_block_effective, "joint")
@@ -1999,7 +2045,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      (fn_persistent_burnin_tau_initial_nuisance_moments_*_resident, chains in parallel), so the nuisance state is not
   ##      copied to R at each iteration of [clip_iter, gap] and the separate accumulator is not loaded. Used only when the
   ##      worker's compiled code provides these functions; otherwise (an older build, the original interface, or
-  ##      options(NicoStan_tau_initial_resident_moments = FALSE)) the state is copied and inst/src_extra/tau_initial_nuisance_moments.cpp
+  ##      tau_initial_resident_moments = FALSE) the state is copied and inst/src_extra/tau_initial_nuisance_moments.cpp
   ##      is used, as before. The two give the same sum up to the order in which the chains are added (rounding only).
   ##
   resident_tau_initial_api_names <-  c("fn_persistent_burnin_tau_initial_api_version",
@@ -2008,7 +2054,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                        "fn_persistent_burnin_tau_initial_nuisance_moments_get_resident")
   use_resident_tau_initial_moments <-  FALSE
   tau_initial_resident_moments_reset <-  FALSE
-  if (tau_initial_adaptive && use_resident_burnin && isTRUE(getOption("NicoStan_tau_initial_resident_moments", TRUE)) &&
+  if (tau_initial_adaptive && use_resident_burnin && isTRUE(tau_initial_resident_moments) &&
       fn_worker_api_has_functions(resident_tau_initial_api_names)) {
         resident_tau_initial_api <-  mget(x = resident_tau_initial_api_names, envir = worker_api_env, inherits = FALSE)
         use_resident_tau_initial_moments <-  isTRUE(tryCatch(resident_tau_initial_api$fn_persistent_burnin_tau_initial_api_version() >= 1,
@@ -2132,7 +2178,6 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## and the rescale keeps the leapfrog steps per trajectory unchanged by the change of scale at each update (see
   ## the rescale block below). "hard" with the rescale option FALSE keeps every result before 5 Oct bit for bit.
   ## pooled_metric_warm_up <-  getOption("NicoStan_pooled_metric_warm_up", default = "hard")
-  pooled_metric_warm_up <-  getOption("NicoStan_pooled_metric_warm_up", default = 8)
   pooled_metric_full_weight_draws <-  min(n_params_main + 1, 50)
   ## if (identical(pooled_metric_warm_up, "soft") || identical(pooled_metric_warm_up, "first_window")) {
   if (identical(pooled_metric_warm_up, "soft") || identical(pooled_metric_warm_up, "first_window") ||
@@ -2146,7 +2191,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         wf_min_draws <- pooled_metric_warm_up
   } else {
         ## stop("NicoStan_pooled_metric_warm_up must be \"first_window\", \"soft\", \"hard\" or one number >= 2.")
-        stop(paste0("NicoStan_pooled_metric_warm_up must be \"first_window\", \"soft\", \"n_over_n_plus_k\", ",
+        stop(paste0("pooled_metric_warm_up must be \"first_window\", \"soft\", \"n_over_n_plus_k\", ",
                     "\"signal_to_noise\", \"hard\" or one number >= 2."))
   }
   ## the minimum draws of the pooled estimator at iteration ii ("first_window": 2 in the first window, the capped
@@ -2180,28 +2225,24 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      pooled_metric_weight_factor_us_update_vec (pooled_metric_weight_factor_vec keeps the factor at each tau
   ##      update).
   ##
-  pooled_metric_soft_full_weight_draws_option <-
-        getOption("NicoStan_pooled_metric_soft_full_weight_draws", default = NULL)
+  pooled_metric_soft_full_weight_draws_option <-  pooled_metric_soft_full_weight_draws
   if (!is.null(pooled_metric_soft_full_weight_draws_option) &&
       (!is.numeric(pooled_metric_soft_full_weight_draws_option) ||
        length(pooled_metric_soft_full_weight_draws_option) != 1 ||
        !is.finite(pooled_metric_soft_full_weight_draws_option) ||
        pooled_metric_soft_full_weight_draws_option <= 0)) {
-        stop("NicoStan_pooled_metric_soft_full_weight_draws must be NULL or one number > 0.")
+        stop("pooled_metric_soft_full_weight_draws must be NULL or one number > 0.")
   }
   pooled_metric_soft_full_weight_draws <-  if (is.null(pooled_metric_soft_full_weight_draws_option))
                                                pooled_metric_full_weight_draws else
                                                as.numeric(pooled_metric_soft_full_weight_draws_option)
-  pooled_metric_weight_k_draws <-  getOption("NicoStan_pooled_metric_weight_k_draws", default = 5)
   if (!is.numeric(pooled_metric_weight_k_draws) || length(pooled_metric_weight_k_draws) != 1 ||
       !is.finite(pooled_metric_weight_k_draws) || pooled_metric_weight_k_draws < 0) {
-        stop("NicoStan_pooled_metric_weight_k_draws must be one number >= 0.")
+        stop("pooled_metric_weight_k_draws must be one number >= 0.")
   }
-  pooled_metric_signal_to_noise_centred <-
-        getOption("NicoStan_pooled_metric_signal_to_noise_centred", default = FALSE)
   if (!is.logical(pooled_metric_signal_to_noise_centred) || length(pooled_metric_signal_to_noise_centred) != 1 ||
       is.na(pooled_metric_signal_to_noise_centred)) {
-        stop("NicoStan_pooled_metric_signal_to_noise_centred must be TRUE or FALSE.")
+        stop("pooled_metric_signal_to_noise_centred must be TRUE or FALSE.")
   }
   ## the count rules set the factor where the pooled moments are formed ("soft" at its default keeps the code
   ## of that rule there); "signal_to_noise" sets it at each metric update, from P and C:
@@ -2282,10 +2323,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## "hard", keeps every result before 5 Oct bit for bit.
   ## metric_update_rescales_eps_and_tau <-  getOption("NicoStan_metric_update_rescales_eps_and_tau",
   ##                                                  default = FALSE)
-  metric_update_rescales_eps_and_tau <-  getOption("NicoStan_metric_update_rescales_eps_and_tau", default = TRUE)
   if (!is.logical(metric_update_rescales_eps_and_tau) || length(metric_update_rescales_eps_and_tau) != 1 ||
       is.na(metric_update_rescales_eps_and_tau)) {
-        stop("NicoStan_metric_update_rescales_eps_and_tau must be TRUE or FALSE.")
+        stop("metric_update_rescales_eps_and_tau must be TRUE or FALSE.")
   }
   metric_update_rescale_active <-  metric_update_rescales_eps_and_tau && !isTRUE(manual_tau)
   metric_update_rescale_us_active <-  metric_update_rescale_active && isTRUE(partitioned_HMC) &&
@@ -2483,8 +2523,6 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      freeze, exactly as without the hold). During the hold it takes precedence over that restart.
   ##      The step-size (eps) hold of iterations 1 to learning_rate_initial_iter above is unchanged:
   ##
-  learning_rate_initial_n_tau_updates_held_from_tau_handover <-
-        getOption("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover", default = NULL)
   if (!is.null(learning_rate_initial_n_tau_updates_held_from_tau_handover)) {
         if (length(learning_rate_initial_n_tau_updates_held_from_tau_handover) != 1 ||
             !is.numeric(learning_rate_initial_n_tau_updates_held_from_tau_handover) ||
@@ -2492,7 +2530,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
             learning_rate_initial_n_tau_updates_held_from_tau_handover < 0 ||
             learning_rate_initial_n_tau_updates_held_from_tau_handover !=
               round(learning_rate_initial_n_tau_updates_held_from_tau_handover)) {
-              stop(paste0("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover",
+              stop(paste0("learning_rate_initial_n_tau_updates_held_from_tau_handover",
                           " must be NULL or a single non-negative whole number of tau updates."))
         }
   }
@@ -2513,12 +2551,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         if (is.null(learning_rate_initial) || !is.numeric(learning_rate_initial) ||
             length(learning_rate_initial) != 1 || !is.finite(learning_rate_initial) ||
             learning_rate_initial <= 0) {
-              stop(paste0("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover",
+              stop(paste0("learning_rate_initial_n_tau_updates_held_from_tau_handover",
                           " requires a single positive finite learning_rate_initial",
                           " (the rate the tau updates are held at)."))
         }
         if (tau_probe_then_average) {
-              stop(paste0("NicoStan_learning_rate_initial_n_tau_updates_held_from_tau_handover",
+              stop(paste0("learning_rate_initial_n_tau_updates_held_from_tau_handover",
                           " is not available with the probe tau adaptation schemes."))
         }
         message(colourise(paste0("tau initial-LR hold from the handover: tau learning rate held at ",
@@ -4132,7 +4170,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
             })
           }
           ##
-          if (isTRUE(getOption("BayesMVP_force_L1", FALSE))) {
+          if (isTRUE(burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step)) {
               EHMC_args_as_Rcpp_List$tau_main <- EHMC_args_as_Rcpp_List$eps_main
               EHMC_args_as_Rcpp_List$tau_us   <- EHMC_args_as_Rcpp_List$eps_us
           }
@@ -5438,7 +5476,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         ## interest_rows = if (is_main || is_joint) interest_rows else NULL)
                                         interest_rows = if (is_main || is_joint) interest_rows else NULL,
                                         ## "LQ_ESSR_spectral" only (NULL for every other criterion):
-                                        step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update)
+                                        ## step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update)
+                                        step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update,
+                                        ## "LQ_ESSR_spectral" (C++ update) only: the threads of its loops
+                                        n_threads_for_spectral_LQ_ESSR_update_loops =
+                                              n_threads_for_spectral_LQ_ESSR_update_loops_in_burnin,
+                                        SpESS_R_max_rows_fitted_per_update =
+                                              SpESS_R_max_rows_fitted_per_update,
+                                        SpESS_R_bins_decay_lazily = SpESS_R_bins_decay_lazily)
                                     } else {
                                     initial_mean <- if (is_main) EHMC_burnin_as_Rcpp_List$snaper_m_vec_main else
                                                     if (is_joint) c(EHMC_burnin_as_Rcpp_List$snaper_m_vec_main, EHMC_burnin_as_Rcpp_List$snaper_m_vec_us) else
@@ -5516,7 +5561,14 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         step_sizes_for_spectral_ESS = step_sizes_for_spectral_ESS_at_update,
                                         ## debug = TRUE, main block: also return the spectral update's
                                         ## complete arguments and inputs (the burn-in debug record below):
-                                        return_spectral_update_inputs = debug_record && is_main)
+                                        ## return_spectral_update_inputs = debug_record && is_main)
+                                        return_spectral_update_inputs = debug_record && is_main,
+                                        ## "LQ_ESSR_spectral" (C++ update) only: the threads of its loops
+                                        n_threads_for_spectral_LQ_ESSR_update_loops =
+                                              n_threads_for_spectral_LQ_ESSR_update_loops_in_burnin,
+                                        SpESS_R_max_rows_fitted_per_update =
+                                              SpESS_R_max_rows_fitted_per_update,
+                                        SpESS_R_bins_decay_lazily = SpESS_R_bins_decay_lazily)
                                     }  ## end of: if (use_resident_joint_block)
                                     ##
                                     ## ---- burn-in debug record of this tau update (debug = TRUE only; main or
@@ -5863,7 +5915,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                             }
                             burnin_metric_main_variance_history[ii, ] <-  if (identical(metric_shape_main, "dense")) diag(EHMC_Metric_as_Rcpp_List$M_inv_dense_main) else
                                                                               c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
-                            if (isTRUE(sample_nuisance) && length(EHMC_Metric_as_Rcpp_List$M_inv_us_vec) > 0) {
+                            # if (isTRUE(sample_nuisance) && length(EHMC_Metric_as_Rcpp_List$M_inv_us_vec) > 0) {
+                            if (record_burnin_metric_nuisance_variance_quantiles_history &&
+                                isTRUE(sample_nuisance) && length(EHMC_Metric_as_Rcpp_List$M_inv_us_vec) > 0) {
                                 burnin_metric_nuisance_variance_quantiles_history[ii, ] <-  stats::quantile(c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec),
                                                                                                            probs = c(0.05, 0.25, 0.50, 0.75, 0.95), names = FALSE)
                             }

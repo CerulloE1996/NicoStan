@@ -591,6 +591,12 @@ MVP_model <- R6Class("MVP_model",
                           #'@param burnin_TBB_pool_equals_n_chains NULL defaults to TRUE for built-in models, which use OpenMP within chains.
                           #'External Stan models always force FALSE, even when TRUE is supplied, so nested TBB likelihood work can use
                           #'n_chains_burnin * n_threads_WCP_burnin threads. Built-in models can explicitly select FALSE.
+                          #'@param n_threads_WCP_burnin,num_chunks_burnin The within-chain threads of each
+                          #'burn-in chain and the burn-in chunks. When both are NULL (the default), a Stan model
+                          #'with the N / chunk_size data contract (reduce_sum_static) gets the values of
+                          #'fn_compute_burnin_n_threads_WCP_and_num_chunks() (Paper 1's burn-in rule, for the
+                          #'CPUs of the process and the measured M_bytes/chain); any other model gets 1 thread
+                          #'and its own chunks. A value given is used as given.
                           #'@param tau_shrink_on_divergence,tau_shrink_factor,tau_shrink_min_divergent_chains Divergence-triggered tau shrink in the
                           #'burn-in. NULL/FALSE (default) = off. TRUE multiplies tau by tau_shrink_factor (NULL = 0.95) at each adaptation iteration
                           #'in which at least tau_shrink_min_divergent_chains (NULL = 2) burn-in chains diverge (the rule used in earlier runs).
@@ -615,6 +621,54 @@ MVP_model <- R6Class("MVP_model",
                           #'(the multi_attempts fallback and force_PartialLog = TRUE) uses this many times the
                           #'number of chunks of the fit, with the nuisance values re-laid out exactly. See
                           #'R_fn_sample_model().
+                          #'@param tau_initial_moments_window_fraction,tau_initial_moments_window_min_iter
+                          #'tau_initial = "adaptive" only: the last fraction (default 0.5; "all" = all) of the
+                          #'burn-in iterations clip_iter to gap whose draws give lambda_max, and the fewest
+                          #'iterations in that window (default 1).
+                          #'@param tau_adam_beta1,tau_adam_beta2,tau_adam_epsilon First-moment weight,
+                          #'second-moment decay and denominator constant of the trajectory-length (tau) ADAM
+                          #'updates. NULL (default) = beta1_adam, beta2_adam and eps_adam.
+                          #'@param eps_adam_beta1,eps_adam_beta2,eps_adam_epsilon The same three for the step-size
+                          #'(eps) ADAM updates. NULL (default) = beta1_adam, beta2_adam and eps_adam.
+                          #'@param tau_adaptation_scheme "adam_decay" (default): ADAM updates of tau, the learning
+                          #'rate decaying from learning_rate to learning_rate^2; "probe_then_average" or
+                          #'"fixed_length_probe_then_decay_and_average": a probe phase, then the average of the
+                          #'probed tau.
+                          #'@param tau_learning_rate_restart_at_metric_end TRUE restarts the tau learning-rate
+                          #'decay at the final metric update; FALSE (default) keeps one decay.
+                          #'@param eps_adam_reset_at_metric_end,eps_learning_rate_restart_at_metric_end TRUE
+                          #'(default) resets the step-size ADAM moments, and restarts its learning-rate decay, at
+                          #'the final metric update.
+                          #'@param rate_criterion_cost_offset_steps Trajectory cost of the rate criteria, tau +
+                          #'eps x c: 0 (default; the cost tau alone), "auto" (the path-aware c) or a number c >=
+                          #'0.
+                          #'@param pooled_metric_warm_up Warm-up of the pooled metric estimator: a number of draws
+                          #'>= 2 (default 8) or "hard", "soft", "first_window", "n_over_n_plus_k" or
+                          #'"signal_to_noise".
+                          #'@param pooled_metric_soft_full_weight_draws Draws at which the "soft" warm-up gives
+                          #'full weight; NULL (default) = min(n_params_main + 1, 50).
+                          #'@param pooled_metric_weight_k_draws k of the "n_over_n_plus_k" warm-up (default 5).
+                          #'@param pooled_metric_signal_to_noise_centred TRUE centres the "signal_to_noise"
+                          #'warm-up (default FALSE).
+                          #'@param metric_update_rescales_eps_and_tau TRUE (default): each metric update rescales
+                          #'eps and tau, so that the leapfrog steps per trajectory do not change with the scale of
+                          #'the metric.
+                          #'@param learning_rate_initial_n_tau_updates_held_from_tau_handover NULL (default) = no
+                          #'hold; a whole number k holds the tau learning rate at learning_rate_initial for the
+                          #'first k tau updates after the handover.
+                          #'@param resident_burnin,resident_burnin_joint_block,tau_initial_resident_moments TRUE
+                          #'(default) keeps the burn-in state, the joint block's criterion and tau_initial's
+                          #'moments in the native worker; FALSE copies them to R at every iteration (same results
+                          #'up to rounding).
+                          #'@param record_burnin_metric_nuisance_variance_quantiles_history TRUE (default) records
+                          #'five quantiles of the nuisance metric variances at each burn-in iteration (a
+                          #'diagnostic; the sampler is unchanged).
+                          #'@param burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step TRUE sets tau
+                          #'to eps at every burn-in iteration, i.e. one leapfrog step per trajectory (a debugging
+                          #'check; default FALSE).
+                          #'@param autodiff_fallback Built-in models with multi_attempts: TRUE falls back to
+                          #'autodiff at the same position when the standard and partial-log gradients fail. NULL
+                          #'(default) = TRUE for the latent_trait model, FALSE for the others.
                           #'@param run_in_fresh_R_process TRUE (default) runs burn-in/sampling in a fresh R process and returns
                           #'the usual draws/diagnostics; native worker memory is released when it exits. FALSE uses this session.
                           sample = function(  force_recompile = FALSE,
@@ -711,7 +765,11 @@ MVP_model <- R6Class("MVP_model",
                                               ##
                                               use_disk = NULL,
                                               ##
-                                              n_threads_WCP_burnin = 1,
+                                              # n_threads_WCP_burnin = 1,
+                                              ## NULL (with num_chunks_burnin NULL): chosen by
+                                              ## fn_compute_burnin_n_threads_WCP_and_num_chunks() for a Stan model
+                                              ## with the N / chunk_size data contract; otherwise 1:
+                                              n_threads_WCP_burnin = NULL,
                                               n_threads_WCP_sampling = 1,
                                               num_chunks_burnin = NULL,
                                               num_chunks_sampling = NULL,
@@ -762,12 +820,51 @@ MVP_model <- R6Class("MVP_model",
                                               ## LC_MVP / LC_MVOP (R_fn_sample_model; 6 Oct 2026):
                                               ## tau_adaptation_block = "main",
                                               tau_adaptation_block = NULL,
+                                              ## SpESS-R ("LQ_ESSR_spectral" criteria) only: 0 (default) =
+                                              ## every monitored row is fitted and scored at every tau
+                                              ## update; a positive number = at most this many rows, the
+                                              ## slowest-moving ones, when more rows are monitored:
+                                              SpESS_R_max_rows_fitted_per_update = 0,
+                                              ## SpESS-R only: TRUE = the monitored rows' bins decay lazily
+                                              ## (the same arithmetic up to rounding, touching only the new
+                                              ## values); FALSE (default) = every stored value is multiplied
+                                              ## at each update:
+                                              SpESS_R_bins_decay_lazily = FALSE,
                                               burnin_TBB_pool_equals_n_chains = NULL,
                                               store_log_lik_trace = NULL,
                                               use_disk_path = "/tmp/hmc_traces",
                                               test_perm_override = NULL,
                                               test_order_rule_for_reorder_cols_MVP = NULL,
                                               n_chunks_multiplier_for_PartialLog_log_scale_evaluation = 3,
+                                              ##
+                                              ## ---- burn-in adaptation settings:
+                                              tau_initial_moments_window_fraction = 0.5,
+                                              tau_initial_moments_window_min_iter = 1,
+                                              tau_adam_beta1 = NULL,
+                                              tau_adam_beta2 = NULL,
+                                              tau_adam_epsilon = NULL,
+                                              eps_adam_beta1 = NULL,
+                                              eps_adam_beta2 = NULL,
+                                              eps_adam_epsilon = NULL,
+                                              tau_adaptation_scheme = "adam_decay",
+                                              tau_learning_rate_restart_at_metric_end = FALSE,
+                                              eps_adam_reset_at_metric_end = TRUE,
+                                              eps_learning_rate_restart_at_metric_end = TRUE,
+                                              rate_criterion_cost_offset_steps = 0,
+                                              pooled_metric_warm_up = 8,
+                                              pooled_metric_soft_full_weight_draws = NULL,
+                                              pooled_metric_weight_k_draws = 5,
+                                              pooled_metric_signal_to_noise_centred = FALSE,
+                                              metric_update_rescales_eps_and_tau = TRUE,
+                                              learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
+                                              resident_burnin = TRUE,
+                                              resident_burnin_joint_block = TRUE,
+                                              tau_initial_resident_moments = TRUE,
+                                              record_burnin_metric_nuisance_variance_quantiles_history = TRUE,
+                                              burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
+                                                    FALSE,
+                                              autodiff_fallback = NULL,
+                                              ##
                                               run_in_fresh_R_process = TRUE
                                               ##
                                              ) {
@@ -905,6 +1002,35 @@ MVP_model <- R6Class("MVP_model",
                             self$result <-       R_fn_sample_model(   
                                                             init_object = self$init_object,
                                                             run_in_fresh_R_process = run_in_fresh_R_process,
+                        ## ---- burn-in adaptation settings:
+                        tau_initial_moments_window_fraction = tau_initial_moments_window_fraction,
+                        tau_initial_moments_window_min_iter = tau_initial_moments_window_min_iter,
+                        tau_adam_beta1 = tau_adam_beta1,
+                        tau_adam_beta2 = tau_adam_beta2,
+                        tau_adam_epsilon = tau_adam_epsilon,
+                        eps_adam_beta1 = eps_adam_beta1,
+                        eps_adam_beta2 = eps_adam_beta2,
+                        eps_adam_epsilon = eps_adam_epsilon,
+                        tau_adaptation_scheme = tau_adaptation_scheme,
+                        tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
+                        eps_adam_reset_at_metric_end = eps_adam_reset_at_metric_end,
+                        eps_learning_rate_restart_at_metric_end = eps_learning_rate_restart_at_metric_end,
+                        rate_criterion_cost_offset_steps = rate_criterion_cost_offset_steps,
+                        pooled_metric_warm_up = pooled_metric_warm_up,
+                        pooled_metric_soft_full_weight_draws = pooled_metric_soft_full_weight_draws,
+                        pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
+                        pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
+                        metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                        learning_rate_initial_n_tau_updates_held_from_tau_handover =
+                              learning_rate_initial_n_tau_updates_held_from_tau_handover,
+                        resident_burnin = resident_burnin,
+                        resident_burnin_joint_block = resident_burnin_joint_block,
+                        tau_initial_resident_moments = tau_initial_resident_moments,
+                        record_burnin_metric_nuisance_variance_quantiles_history =
+                              record_burnin_metric_nuisance_variance_quantiles_history,
+                        burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
+                              burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step,
+                        autodiff_fallback = autodiff_fallback,
                                                             ##
                                                             # Model_type = self$Model_type, ## cannot be changed in "$sample()"
                                                             ##
@@ -972,6 +1098,9 @@ MVP_model <- R6Class("MVP_model",
                                                             tau_jitter_sampling_type = tau_jitter_sampling_type,
                                                             bulk_local_tuner = bulk_local_tuner,
                                                             tau_adaptation_block = tau_adaptation_block,
+                                                            SpESS_R_max_rows_fitted_per_update =
+                                                                  SpESS_R_max_rows_fitted_per_update,
+                                                            SpESS_R_bins_decay_lazily = SpESS_R_bins_decay_lazily,
                                                             burnin_TBB_pool_equals_n_chains = burnin_TBB_pool_equals_n_chains,
                                                             store_log_lik_trace = store_log_lik_trace,
                                                             use_disk_path = use_disk_path,

@@ -91,6 +91,19 @@ generate_summary_tibble <- function(n_threads = NULL,
               ess_vec <- outs$diagnostics[, 1]
               # ess_tail_vec <- outs$diagnostics[, 2]
               ess_tail_vec <- outs$diagnostics[, 2]   ## the tail ESS "split_ESS_rank" already returns (column 2), now kept
+              ## ---- where draws tie at a quantile (e.g. a probability that equals 1 in more than 5% of the
+              ##      draws, so that I(x <= q95) never changes), the tail ESS of x is undefined: it is then the
+              ##      tail ESS of -x, i.e. the same two tails counted with the tied draws on the other side
+              ##      (without ties the two agree to within one draw). Draws that never change stay undefined:
+              tail_ESS_undefined <- which(!is.finite(ess_tail_vec))
+              if (length(tail_ESS_undefined) > 0) {
+                    negated_draws <- lapply(X = posterior_draws_as_std_vec_of_mats[tail_ESS_undefined],
+                                            FUN = function(draws_matrix) -draws_matrix)
+                    tail_ESS_of_negated_draws <- Rcpp_compute_MCMC_diagnostics( negated_draws,
+                                                                                diagnostic = "split_ESS_rank",
+                                                                                n_threads = n_threads)
+                    ess_tail_vec[tail_ESS_undefined] <- tail_ESS_of_negated_draws$diagnostics[, 2]
+              }
               ##
               ## ESS of the centred squared draws, (x - mean(x))^2 with ONE pooled mean over all chains and iterations: the ESS
               ## for estimating the posterior SD (the definition of posterior::ess_sd), computed with the plain split-chain ESS

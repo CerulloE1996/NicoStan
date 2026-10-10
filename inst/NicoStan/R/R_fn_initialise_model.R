@@ -141,7 +141,25 @@ initialise_model <- function( Model_type,
               stanc_args <- unique(c( as.list(stanc_args),
                                       "--allow-undefined"))
               ##
-              make_args <- c( as.list(make_args),
+              # make_args <- c( as.list(make_args),
+              #                 paste0( "USER_HEADER=",
+              #                         normalizePath(Stan_cpp_user_header)))
+              ##
+              ## ---- exactly one USER_HEADER: make_args taken from an init_object (e.g. when $sample() rebuilds the
+              ##      model, as in the fresh R process) already hold it, and a second copy stopped the compile
+              ##      ("Multiple USER_HEADER arguments are ambiguous"). A USER_HEADER for another file is an error:
+              ##
+              make_args <- as.list(as.character(unlist(make_args)))
+              make_arg_is_user_header <- grepl(pattern = "^USER_HEADER=", x = unlist(make_args))
+              user_header_files_given <- normalizePath(sub(pattern = "^USER_HEADER=", replacement = "",
+                                                           x = unlist(make_args)[make_arg_is_user_header]),
+                                                       mustWork = FALSE)
+              if (any(user_header_files_given != normalizePath(Stan_cpp_user_header))) {
+                    stop("make_args hold USER_HEADER=", paste(user_header_files_given, collapse = ", "),
+                         ", which differs from Stan_cpp_user_header = ", normalizePath(Stan_cpp_user_header),
+                         "; give the user header in one of the two only.")
+              }
+              make_args <- c( make_args[!make_arg_is_user_header],
                               paste0( "USER_HEADER=",
                                       normalizePath(Stan_cpp_user_header)))
         }

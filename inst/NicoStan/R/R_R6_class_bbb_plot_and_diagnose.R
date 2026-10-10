@@ -154,6 +154,7 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                     #' }
                                     get_efficiency_metrics = function() {
                                       
+                                      efficiency_info <- self$summary_object$summaries$efficiency_info
                                       list(
                                         ## times
                                         time_burnin = self$summary_object$summaries$efficiency_info$time_burnin,
@@ -177,11 +178,42 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                         ## extract the "time to X ESS" (for total time w/o summaries)
                                         est_time_to_100_ESS_wo_summaries = self$summary_object$summaries$efficiency_info$total_time_to_100_ESS_wo_summaries,
                                         est_time_to_1000_ESS_wo_summaries = self$summary_object$summaries$efficiency_info$total_time_to_1000_ESS_wo_summaries,
-                                        est_time_to_10000_ESS_wo_summaries = self$summary_object$summaries$efficiency_info$total_time_to_1000_ESS_wo_summaries,
+                                        est_time_to_10000_ESS_wo_summaries =
+                                              efficiency_info$total_time_to_10000_ESS_wo_summaries,
                                         ## extract the "time to X ESS" (for total time inc. summaries)
                                         est_time_to_100_ESS_inc_summaries = self$summary_object$summaries$efficiency_info$total_time_to_100_ESS_with_summaries,
                                         est_time_to_1000_ESS_inc_summaries = self$summary_object$summaries$efficiency_info$total_time_to_1000_ESS_with_summaries,
-                                        est_time_to_10000_ESS_inc_summaries = self$summary_object$summaries$efficiency_info$total_time_to_10000_ESS_with_summaries
+                                        est_time_to_10000_ESS_inc_summaries =
+                                              efficiency_info$total_time_to_10000_ESS_with_summaries,
+                                        ## ESS types over the generated quantities, per sampling gradient, and the
+                                        ## gradient evaluations (all chains): the input of
+                                        ## fn_gradient_evaluations_to_target_ESS():
+                                        Min_ESS_tail_main =
+                                              efficiency_info$Min_ESS_tail_main,
+                                        Min_ESS_tail_per_grad_sampling =
+                                              efficiency_info$Min_ess_tail_per_grad_main_samp,
+                                        Min_ESS_gq =
+                                              efficiency_info$Min_ESS_gq,
+                                        Min_ESS_tail_gq =
+                                              efficiency_info$Min_ESS_tail_gq,
+                                        Min_ESS_sd_gq =
+                                              efficiency_info$Min_ESS_sd_gq,
+                                        n_gq_with_an_undefined_ESS_left_out =
+                                              efficiency_info$n_gq_with_an_undefined_ESS_left_out,
+                                        Min_ESS_gq_per_grad_sampling =
+                                              efficiency_info$Min_ess_per_grad_gq_samp,
+                                        Min_ESS_tail_gq_per_grad_sampling =
+                                              efficiency_info$Min_ess_tail_per_grad_gq_samp,
+                                        Min_ESS_sd_gq_per_grad_sampling =
+                                              efficiency_info$Min_ess_sd_per_grad_gq_samp,
+                                        n_grad_evals_sampling =
+                                              efficiency_info$n_grad_evals_sampling,
+                                        n_grad_evals_main_burnin =
+                                              efficiency_info$n_grad_evals_main_burnin,
+                                        n_grad_evals_pre_burnin =
+                                              efficiency_info$n_grad_evals_pre_burnin,
+                                        n_grad_evals_burnin =
+                                              efficiency_info$n_grad_evals_burnin
                                         
                                       )
                                       

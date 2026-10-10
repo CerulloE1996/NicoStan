@@ -1225,6 +1225,7 @@ create_summary_and_traces <- function(    model_results,
             
             Min_ESS_main <- NULL
             Min_ESS_sd_main <- NULL
+            Min_ESS_tail_main <- NULL
             summary_tibble_main_params <- NULL
             names_main <- pars_names[index_params_main]
             
@@ -1302,6 +1303,13 @@ create_summary_and_traces <- function(    model_results,
                         summary_tibble_main_params$n_eff_sd[rows_of_main_parameters_in_diagnostics]
                   Min_ESS_sd_main <- if (length(x = main_ess_sd_values) > 0 && all(is.finite(x = main_ess_sd_values)))
                       min(main_ess_sd_values) else NA_real_
+                  ## the same minimum for the tail ESS:
+                  main_ess_tail_values <-
+                        summary_tibble_main_params$n_eff_tail[rows_of_main_parameters_in_diagnostics]
+                  Min_ESS_tail_main <- if (length(x = main_ess_tail_values) > 0 &&
+                                           all(is.finite(x = main_ess_tail_values))) {
+                      min(main_ess_tail_values)
+                  } else NA_real_
                   Max_rhat_main <- if (length(x = main_rhat_values) > 0 && !anyNA(x = main_rhat_values))
                       max(main_rhat_values) else NA_real_
                   Max_nested_rhat_main <- NULL
@@ -1679,6 +1687,90 @@ create_summary_and_traces <- function(    model_results,
                             parameter_families_left_in_fitted_test_order =
                                   parameter_families_left_in_fitted_test_order)
           ##
+          ## ---- the smallest bulk ESS, tail ESS and ESS of the centred squared draws (ESS(theta^2), n_eff_sd)
+          ##      over the generated quantities (e.g. the sensitivities, specificities and prevalences of a latent
+          ##      class model), from their per-quantity values (NicoStan's C++ diagnostics); quantities with an
+          ##      undefined ESS (draws that never change) are left out and counted:
+          ##
+          Min_ESS_gq <- NA_real_
+          Min_ESS_tail_gq <- NA_real_
+          Min_ESS_sd_gq <- NA_real_
+          n_gq_with_an_undefined_ESS_left_out <- NA_real_
+          try({
+                if (!is.null(summary_tibble_generated_quantities) &&
+                    nrow(summary_tibble_generated_quantities) > 0) {
+                      gq_ESS_defined <- is.finite(summary_tibble_generated_quantities$n_eff) &
+                                        is.finite(summary_tibble_generated_quantities$n_eff_tail) &
+                                        is.finite(summary_tibble_generated_quantities$n_eff_sd)
+                      n_gq_with_an_undefined_ESS_left_out <- sum(!gq_ESS_defined)
+                      if (any(gq_ESS_defined)) {
+                            Min_ESS_gq <- min(summary_tibble_generated_quantities$n_eff[gq_ESS_defined])
+                            Min_ESS_tail_gq <- min(summary_tibble_generated_quantities$n_eff_tail[gq_ESS_defined])
+                            Min_ESS_sd_gq <- min(summary_tibble_generated_quantities$n_eff_sd[gq_ESS_defined])
+                      }
+                }
+          }, silent = TRUE)
+          ##
+          ## ---- gradient evaluations of the burn-in (all burn-in chains): at each iteration the expected
+          ##      executed leapfrog steps under the burn-in jitter, with the L in force at that iteration (the L
+          ##      recorded at the iteration before it; 1 at the first), plus the pre-burn-in when it ran
+          ##      (pre_burnin_L steps at each of its iterations, or its recorded L history when its trajectory
+          ##      length was set in tau units):
+          ##
+          n_grad_evals_main_burnin <- NA_real_
+          n_grad_evals_pre_burnin <- NA_real_
+          try({
+                randomize_tau_burnin_used <- !isFALSE(model_results$randomize_tau_burnin)
+                fn_expected_executed_leapfrog_steps_at_L <- function(L) {
+                      fn_expected_leapfrog_steps_sampling( tau = L,
+                                                           eps = 1,
+                                                           randomize_tau_sampling = randomize_tau_burnin_used)
+                }
+                fn_burnin_gradient_evaluations_of_L_history <- function(L_recorded) {
+                      L_recorded <- as.numeric(L_recorded)
+                      if (length(L_recorded) == 0 || anyNA(L_recorded)) return(NA_real_)
+                      L_in_force <- pmax(1, c(1, L_recorded[-length(L_recorded)]))
+                      n_chains_burnin * sum(vapply(X = L_in_force, FUN = fn_expected_executed_leapfrog_steps_at_L,
+                                                   FUN.VALUE = numeric(1)))
+                }
+                n_grad_evals_main_burnin <- fn_burnin_gradient_evaluations_of_L_history(
+                                                  burnin_object$L_main_during_burnin_vec)
+                n_grad_evals_pre_burnin <- if (!isTRUE(model_results$pre_burnin_n_iter_run > 0)) {
+                      0
+                } else if (is.numeric(model_results$pre_burnin_L) && length(model_results$pre_burnin_L) == 1) {
+                      n_chains_burnin * model_results$pre_burnin_n_iter_run *
+                            fn_expected_executed_leapfrog_steps_at_L(model_results$pre_burnin_L)
+                } else {
+                      fn_burnin_gradient_evaluations_of_L_history(
+                            model_results$pre_burnin_L_main_during_burnin_vec)
+                }
+          }, silent = TRUE)
+          n_grad_evals_burnin <- n_grad_evals_main_burnin + n_grad_evals_pre_burnin
+          ##
+          ## ---- ESS per sampling gradient evaluation (all sampling chains) for each ESS type:
+          ##
+          n_grad_evals_sampling <- if (exists("n_grad_evals_sampling_main", inherits = FALSE)) {
+                n_grad_evals_sampling_main
+          } else NA_real_
+          if (!exists("Min_ess_per_grad_main_samp", inherits = FALSE)) Min_ess_per_grad_main_samp <- NA_real_
+          fn_ESS_per_sampling_gradient <- function(ESS) {
+                if (is.null(ESS)) NA_real_ else ESS / n_grad_evals_sampling
+          }
+          Min_ess_tail_per_grad_main_samp <- fn_ESS_per_sampling_gradient(Min_ESS_tail_main)
+          Min_ess_per_grad_gq_samp <- fn_ESS_per_sampling_gradient(Min_ESS_gq)
+          Min_ess_tail_per_grad_gq_samp <- fn_ESS_per_sampling_gradient(Min_ESS_tail_gq)
+          Min_ess_sd_per_grad_gq_samp <- fn_ESS_per_sampling_gradient(Min_ESS_sd_gq)
+          try({
+                message(paste0("Min ESS (bulk / tail / theta^2) over the generated quantities = ",
+                               round(Min_ESS_gq), " / ", round(Min_ESS_tail_gq), " / ", round(Min_ESS_sd_gq),
+                               "; per 1,000 sampling gradients = ",
+                               signif(1000 * Min_ess_per_grad_gq_samp, 3), " / ",
+                               signif(1000 * Min_ess_tail_per_grad_gq_samp, 3), " / ",
+                               signif(1000 * Min_ess_sd_per_grad_gq_samp, 3)))
+                message(paste0("Gradient evaluations: burn-in ", round(n_grad_evals_burnin), " (pre-burn-in ",
+                               round(n_grad_evals_pre_burnin), "), sampling ", round(n_grad_evals_sampling)))
+          }, silent = TRUE)
+          ##
           ## list to store efficiency information
           ##
           efficiency_info <- list(              n_iter = n_iter,
@@ -1734,7 +1826,25 @@ create_summary_and_traces <- function(    model_results,
                                                 ##
                                                 total_time_to_100_ESS_with_summaries = total_time_to_100_ESS_with_summaries,
                                                 total_time_to_1000_ESS_with_summaries = total_time_to_1000_ESS_with_summaries,
-                                                total_time_to_10000_ESS_with_summaries = total_time_to_10000_ESS_with_summaries)
+                                                total_time_to_10000_ESS_with_summaries =
+                                                      total_time_to_10000_ESS_with_summaries,
+                                                ##
+                                                ## ---- ESS types per sampling gradient; gradient evaluations:
+                                                Min_ESS_tail_main = Min_ESS_tail_main,
+                                                Min_ess_per_grad_main_samp = Min_ess_per_grad_main_samp,
+                                                Min_ess_tail_per_grad_main_samp = Min_ess_tail_per_grad_main_samp,
+                                                Min_ESS_gq = Min_ESS_gq,
+                                                Min_ESS_tail_gq = Min_ESS_tail_gq,
+                                                Min_ESS_sd_gq = Min_ESS_sd_gq,
+                                                n_gq_with_an_undefined_ESS_left_out =
+                                                      n_gq_with_an_undefined_ESS_left_out,
+                                                Min_ess_per_grad_gq_samp = Min_ess_per_grad_gq_samp,
+                                                Min_ess_tail_per_grad_gq_samp = Min_ess_tail_per_grad_gq_samp,
+                                                Min_ess_sd_per_grad_gq_samp = Min_ess_sd_per_grad_gq_samp,
+                                                n_grad_evals_sampling = n_grad_evals_sampling,
+                                                n_grad_evals_main_burnin = n_grad_evals_main_burnin,
+                                                n_grad_evals_pre_burnin = n_grad_evals_pre_burnin,
+                                                n_grad_evals_burnin = n_grad_evals_burnin)
           ##
           ## Final lists to output
           ##

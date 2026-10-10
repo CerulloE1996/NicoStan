@@ -17,6 +17,9 @@
 #include <memory>
 #include <thread>
 #include <functional>
+//// (the WCP team of a burn-in thread put to sleep after a burn-in iteration, when R's gap between iterations
+////  is long)
+#include <NicoStan/runtime/general_functions/libomp_spin_time_of_thread.hpp>
 
  
  
@@ -1013,6 +1016,9 @@ public:
       std::chrono::steady_clock::time_point parallel_start;
       const std::vector<double> *tau_main_ii_overrides;
       const std::vector<double> *tau_us_ii_overrides;
+      //// (R's time between the previous burn-in iteration and this one: see the gap rule in
+      ////  libomp_spin_time_of_thread.hpp)
+      double gap_since_last_burnin_iteration_ms = 0.0;
       
       BurninIterWorker(PersistentBurninState* st_, const int seed_, const int current_iter_,
                        std::vector<BurninChainProfile> *chain_profiles_ = nullptr,
@@ -1025,7 +1031,8 @@ public:
                        const std::vector<double> *tau_main_ii_overrides_,
                        const std::vector<double> *tau_us_ii_overrides_)
         : st(st_), seed(seed_), current_iter(current_iter_), chain_profiles(chain_profiles_), parallel_start(parallel_start_),
-          tau_main_ii_overrides(tau_main_ii_overrides_), tau_us_ii_overrides(tau_us_ii_overrides_) {}
+          tau_main_ii_overrides(tau_main_ii_overrides_), tau_us_ii_overrides(tau_us_ii_overrides_),
+          gap_since_last_burnin_iteration_ms(fn_gap_since_last_burnin_iteration_ms()) {}
       
       void operator()(std::size_t begin, std::size_t end) {
         for (std::size_t i = begin; i < end; ++i) {
@@ -1051,6 +1058,13 @@ public:
             profile.start_offset_seconds = std::chrono::duration<double>(chain_start - parallel_start).count();
           }
         }
+        //// (this thread's WCP team sleeps from here, rather than spinning, whilst R runs the tau update, when
+        ////  R's last gap between iterations was long: the gap rule in libomp_spin_time_of_thread.hpp)
+        if (gap_since_last_burnin_iteration_ms >=
+            minimum_gap_ms_for_putting_WCP_team_to_sleep_after_burnin_iteration) {
+          fn_put_WCP_team_of_this_thread_to_sleep_after_burnin_iteration(st->Model_type, st->n_threads_WCP);
+        }
+        fn_record_end_of_burnin_iteration_chain();
       }
   
 };
