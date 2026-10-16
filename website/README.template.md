@@ -1077,6 +1077,88 @@ for instance,
 describes how to check which extensions your CPU supports.
 
 
+### NicoSIMD: the SIMD functions on every device
+
+
+SIMD (single instruction, multiple data) instructions apply one operation 
+(for instance, an addition, a multiplication, or one step of the polynomial approximation of `exp()`) 
+to several numbers at once, all held in one wide register of the CPU. 
+Which SIMD instructions are available depends on the CPU's instruction set;
+more specifically:
+
+- **AVX2** (Advanced Vector Extensions 2; 256-bit registers, i.e., four double-precision values per instruction) 
+is an x86 (Intel and AMD) instruction set. 
+It is supported by every Intel CPU since the 4th-generation Core CPUs ("Haswell", 2013), 
+and by every AMD CPU since 2015, including every AMD Ryzen, Threadripper and EPYC CPU;
+note that some low-power Intel CPUs (e.g., older Atom, Celeron and Pentium models) do not support it.
+- **AVX-512** (512-bit registers, i.e., eight double-precision values per instruction) 
+is also an x86 instruction set. 
+It is supported by AMD's Zen 4 and Zen 5 CPUs (e.g., Ryzen 7000 and 9000, and EPYC 9004 and 9005), 
+by Intel's Xeon (server) CPUs since 2017, 
+and by some 10th- and 11th-generation Intel laptop and desktop CPUs;
+however, it is switched off in Intel's 12th-generation (and later) consumer CPUs.
+Note that Zen 4 CPUs run each 512-bit instruction in two 256-bit halves;
+nevertheless, on our Zen 4 server, the AVX-512 versions were at least as fast as the AVX2 versions 
+in almost every case.
+- **NEON** (also called Advanced SIMD; 128-bit registers, i.e., two double-precision values per instruction) 
+is the SIMD instruction set of ARM CPUs, which have no AVX. 
+It is supported by every 64-bit ARM CPU, for instance:
+Apple Silicon (M1-M4) Macs,
+Qualcomm Snapdragon CPUs (including the Snapdragon X CPUs of Windows on ARM laptops),
+the Raspberry Pi 3, 4 and 5,
+and ARM servers such as AWS Graviton, NVIDIA Grace and Ampere Altra.
+Some ARM server CPUs also have SVE / SVE2 (scalable vector extensions), which NicoSIMD does not use.
+
+
+The custom vectorised functions (the AVX2 and AVX-512 functions, the fused log densities, 
+and the mathematical functions such as `exp()`, `log()` and `Phi()`) 
+are provided by NicoSIMD, a separate, header-only R package, 
+which is installed automatically with NicoStan (and with BayesMVP).
+Note that neither NicoStan nor BayesMVP requires them: 
+both run on the plain Stan math functions, just more slowly.
+
+
+Since every model is compiled on the user's own computer, 
+the instruction set is chosen when the model is compiled, based on what the CPU supports;
+more specifically, the functions use:
+
+- **AVX-512** on CPUs which support it;
+- otherwise, **AVX2**;
+- on ARM CPUs, **NEON**, through the [SIMDe](https://github.com/simd-everywhere/simde) 
+("SIMD Everywhere") library, which translates the AVX2 functions into NEON instructions;
+- otherwise, the plain Stan math functions.
+
+
+To check which of these your CPU supports:
+on Linux, `grep -o -w -E 'avx2|avx512f|asimd' /proc/cpuinfo | sort -u` 
+(where `asimd` means NEON, on ARM CPUs);
+on Windows, a tool such as CPU-Z;
+on an Intel Mac, `sysctl -a | grep machdep.cpu`
+(every Apple Silicon Mac supports NEON, and none supports AVX).
+
+
+### Compatibility across devices
+
+
+| Device / operating system | SIMD functions used | Notes |
+|---|---|---|
+| Linux, Intel / AMD CPU | AVX-512 or AVX2 | |
+| Windows, Intel / AMD CPU | AVX-512 or AVX2 | requires the Clang compiler of Rtools (`clang64`); with GCC, the AVX functions are switched off |
+| macOS, Intel CPU | AVX2 (or AVX-512 on some Mac Pro and iMac Pro models) | not yet tested |
+| macOS, Apple Silicon (M1-M4) | NEON (via SIMDe) | not yet tested; the within-chain parallelisation of the BayesMVP models uses OpenMP, which Apple's compiler does not include by default (libomp may need to be installed, e.g., via Homebrew) |
+| Windows on ARM (e.g., Snapdragon X) | NEON (via SIMDe) | not yet tested |
+
+
+Note that we have not yet tested NicoStan, BayesMVP or the SIMD functions on any ARM CPU 
+(i.e., neither on Apple Silicon Macs nor on Snapdragon CPUs), nor on macOS;
+hence, bug reports are very welcome
+(please email me - see the [Installation](#installation) section for my email address - 
+or open an issue on [GitHub](https://github.com/CerulloE1996/NicoStan/issues)).
+Furthermore, our benchmarks were run on an AMD EPYC 9654 (Zen 4) and an AMD Ryzen 7 5800H (Zen 3),
+so they do not apply to ARM CPUs;
+the speed-ups of the NEON versions may be smaller than those of the AVX2 and AVX-512 versions.
+
+
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## How to cite NicoStan
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
