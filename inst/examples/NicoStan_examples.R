@@ -160,7 +160,9 @@ make_NicoStan_example <-  function( model,
         ##
         if (model == "cox_frailty") {
                 n <-  size(if (small) 64L else 600L)
-                n_groups <-  if (is.null(N)) if (small) 8L else 30L else max(4L, as.integer(ceiling(n / 8)))
+                # n_groups <-  if (is.null(N)) if (small) 8L else 30L else max(4L, as.integer(ceiling(n / 8)))
+                ## (8 subjects per group in every profile and at every N, as in the benchmarks)
+                n_groups <-  max(4L, as.integer(ceiling(n / 8)))
                 group <-  rep(seq_len(n_groups), length.out = n)
                 design <-  matrix(rnorm(n * 2L), nrow = n)
                 beta <-  c(0.5, -0.3)
@@ -198,7 +200,9 @@ make_NicoStan_example <-  function( model,
                 main <-  c("alpha", "beta", "sigma")
         } else if (model == "hierarchical_logistic") {
                 n <-  size(if (small) 96L else 1200L)
-                n_groups <-  if (is.null(N)) if (small) 8L else 40L else max(4L, as.integer(ceiling(n / 12)))
+                # n_groups <-  if (is.null(N)) if (small) 8L else 40L else max(4L, as.integer(ceiling(n / 12)))
+                ## (12 observations per group in every profile and at every N, as in the benchmarks)
+                n_groups <-  max(4L, as.integer(ceiling(n / 12)))
                 group <-  rep(seq_len(n_groups), length.out = n)
                 x <-  rnorm(n)
                 coefficients <-  cbind(rnorm(n_groups, -0.3, 0.6), rnorm(n_groups, 0.7, 0.4))

@@ -314,7 +314,7 @@ and the R-hat and nested R-hat convergence diagnostics (`Rhat` and `n_Rhat`).
 
 
 This example simulates data with 20 groups and 200 observations, with a standard normal latent vector 
-(i.e., the non-centred random intercepts) declared first in the Stan model.
+(i.e., the non-centred random intercepts) as the nuisance block, named with `nuisance_params = "z"`.
 See the complete [R example](inst/examples/random_intercepts.R) and [Stan model](inst/examples/random_intercepts.stan)
 for the full parameterisation and settings.
 Note that the R6 class is called `NicoStan::Nico_model` (`NicoStan::MVP_model` also still works, for compatibility reasons);
@@ -352,10 +352,16 @@ selecting an AVX backend does not automatically replace standard Stan function c
 
 When preparing a model for NicoStan:
 
-- Declare the nuisance block **first in the Stan parameters block**.
-- Set `sample_nuisance = TRUE` (or `FALSE` for a model without a nuisance block).
-- Note that NicoStan automatically detects the (unconstrained) dimension of the nuisance block, 
-using the Stan compiler metadata and BridgeStan.
+- Name every nuisance block with `nuisance_params = c(...)` in `Nico_model$new()`, in any order
+(e.g., `nuisance_params = c("z_intercept", "z_slope")`); the blocks can be declared anywhere in the
+`parameters` block.
+NicoStan never chooses the nuisance blocks itself: with `sample_nuisance = TRUE` and no `nuisance_params`,
+it stops with an error saying so.
+- Set `sample_nuisance = TRUE` (or `FALSE` for a model without a nuisance block, i.e., every parameter is main).
+- Note that NicoStan then writes a version of the model whose nuisance blocks are held by NicoStan,
+rather than declared as Stan parameters
+(see [Example 2](#example-2-several-nuisance-blocks-nuisance_params) and
+[reduce_sum_chunked](#reduce_sum_chunked-nuisance-blocks-held-inside-the-chunks)).
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -371,9 +377,10 @@ with its Stan model, its AVX version and an R script which simulates the data, f
 ### Example 1: one nuisance block (logistic regression with random intercepts)
 
 
-The nuisance parameters (here, the standardised random intercepts `z`) are declared **first** in the `parameters` block;
-NicoStan then detects them automatically (i.e., the first declared parameter), and samples them with
-diffusion-pathspace HMC (`diffusion_HMC = TRUE`), whilst the main parameters use standard HMC.
+The nuisance parameters (here, the standardised random intercepts `z`) are named with `nuisance_params = "z"`;
+NicoStan samples them with diffusion-pathspace HMC (`diffusion_HMC = TRUE`), whilst the main parameters use standard HMC.
+Note that NicoStan never chooses the nuisance blocks itself, so they are always named,
+wherever they are declared in the `parameters` block.
 The Stan model ([random_intercepts.stan](inst/examples/random_intercepts.stan)) is:
 
 ```stan
@@ -385,7 +392,7 @@ data {
   array[N] int<lower=0, upper=1> y;
 }
 parameters {
-  vector[J] z;                  // the nuisance block: declared first
+  vector[J] z;                  // the nuisance block (named with nuisance_params)
   real alpha;
   real beta;
   real<lower=0> sigma;
@@ -408,6 +415,7 @@ and it is fitted with (see [random_intercepts.R](inst/examples/random_intercepts
 model <-  NicoStan::Nico_model$new(Model_type = "Stan",
                                     Stan_data_list = stan_data,
                                     Stan_model_file_path = "random_intercepts.stan",
+                                    nuisance_params = "z",
                                     sample_nuisance = TRUE)
 initial_values <-  lapply(X = 1:4, FUN = function(chain) {
                        list(z = rep(0, n_groups), alpha = 0.1 * (chain - 2.5), beta = 0, sigma = 0.6)
@@ -476,9 +484,11 @@ the model uses `reduce_sum`).
 Note that:
 
 - **How many blocks:** any number (each one named in `nuisance_params`).
-- **Which shapes:** unconstrained `vector`, `row_vector`, `array[] real`, `array[] vector` and `array[] row_vector`
-blocks, and tuples of these (see below); any other block (e.g., with a constraint, a matrix, or an array of tuples)
-stops with an error saying so.
+- **Which shapes:** unconstrained `vector`, `row_vector`, `array[] real`, `array[] vector`, `array[] row_vector`
+and `matrix` blocks, and tuples of these (see below); any other block (e.g., with a constraint, or an array of
+tuples) stops with an error saying so.
+Note that `reduce_sum` slices arrays only, so a nuisance block which is the sliced argument of `reduce_sum` must be
+an array (e.g., `array[N] vector[K]` or `array[N] row_vector[K]`).
 - **Tuples:** a nuisance block may also be a tuple, so that blocks of different containers can be declared (and
 named in `nuisance_params`) at once, e.g.:
 
@@ -605,9 +615,7 @@ NicoStan then samples the nuisance blocks with diffusion-pathspace HMC (`diffusi
 the main parameters with standard HMC.
 Since `u_raw` is the sliced argument of `reduce_sum_static`, NicoStan holds its values inside the chunks
 (reduce_sum_chunked), i.e., off Stan's main autodiff tape.
-Note that a single nuisance block declared first in the `parameters` block is also found with
-`sample_nuisance = TRUE` alone (as in
-[Example 1](#example-1-one-nuisance-block-logistic-regression-with-random-intercepts)):
+Note that NicoStan never chooses the nuisance blocks itself, so they are always named, as here:
 
 ```r
 NicoSIMD_build <-  NicoSIMD::fn_include_folder_Stan_user_header_and_build_arguments_of_NicoSIMD_for_this_CPU()
@@ -827,7 +835,7 @@ for (name_of_switch in c("softplus", "hetero_sigma", "compound_symmetry")) {
 
 
 **(b) The nuisance parameters.**
-The model's two nuisance blocks are declared first in its `parameters` block,
+The model's two nuisance blocks of standard-normal between-study values,
 
 ```stan
 parameters {
@@ -837,10 +845,13 @@ parameters {
 }
 ```
 
-with `n_total_obs` the number of study-test pairs. As they are the first `2 n_studies + 2 n_total_obs`
-parameters, `sample_nuisance = TRUE` with `n_nuisance_override = 2 n_studies + 2 n_total_obs` gives both blocks to
-NicoStan, which samples them with diffusion-pathspace HMC (`diffusion_HMC = TRUE` in `$sample()`) and the main
-parameters with standard HMC; the `#include` files are found with `stanc_args`:
+with `n_total_obs` the number of study-test pairs, are given to NicoStan by name with
+`nuisance_params = c("beta_eta_z", "beta_delta_z_vec")`;
+NicoStan samples them with diffusion-pathspace HMC (`diffusion_HMC = TRUE` in `$sample()`) and the main parameters
+with standard HMC.
+NicoStan writes the model's version with these two blocks held by NicoStan
+(`DTA_NMA_Nyaga_Xu_FIXEDthr_reduce_sum_chunked.stan`, next to the model; the rest of the model is unchanged),
+and the `#include` files are found with `stanc_args`:
 
 ```r
 Stan_model_file_path <-  file.path(tempdir(), "DTA_NMA_Nyaga_Xu_FIXEDthr.stan")
@@ -854,8 +865,8 @@ model_NicoStan <-  NicoStan::Nico_model$new(Model_type            = "Stan",
                                             Stan_model_file_path  = Stan_model_file_path,
                                             stanc_args            = list(paste0("--include-paths=",
                                                                                 Stan_functions_folder)),
-                                            sample_nuisance       = TRUE,
-                                            n_nuisance_override   = 2 * n_studies + 2 * n_total_obs)
+                                            nuisance_params       = c("beta_eta_z", "beta_delta_z_vec"),
+                                            sample_nuisance       = TRUE)
 ```
 
 Here this gives 432 nuisance parameters (2 x 80 studies + 2 x 136 study-test pairs) and 241 main parameters.
@@ -910,7 +921,7 @@ fit_summary$get_summary_main()
 ### The example models
 
 
-| Model | Nuisance block (declared first) | Stan model | AVX version | R script |
+| Model | Nuisance blocks (named with `nuisance_params`) | Stan model | AVX version | R script |
 |---|---|---|---|---|
 | Logistic regression with random intercepts | `z[J]` | [random_intercepts.stan](inst/examples/random_intercepts.stan) | - | [random_intercepts.R](inst/examples/random_intercepts.R) |
 | Stochastic volatility (discrete-time AR(1)) | `h_std[T]` | [EASY_Stochastic_volatility.stan](inst/examples/models/EASY_Stochastic_volatility.stan) | [_avx](inst/examples/models/EASY_Stochastic_volatility_avx.stan) | [Run_EASY_Stochastic_volatility.R](inst/examples/Run_EASY_Stochastic_volatility.R) |
@@ -972,6 +983,24 @@ The correlation matrices use the flexible Cholesky parameterisation of [Sean Pin
 (`corr_force_positive = TRUE`), as well as custom element-specific bounds (via the `lb_corr` and `ub_corr` arguments, with one
 matrix per latent class). Furthermore, any of the correlations can be fixed to known values, via the `known_values_indicator_list`
 argument (which indicates which correlations are known) and the `known_values_list` argument (their values).
+
+
+**Chunks and within-chain threads.**
+BayesMVP's models work through the subjects in chunks: the forward pass and the (manual) gradients of each chunk
+are finished before the next chunk starts, in one workspace which is reused for every chunk
+(one workspace per thread, with within-chain parallelisation, i.e., WCP),
+so that, with the number of chunks chosen as below, each chunk's buffers stay in the CPU's L2 cache.
+Similarly to the Stan models, the number of chunks and of within-chain threads of the burn-in and of the sampling
+are found by BayesMVP itself, from the L2 and L3 caches of the computer
+(`BayesMVP::fn_compute_burnin_n_threads_WCP_and_num_chunks_for_BayesMVP_model()` and
+`BayesMVP::fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_BayesMVP_model()`, see
+[Example 3](#example-3-the-multivariate-ordered-probit-model-with-the-fused-ghk-function-and-bayesmvp)),
+or by `$sample()` when they are left out.
+The log density and its gradient do not depend on the number of chunks: in the evaluation the sampler uses,
+the largest relative difference from one chunk was 1.1e-14 (LC-MVP and LC-MVOP, with and without missing results,
+with the AVX-512 and the Stan math functions, at 1 to 64 chunks; the check is
+`tests/check_that_the_BayesMVP_manual_gradient_models_give_the_same_log_density_and_gradient_at_every_number_of_chunks.R`
+in BayesMVP).
 
 
 The ordinal latent class model is described in [Cerullo et al., 2022](https://doi.org/10.1002/jrsm.1567).
@@ -1378,7 +1407,7 @@ nuisance block.
 | | $\mu_{k_a}$ (`mu_ka`) | population mean of log ka (absorption rate, 1/h), above the elimination rate (no flip-flop) | 1 | main (fixed size) |
 | | $\boldsymbol{\omega} \in \mathbb{R}^5$ (`omega`) | between-patient SDs of log CL, log Q, log V1, log V2 and log ka | 5 | main (fixed size) |
 | | $\mathbf{L}_{\Omega}$ (`L_Omega`) | Cholesky factor of the correlation matrix of the patient effects | $5 \times 5$ (10 free) | main (fixed size) |
-| | $\sigma$ (`sigma`) | residual SD of the log concentrations | 1 | main (fixed size) |
+| | $\sigma$ (`sigma`) | residual SD of the log concentrations (5 per patient at every N, at 0.5, 1.5, 4, 8 and 24 h after the dose) | 1 | main (fixed size) |
 | GP classification (50) | $\boldsymbol{\eta} = (\eta_1, \ldots, \eta_N)$ (`eta`) | standard normal values of the latent GP | $N$ | nuisance (standard normal latent GP, grows with N) |
 | | $\mu$ (`mu`) | constant mean of the latent log-odds | 1 | main (fixed size) |
 | | $\ell$ (`lengthscale`) | lengthscale of the squared-exponential covariance | 1 | main (fixed size) |
@@ -1517,14 +1546,13 @@ threads per chain and chunks; see Paper 1):
 
 | N | Gain over plain `reduce_sum`: local-HPC (AVX-512) | Gain over plain `reduce_sum`: laptop (AVX2) |
 |---:|---:|---:|
-| 500 | 1.15x | 1.19x |
-| 5000 | 1.26x | 1.27x |
-| 10,000 | 1.28x | 1.47x |
-| 25,000 | 1.74x | 1.95x |
-| 50,000 | 2.12x | 2.74x |
+| 500 | 1.13x | 1.17x |
+| 10,000 | 1.30x | 1.36x |
+| 50,000 | 2.11x | 2.54x |
 
-With `reduce_sum_chunked`, the AVX-512 version of this model is 3.06x, 3.61x, 4.14x, 4.87x and 5.23x faster than
-its Stan math version (local-HPC, N = 500, 5000, 10,000, 25,000 and 50,000), i.e., rising with N.
+With `reduce_sum_chunked`, the AVX-512 version of this model is 3.02x, 4.23x and 5.21x faster than its Stan math
+version (local-HPC, N = 500, 10,000 and 50,000), and the AVX2 version 2.97x, 4.52x and 4.69x (laptop), i.e.,
+rising with N.
 
 
 ### What it changes inside Stan's autodiff system
@@ -1965,7 +1993,8 @@ essentially joint-best).
 
 
 NicoStan can also use our custom C++, vectorised (i.e., SIMD) mathematical functions,
-which are supplied through the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension R package.
+which are supplied by [NicoSIMD](#nicosimd-the-simd-functions-on-every-device),
+the SIMD library of both NicoStan and [BayesMVP](https://github.com/CerulloE1996/BayesMVP).
 These include, for instance, exponentials (`exp()`), logarithms (`log()`),
 and normal distribution functions (`Phi()`, `inv_Phi()`, `Phi_approx()` and `inv_Phi_approx()`),
 as well as their derivatives and some other maths functions.
@@ -1974,14 +2003,17 @@ as well as their derivatives and some other maths functions.
 - **AVX2:** four double-precision values per vector operation; supported by many x86 CPUs.
 - **AVX-512:** eight double-precision values per vector operation on supported processors.
 - **General Stan models:** declare and call the custom AVX functions in the `.stan` model, 
-then supply their C++ header via `Stan_cpp_user_header`.
+then supply their C++ header via `Stan_cpp_user_header`
+(`NicoSIMD::fn_include_folder_Stan_user_header_and_build_arguments_of_NicoSIMD_for_this_CPU()` gives the header
+and the build arguments for the CPU in use, see
+[Example 3](#example-3-the-multivariate-ordered-probit-model-with-the-fused-ghk-function-and-bayesmvp)).
 - **Specialised [BayesMVP](https://github.com/CerulloE1996/BayesMVP) models:** 
 the same AVX functions are used within the native implementations.
 
 
 Note that the AVX options are not a drop-in switch for an existing Stan model;
 more specifically, the user has to re-write their Stan model (i.e., the `.stan` file), 
-so that it calls the custom AVX2/AVX-512 functions from BayesMVP.
+so that it calls the custom AVX2/AVX-512 functions from NicoSIMD.
 
 
 The comparison examples (whose Stan models have already been re-written in this way) 
@@ -2028,12 +2060,31 @@ and ARM servers such as AWS Graviton, NVIDIA Grace and Ampere Altra.
 Some ARM server CPUs also have SVE / SVE2 (scalable vector extensions), which NicoSIMD does not use.
 
 
-The custom vectorised functions (the AVX2 and AVX-512 functions, the fused log densities, 
-and the mathematical functions such as `exp()`, `log()` and `Phi()`) 
-are provided by NicoSIMD, a separate, header-only R package, 
-which is installed automatically with NicoStan (by `install_NicoStan()`).
-Note that neither NicoStan nor BayesMVP requires them: 
-both run on the plain Stan math functions, just more slowly.
+NicoSIMD (named, like NicoStan, after Nico) is the one SIMD library of both NicoStan and BayesMVP:
+a separate, header-only R package, which is a dependency of both (from GitHub, through
+`Remotes: CerulloE1996/NicoSIMD` in their `DESCRIPTION` files), and which `install_NicoStan()` installs first.
+More specifically, it holds:
+
+- **the elementwise AVX2 and AVX-512 functions** (`math/fast_and_approx_AVX2_fns.hpp` and
+`math/fast_and_approx_AVX512_fns.hpp`), e.g., `exp()`, `log()`, `log1p()`, `inv_logit()` and `log_inv_logit()`,
+`Phi()`, `Phi_approx()`, `inv_Phi()` and `inv_Phi_approx()` (also from a probability on the logit scale),
+`log_Phi_approx()`, `erf()` and its inverse, and `tanh()`;
+- **the fused log densities and GLMs**, each a single autodiff node with its own gradient, e.g., the normal,
+Student-t, Weibull, ordered logistic, binomial and Bernoulli-logit log densities, and the Bernoulli (logit and probit),
+ordered logistic, Student-t and Weibull GLMs (and a Bernoulli GLM with a tensor-product basis);
+- **the fused general functions**, e.g., the Gaussian process nodes (with a choice of kernel), the affine
+recurrences and scans of state-space models, the proportional hazards log likelihood with a piecewise linear
+baseline hazard, the truncated normal quantile and log mass, the binomial counts above successive cutpoints and the
+induced Dirichlet prior of ordered cutpoints, and the fused GHK log likelihood of the multivariate (ordered) probit
+family (1, 2 or 4 latent classes; binary, ordinal and mixed outcomes; missing results);
+- **[SIMDe](https://github.com/simd-everywhere/simde)**, for NEON on ARM CPUs (see below).
+
+The functions are called from Stan as external `nico_` functions (the older `fast_` names of BayesMVP still work).
+Every SIMD local variable is declared aligned (`ALIGN32` for AVX2 and `ALIGN64` for AVX-512), so that the AVX code
+is also safe on Windows, where it is built with clang (Rtools' `clang64`).
+Note that custom fused functions with no SIMD code of their own (i.e., Stan math only) are in NicoStan, not in
+NicoSIMD; furthermore, a model compiled without NicoSIMD's functions runs on the plain Stan math functions, just
+more slowly.
 
 
 Since every model is compiled on the user's own computer, 

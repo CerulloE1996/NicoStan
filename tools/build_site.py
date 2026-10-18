@@ -260,7 +260,9 @@ kinds_of_benchmark_file = [("unchunked, with Stan's fused functions",
                            ("chunked", "_chunked.stan"),
                            ("chunked, with the hand-written AVX functions",
                             "_chunked_hand_written_BayesMVP_AVX.stan")]
-EXAMPLES_OF_THE_BENCHMARK.mkdir(exist_ok=True)
+# EXAMPLES_OF_THE_BENCHMARK.mkdir(exist_ok=True)
+## (parents = True: the copy of the site that the sync script builds in a temporary folder has no inst/examples)
+EXAMPLES_OF_THE_BENCHMARK.mkdir(parents = True, exist_ok = True)
 benchmark_files_of_each_model = []
 ## The models whose current files do not follow the three names above: each file's kind, its source (in the
 ## benchmark's models folder) and the name of its copy
