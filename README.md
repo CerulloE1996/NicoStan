@@ -361,7 +361,7 @@ it stops with an error saying so.
 - Note that NicoStan then writes a version of the model whose nuisance blocks are held by NicoStan,
 rather than declared as Stan parameters
 (see [Example 2](#example-2-several-nuisance-blocks-nuisance_params) and
-[reduce_sum_chunked](#reduce_sum_chunked-nuisance-blocks-held-inside-the-chunks)).
+[reduce_sum_chunked](#nico_reduce_sum-and-nico_map_rect)).
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -479,7 +479,7 @@ With `nuisance_params`, NicoStan writes a version of the model (`<model>_reduce_
 whose nuisance blocks are held by NicoStan, rather than declared as Stan parameters
 (the blocks one after the other, each in Stan's own order of its values);
 the rest of the model is unchanged
-(see [reduce_sum_chunked](#reduce_sum_chunked-nuisance-blocks-held-inside-the-chunks) for what this gives when
+(see [reduce_sum_chunked](#nico_reduce_sum-and-nico_map_rect) for what this gives when
 the model uses `reduce_sum`).
 Note that:
 
@@ -1507,7 +1507,7 @@ Furthermore, NicoStan can be used without having to restructure the model's calc
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
-## reduce_sum_chunked: nuisance blocks held inside the chunks
+## nico_reduce_sum and nico_map_rect
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
 
@@ -1536,7 +1536,7 @@ Note that `map_rect` is not a substitute for this:
 Jacobian on the main tape; in other words, a shared N-sized parameter is copied into every job.
 
 
-### What it gives
+### What nico_reduce_sum gives
 
 
 For the stochastic volatility model (non-centred, with one latent volatility per time point as its nuisance block),
@@ -1553,6 +1553,52 @@ threads per chain and chunks; see Paper 1):
 With `reduce_sum_chunked`, the AVX-512 version of this model is 3.02x, 4.23x and 5.21x faster than its Stan math
 version (local-HPC, N = 500, 10,000 and 50,000), and the AVX2 version 2.97x, 4.52x and 4.69x (laptop), i.e.,
 rising with N.
+
+
+### Map jobs in a shared-frailty Cox model
+
+
+`nico_reduce_sum` applies a partial-sum function to slices and returns their sum; `nico_map_rect` applies a job
+function and returns a vector of job results. In this Cox model, observations are sorted by decreasing survival
+time and split into blocks. Each map job calculates the log-sum-exp of eta within one block, giving that block's
+log risk. A cumulative log-sum-exp scan of the block results gives each later block its risk-set offset.
+
+
+The scalar reducer uses each block's offset to calculate its Cox partial-likelihood contribution and the prior
+contribution for that block's frailty groups. Mapping and reduction perform different parts of the same
+calculation: the map jobs produce block risk summaries, and the reducer sums the block contributions. In the
+`nico_map_rect` arm, NicoStan's generated C++ reads the nuisance values needed by each map job inside that job,
+rather than first gathering the nuisance values for all blocks into job-argument vectors on the main tape.
+
+
+For each pair, the scalar reducer and its retained nuisance-reader code are identical; only the map implementation
+changes. Each arm uses its own layout selected by the existing search. The comparison covers both maths backends,
+both devices, and N = 10,000, 50,000 and 200,000, with J = N/2 (two subjects per frailty group).
+
+
+The table shows the ratio of median `TP_iter` at L = 10 for `nico_map_rect` and Stan's `map_rect`; each median is
+calculated from three final repeats at that arm's independently selected layout. The same device, maths backend
+and N are compared in each row. Layouts are shown as chains × within-chain threads (WCP) / requested chunks.
+
+
+| Device | Maths backend | N | Stan `map_rect` | `nico_map_rect` | Speed-up |
+|---|---|---:|---:|---:|---:|
+| HPC | Stan maths only | 10,000 | 180 × 1 / 8 | 180 × 1 / 4 | 1.007× |
+| HPC | Stan maths only | 50,000 | 180 × 1 / 64 | 180 × 1 / 32 | 1.070× |
+| HPC | Stan maths only | 200,000 | 180 × 1 / 512 | 180 × 1 / 256 | 1.239× |
+| HPC | Nico maths | 10,000 | 180 × 1 / 2 | 180 × 1 / 2 | 1.084× |
+| HPC | Nico maths | 50,000 | 180 × 1 / 64 | 180 × 1 / 32 | 1.123× |
+| HPC | Nico maths | 200,000 | 180 × 1 / 512 | 180 × 1 / 256 | 1.414× |
+| Laptop | Stan maths only | 10,000 | 16 × 1 / 8 | 16 × 1 / 16 | 0.960× |
+| Laptop | Stan maths only | 50,000 | 8 × 2 / 64 | 8 × 2 / 32 | 1.060× |
+| Laptop | Stan maths only | 200,000 | 8 × 2 / 512 | 8 × 2 / 256 | 1.208× |
+| Laptop | Nico maths | 10,000 | 8 × 2 / 8 | 16 × 1 / 8 | 1.044× |
+| Laptop | Nico maths | 50,000 | 16 × 1 / 32 | 16 × 1 / 64 | 1.271× |
+| Laptop | Nico maths | 200,000 | 16 × 1 / 256 | 8 × 2 / 256 | 1.496× |
+
+
+At N = 10,000 the gain is smaller; on the laptop with Stan maths, `nico_map_rect` has 4.0% lower throughput.
+The gains are larger at N = 50,000 and 200,000 for both maths backends and devices.
 
 
 ### What it changes inside Stan's autodiff system
