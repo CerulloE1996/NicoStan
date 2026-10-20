@@ -1573,7 +1573,7 @@ rather than first gathering the nuisance values for all blocks into job-argument
 
 For each pair, the scalar reducer and its retained nuisance-reader code are identical; only the map implementation
 changes. Each arm uses its own layout selected by the existing search. The comparison covers both maths backends,
-both devices, and N = 10,000, 50,000 and 200,000, with J = N/2 (two subjects per frailty group).
+both devices, and N = 10,000, 25,000, 50,000 and 200,000, with J = N/2 (two subjects per frailty group).
 
 
 The table shows the ratio of median `TP_iter` at L = 10 for `nico_map_rect` and Stan's `map_rect`; each median is
@@ -1584,15 +1584,19 @@ and N are compared in each row. Layouts are shown as chains × within-chain thre
 | Device | Maths backend | N | Stan `map_rect` | `nico_map_rect` | Speed-up |
 |---|---|---:|---:|---:|---:|
 | HPC | Stan maths only | 10,000 | 180 × 1 / 8 | 180 × 1 / 4 | 1.007× |
+| HPC | Stan maths only | 25,000 | 180 × 1 / 32 | 180 × 1 / 16 | 1.002× |
 | HPC | Stan maths only | 50,000 | 180 × 1 / 64 | 180 × 1 / 32 | 1.070× |
 | HPC | Stan maths only | 200,000 | 180 × 1 / 512 | 180 × 1 / 256 | 1.239× |
 | HPC | Nico maths | 10,000 | 180 × 1 / 2 | 180 × 1 / 2 | 1.084× |
+| HPC | Nico maths | 25,000 | 180 × 1 / 32 | 180 × 1 / 8 | 1.036× |
 | HPC | Nico maths | 50,000 | 180 × 1 / 64 | 180 × 1 / 32 | 1.123× |
 | HPC | Nico maths | 200,000 | 180 × 1 / 512 | 180 × 1 / 256 | 1.414× |
 | Laptop | Stan maths only | 10,000 | 16 × 1 / 8 | 16 × 1 / 16 | 0.960× |
+| Laptop | Stan maths only | 25,000 | 16 × 1 / 32 | 16 × 1 / 32 | 1.034× |
 | Laptop | Stan maths only | 50,000 | 8 × 2 / 64 | 8 × 2 / 32 | 1.060× |
 | Laptop | Stan maths only | 200,000 | 8 × 2 / 512 | 8 × 2 / 256 | 1.208× |
 | Laptop | Nico maths | 10,000 | 8 × 2 / 8 | 16 × 1 / 8 | 1.044× |
+| Laptop | Nico maths | 25,000 | 16 × 1 / 32 | 16 × 1 / 16 | 1.109× |
 | Laptop | Nico maths | 50,000 | 16 × 1 / 32 | 16 × 1 / 64 | 1.271× |
 | Laptop | Nico maths | 200,000 | 16 × 1 / 256 | 8 × 2 / 256 | 1.496× |
 
