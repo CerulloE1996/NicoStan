@@ -25,59 +25,68 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
                                           ## ---- ADAM bias-correction step (OPTIONAL):
                                           ##
                                           ## The number of tau ADAM updates actually PERFORMED on these moments,
-                                          ## counting this one (1 on the first update after the moments are reset).
-                                          ## ii keeps driving the learning-rate SCHEDULE below; it cannot drive the
-                                          ## bias correction, because ii also advances on iterations where this
-                                          ## function returns early without touching tau_m_adam / tau_v_adam. After
-                                          ## k such skips the first real step would divide by (1 - beta2^(k + 1))
-                                          ## instead of (1 - beta2), inflating it by up to sqrt(1 / (1 - beta2)).
-                                          ## NULL keeps the historical behaviour (bias correction uses ii).
+                                          ## counting this one (1 on the first update after the moments are
+                                          ## reset). ii keeps driving the learning-rate SCHEDULE below; it cannot
+                                          ## drive the bias correction, because ii also advances on iterations
+                                          ## where this function returns early without touching tau_m_adam /
+                                          ## tau_v_adam. After k such skips the first real step would divide by (1
+                                          ## - beta2^(k + 1)) instead of (1 - beta2), inflating it by up to sqrt(1
+                                          ## / (1 - beta2)). NULL keeps the historical behaviour (bias correction
+                                          ## uses ii).
                                           ##
                                           bias_correction_step = NULL,
                                           ##
-                                          ## ---- Acceptance weighting (both OPTIONAL; corrected sampler calls use a mean).
+                                          ## ---- Acceptance weighting (both OPTIONAL; corrected sampler calls use
+                                          ##      a mean).
                                           ##
-                                          ## weights_per_chain: per-chain Metropolis acceptance probabilities (p_jump),
-                                          ## indexed the SAME way as noisy_grads_prop_per_chain. The ChEES estimator is the
-                                          ## expectation estimate mean(alpha_k g_k). Passing p_jump instead of
-                                          ## relying on the accept indicator carried implicitly by use_proposed = FALSE gives the
-                                          ## same expectation with strictly lower variance, since it replaces a Bernoulli draw by
-                                          ## its conditional mean (Rao-Blackwellisation).
+                                          ## weights_per_chain: per-chain Metropolis acceptance probabilities
+                                          ## (p_jump), indexed the SAME way as noisy_grads_prop_per_chain. The
+                                          ## ChEES estimator is the expectation estimate mean(alpha_k g_k).
+                                          ## Passing p_jump instead of relying on the accept indicator carried
+                                          ## implicitly by use_proposed = FALSE gives the same expectation with
+                                          ## strictly lower variance, since it replaces a Bernoulli draw by its
+                                          ## conditional mean (Rao-Blackwellisation).
                                           weights_per_chain = NULL,
                                           ##
-                                          ## aggregation: "median" is the historical behaviour - robust, but it discards the
-                                          ## acceptance weighting and is NOT the ChEES estimator. "weighted_mean" uses the
-                                          ## weights above (falling back to an unweighted mean if none are supplied).
+                                          ## aggregation: "median" is the historical behaviour - robust, but it
+                                          ## discards the acceptance weighting and is NOT the ChEES estimator.
+                                          ## "weighted_mean" uses the weights above (falling back to an unweighted
+                                          ## mean if none are supplied).
                                           ## aggregation = c("median", "weighted_mean")
                                           aggregation = c("median", "weighted_mean"),
                                           ##
                                           ## ---- Position in the learning-rate schedule (both OPTIONAL).
                                           ##
-                                          ## The learning rate falls linearly from LR at schedule iteration 1 to LR^2 at schedule
-                                          ## iteration learning_rate_schedule_length. NULL keeps the historical schedule (ii and
-                                          ## n_burnin). A schedule restarted part-way through the tau adaptation (e.g. at the metric
-                                          ## freeze) passes its own iteration and length; ii, the ADAM moments and the bias
-                                          ## correction are not affected by them.
+                                          ## The learning rate falls linearly from LR at schedule iteration 1 to
+                                          ## LR^2 at schedule iteration learning_rate_schedule_length. NULL keeps
+                                          ## the historical schedule (ii and n_burnin). A schedule restarted
+                                          ## part-way through the tau adaptation (e.g. at the metric freeze)
+                                          ## passes its own iteration and length; ii, the ADAM moments and the
+                                          ## bias correction are not affected by them.
                                           learning_rate_schedule_iteration = NULL,
                                           learning_rate_schedule_length = NULL
 ) {
 
-        aggregation <- match.arg(aggregation)
+        aggregation <-  match.arg(aggregation)
         ##
         ## ---- bias-correction exponent (defaults to ii, the historical behaviour):
         ##
-        bias_correction_step <- if_null_then_set_to(bias_correction_step, ii)
+        bias_correction_step <-  if_null_then_set_to(bias_correction_step, ii)
         if (length(bias_correction_step) != 1 || !is.finite(bias_correction_step) || bias_correction_step < 1) {
-            stop(paste0("R_fn_update_tau_using_ADAM: bias_correction_step must be a single finite number >= 1; got: ",
+            stop(paste0("R_fn_update_tau_using_ADAM: bias_correction_step must be a single finite number >= 1; ",
+                        "got: ",
                         paste(bias_correction_step, collapse = ", ")))
         }
         ##
         ## ---- learning-rate schedule position (both or neither; NULL = ii / n_burnin, the historical schedule):
         ##
         if (!is.null(learning_rate_schedule_iteration) || !is.null(learning_rate_schedule_length)) {
-            if (length(learning_rate_schedule_iteration) != 1 || !is.finite(learning_rate_schedule_iteration) || learning_rate_schedule_iteration < 1 ||
-                length(learning_rate_schedule_length) != 1 || !is.finite(learning_rate_schedule_length) || learning_rate_schedule_length < 1) {
-                stop(paste0("R_fn_update_tau_using_ADAM: learning_rate_schedule_iteration and learning_rate_schedule_length must both be ",
+            if (length(learning_rate_schedule_iteration) != 1 || !is.finite(learning_rate_schedule_iteration) ||
+                learning_rate_schedule_iteration < 1 ||
+                length(learning_rate_schedule_length) != 1 || !is.finite(learning_rate_schedule_length) ||
+                learning_rate_schedule_length < 1) {
+                stop(paste0("R_fn_update_tau_using_ADAM: learning_rate_schedule_iteration and ",
+                            "learning_rate_schedule_length must both be ",
                             "single finite numbers >= 1 (or both NULL); got: ",
                             paste(learning_rate_schedule_iteration, collapse = ", "), " and ",
                             paste(learning_rate_schedule_length, collapse = ", ")))
@@ -86,11 +95,13 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         ##
         ## ---- every return carries attr "adam_update_performed" so the caller can count real updates:
         ##
-        fn_mark_adam_update_performed <- function(returned_vector,
+        fn_mark_adam_update_performed <-  function(returned_vector,
                                                   adam_update_performed) {
-            attr(returned_vector, "adam_update_performed") <- adam_update_performed
+
+            attr(returned_vector, "adam_update_performed") <-  adam_update_performed
             return(returned_vector)
         }
+
 
         # eta_w = 3.0;
         # rho = 1.0;
@@ -102,15 +113,17 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         out_vec <- c(NA, NA, NA)
         ##
         is_NaN_or_Inf_vec <- function(x) { 
+
           if ((any(is.infinite(x))) || (any(is.nan(x))) || (any(is.na(x)))) {  # Added is.na check
             return(TRUE)
           } else { 
             return(FALSE)
           }
         }
+
         
         noisy_grads_per_chain <- noisy_grads_prop_per_chain
-        n_chains_total <- if (length(n_chains) == 1L && is.finite(n_chains) && n_chains >= 1) {
+        n_chains_total <-  if (length(n_chains) == 1 && is.finite(n_chains) && n_chains >= 1) {
             as.integer(n_chains)
         } else {
             length(noisy_grads_per_chain)
@@ -118,7 +131,7 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         # print(noisy_grads_per_chain)
         
         # Filter out NA/NaN/Inf values before computing mean
-        valid_mask <- (!is.na(noisy_grads_per_chain) &
+        valid_mask <-  (!is.na(noisy_grads_per_chain) &
                          !is.nan(noisy_grads_per_chain) &
                          !is.infinite(noisy_grads_per_chain))
         valid_grads <- noisy_grads_per_chain[valid_mask]
@@ -154,15 +167,15 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
                 ## can be SHORTER than weights_per_chain whenever the last chain diverged. Indexing a
                 ## longer weight vector by the shorter mask would silently recycle the mask and pair
                 ## each gradient with the wrong chain's acceptance probability, so align explicitly:
-                weights_aligned <- rep(0.0, length(noisy_grads_per_chain))
-                n_shared <- min(length(weights_per_chain), length(noisy_grads_per_chain))
-                if (n_shared > 0) weights_aligned[seq_len(n_shared)] <- weights_per_chain[seq_len(n_shared)]
+                weights_aligned <-  rep(0.0, length(noisy_grads_per_chain))
+                n_shared <-  min(length(weights_per_chain), length(noisy_grads_per_chain))
+                if (n_shared > 0) weights_aligned[seq_len(n_shared)] <-  weights_per_chain[seq_len(n_shared)]
                 ##
-                valid_weights <- weights_aligned[valid_mask]
-                valid_weights[!is.finite(valid_weights)] <- 0.0
-                valid_weights <- pmax(0.0, valid_weights)
+                valid_weights <-  weights_aligned[valid_mask]
+                valid_weights[!is.finite(valid_weights)] <-  0.0
+                valid_weights <-  pmax(0.0, valid_weights)
                 ##
-                weight_sum <- sum(valid_weights)
+                weight_sum <-  sum(valid_weights)
                 ##
                 if (weight_sum > 0) {
                     ## weights_per_chain are conditional acceptance
@@ -187,9 +200,12 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         ##
         # if (ii > eta_w && eigen_max > 0) {
         ##
-        pow <- function(x, a) { 
+        pow <- function( x,
+                         a) { 
+
           return(x^a)
         }
+
         ##
         tau_m_adam = beta1_adam * tau_m_adam + (1.0 - beta1_adam) * tau_noisy_grad_mean;
         tau_v_adam = beta2_adam * tau_v_adam + (1.0 - beta2_adam) * pow(tau_noisy_grad_mean, 2);
@@ -205,11 +221,13 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         ## Start at the full requested LR, then decay over this optimiser's own active window.
         ## A restarted schedule replaces them by learning_rate_schedule_iteration / learning_rate_schedule_length
         ## (NULL = ii / n_burnin, the historical schedule):
-        learning_rate_schedule_iteration <- if_null_then_set_to(learning_rate_schedule_iteration, ii)
-        learning_rate_schedule_length <- if_null_then_set_to(learning_rate_schedule_length, n_burnin)
+        learning_rate_schedule_iteration <-  if_null_then_set_to(learning_rate_schedule_iteration, ii)
+        learning_rate_schedule_length <-  if_null_then_set_to(learning_rate_schedule_length, n_burnin)
         # adaptation_progress <- if (n_burnin <= 1) 0 else min(1, max(0, (ii - 1) / (n_burnin - 1)))
-        adaptation_progress <- if (learning_rate_schedule_length <= 1) 0 else
-                                   min(1, max(0, (learning_rate_schedule_iteration - 1) / (learning_rate_schedule_length - 1)))
+        adaptation_progress <-  if (learning_rate_schedule_length <= 1) 0 else
+                                   min(1,
+                                       max(0, (learning_rate_schedule_iteration - 1) /
+                                              (learning_rate_schedule_length - 1)))
         current_alpha = LR * (1.0 - (1.0 - LR) * adaptation_progress);
         
         # CRITICAL FIX: Work in log space more carefully
@@ -258,23 +276,23 @@ R_fn_update_tau_using_ADAM <- function(debug = FALSE,
         }
         
         # Final safety check
-        adam_update_performed <- TRUE
+        adam_update_performed <-  TRUE
         if (is_NaN_or_Inf_vec(out_vec) == TRUE) {
           cat("tau or tau_m_adam or tau_v_adam are not valid, reverting to initial values\n")
           out_vec[1] = tau_initial;
           out_vec[2] = tau_m_adam_initial;
           out_vec[3] = tau_v_adam_initial;
           ## the moments were reverted, so this does not count as a performed update:
-          adam_update_performed <- FALSE
+          adam_update_performed <-  FALSE
         }
         ##
-        ## the aggregated gradient of this update (read by the probe of NicoStan_tau_adaptation_scheme = "probe_then_average"):
-        attr(out_vec, "aggregated_gradient") <- tau_noisy_grad_mean
+        ## the aggregated gradient of this update (read by the probe of NicoStan_tau_adaptation_scheme =
+        ## "probe_then_average"):
+        attr(out_vec, "aggregated_gradient") <-  tau_noisy_grad_mean
         return(fn_mark_adam_update_performed(returned_vector       = out_vec,
                                              adam_update_performed = adam_update_performed))
   
 }
-
 
 
 

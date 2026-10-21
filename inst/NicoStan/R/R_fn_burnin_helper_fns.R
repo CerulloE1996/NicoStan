@@ -22,6 +22,7 @@ adj_diag_M <- function(M_diag) {
 
 
 
+
 ## helper function:
 #' adj_diag_inv_M
 #' @export
@@ -41,12 +42,15 @@ adj_diag_inv_M <- function(M_diag_inv) {
 
 
 
+
 ## helper function:
 #' is_valid
 #' @export
 is_valid <- function(x) {
+
        return( !(is.null(x)) && all(!is.na(x)) && all(!is.nan(x)) && all(is.finite(x)) )
 }
+
 
 
 
@@ -81,7 +85,8 @@ recip <- function(x) {
           
           diag_of_x <- diag(x)
           recip_diag_x <- 1.0 / diag_of_x
-          ## nrow = length(...) so a 1x1 matrix stays 1x1 (diag() of a length-1 vector builds a floor(x) x floor(x) identity instead):
+          ## nrow = length(...) so a 1x1 matrix stays 1x1 (diag() of a length-1 vector builds a floor(x) x
+          ## floor(x) identity instead):
           recip_mat_x <- diag(recip_diag_x, nrow = length(recip_diag_x))
           return(recip_mat_x)
           
@@ -153,7 +158,7 @@ init_EHMC_Metric_as_Rcpp_List   <- function(  n_params_main,
 init_EHMC_args_as_Rcpp_List   <- function( diffusion_HMC,
                                          diffusion_HMC_integrator = "kick_flow_kick") {
 
-        if (!is.character(x = diffusion_HMC_integrator) || length(x = diffusion_HMC_integrator) != 1L ||
+        if (!is.character(x = diffusion_HMC_integrator) || length(x = diffusion_HMC_integrator) != 1 ||
             is.na(x = diffusion_HMC_integrator) ||
             !(diffusion_HMC_integrator %in% c("kick_flow_kick", "flow_kick_flow"))) {
             stop("diffusion_HMC_integrator must be 'kick_flow_kick' or 'flow_kick_flow'.")
@@ -371,9 +376,9 @@ update_M_diag_Empirical_nuisance <- function( EHMC_Metric_as_Rcpp_List,
 ) { 
 
           proposed_variance_vec <- c(proposed_variance_vec)
-          ## min() and max() reach any NA, NaN or +/-Inf, so these are the same tests as any(!is.finite(.)) and then
-          ## any(. <= 0), without nuisance-length logical copies of the proposal:
-          if (length(proposed_variance_vec) == 0L ||
+          ## min() and max() reach any NA, NaN or +/-Inf, so these are the same tests as any(!is.finite(.)) and
+          ## then any(. <= 0), without nuisance-length logical copies of the proposal:
+          if (length(proposed_variance_vec) == 0 ||
               !is.finite(min(proposed_variance_vec)) || !is.finite(max(proposed_variance_vec)) ||
               min(proposed_variance_vec) <= 0) {
             ## An early or degenerate moment estimate cannot define a metric.
@@ -393,8 +398,9 @@ update_M_diag_Empirical_nuisance <- function( EHMC_Metric_as_Rcpp_List,
           ##
           # M_inv_as_snaper_s_vec_us_empirical_scaled <- EHMC_burnin_as_Rcpp_List$snaper_s_vec_us_empirical
           ## now update M_inv_nuisance:
-          ## (proposed_variance_vec is already a plain vector, from c() above, and so is the blend, so neither needs a c() copy;
-          ##  c() on the current M_inv_us_vec drops the dimensions of a one-column starting metric)
+          ## (proposed_variance_vec is already a plain vector, from c() above, and so is the blend, so neither
+          ##  needs a c() copy; c() on the current M_inv_us_vec drops the dimensions of a one-column starting
+          ##  metric)
           EHMC_Metric_as_Rcpp_List$M_inv_us_vec <- ratio_M_nuisance_effective * proposed_variance_vec + 
                                                    (1.0 - ratio_M_nuisance_effective) * c(EHMC_Metric_as_Rcpp_List$M_inv_us_vec)
           EHMC_Metric_as_Rcpp_List$M_us_vec <- recip(EHMC_Metric_as_Rcpp_List$M_inv_us_vec)
@@ -420,9 +426,9 @@ compute_ratio_M <- function(   debug,
                                M_decay_scale = NULL
 ) { 
   
-          decay_active <- !is.null(ii) && !is.null(n_adapt) &&
+          decay_active <-  !is.null(ii) && !is.null(n_adapt) &&
                           (is.null(M_decay_type) ||
-                           (length(M_decay_type) == 1L &&
+                           (length(M_decay_type) == 1 &&
                             !is.na(M_decay_type) &&
                             M_decay_type != "none"))
           if (isTRUE(decay_active)) {
@@ -507,17 +513,21 @@ update_M_Empirical_main <- function( debug,
                                      M_decay_scale,
                                      ##
                                      ## Multiplies the proposed (co)variance before it is blended into the metric.
-                                     ## 1 = unchanged. metric_estimator = "chain_mean_scaled" passes n_chains_burnin, since
-                                     ## the chain-mean estimate is ~ Sigma / n_chains_burnin for independent chains.
+                                     ## 1 = unchanged. metric_estimator = "chain_mean_scaled" passes
+                                     ## n_chains_burnin, since the chain-mean estimate is ~ Sigma /
+                                     ## n_chains_burnin for independent chains.
                                      variance_scale = 1,
                                      ##
-                                     ## metric_estimator = "per_iteration", diagonal shape: the proposed variances of the main parameters (the
-                                     ## cross-chain variances of the current iteration's draws), used instead of
-                                     ## variance_scale * snaper_s_vec_main_empirical. NULL (default) = unchanged. Not read by the dense shape.
+                                     ## metric_estimator = "per_iteration", diagonal shape: the proposed variances
+                                     ## of the main parameters (the cross-chain variances of the current
+                                     ## iteration's draws), used instead of variance_scale *
+                                     ## snaper_s_vec_main_empirical. NULL (default) = unchanged. Not read by the
+                                     ## dense shape.
                                      per_iteration_variance_vec_main = NULL,
                                      adaptive_shrinkage_state,
-                                    ## the symmetric square root M_dense_sqrt is only read by the SNAPER functions; the ChESSR
-                                    ## burn-in never uses it, so it passes FALSE and skips a pracma::sqrtm() per metric update:
+                                    ## the symmetric square root M_dense_sqrt is only read by the SNAPER
+                                    ## functions; the ChESSR burn-in never uses it, so it passes FALSE and skips a
+                                    ## pracma::sqrtm() per metric update:
                                     compute_M_dense_sqrt = TRUE
 ) {
 
@@ -525,17 +535,19 @@ update_M_Empirical_main <- function( debug,
           print(paste("calling update_M_Empirical_main"))
         }
         if (metric_shape_main == "diag") {
-          proposed_variance_vec_check <- variance_scale *
+          proposed_variance_vec_check <-  variance_scale *
                                          c(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical)
           if (!is.null(per_iteration_variance_vec_main)) {
             ## a proposal of the wrong LENGTH is a bug, as for the dense size check below:
             if (length(per_iteration_variance_vec_main) != length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)) {
-              stop(paste0("update_M_Empirical_main: per_iteration_variance_vec_main has length ", length(per_iteration_variance_vec_main),
-                          " but there are ", length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), " main parameters."))
+              stop(paste0("update_M_Empirical_main: per_iteration_variance_vec_main has length ",
+                          length(per_iteration_variance_vec_main),
+                          " but there are ", length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec),
+                          " main parameters."))
             }
-            proposed_variance_vec_check <- c(per_iteration_variance_vec_main)
+            proposed_variance_vec_check <-  c(per_iteration_variance_vec_main)
           }
-          if (length(proposed_variance_vec_check) == 0L ||
+          if (length(proposed_variance_vec_check) == 0 ||
               any(!is.finite(proposed_variance_vec_check)) ||
               any(proposed_variance_vec_check <= 0)) {
             ## Keep the last valid metric when empirical moments are not yet usable.
@@ -550,18 +562,21 @@ update_M_Empirical_main <- function( debug,
           }
         } else if (metric_shape_main == "dense") {
           ##
-          ## A covariance of the wrong SIZE is a bug, not an estimate that is "not yet usable", so stop rather than keep the old
-          ## metric silently (a 0x0 covariance from diag() of a length-1 vector left 1-parameter models on a unit metric).
+          ## A covariance of the wrong SIZE is a bug, not an estimate that is "not yet usable", so stop rather
+          ## than keep the old metric silently (a 0x0 covariance from diag() of a length-1 vector left 1-parameter
+          ## models on a unit metric).
           ##
           n_params_main_expected <- length(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
           if (!is.null(empicical_cov_main) && is.matrix(empicical_cov_main) &&
-              (nrow(empicical_cov_main) != n_params_main_expected || ncol(empicical_cov_main) != n_params_main_expected)) {
-            stop(paste0("update_M_Empirical_main: empirical covariance is ", nrow(empicical_cov_main), " x ", ncol(empicical_cov_main),
+              (nrow(empicical_cov_main) != n_params_main_expected || ncol(empicical_cov_main) !=
+                                                                     n_params_main_expected)) {
+            stop(paste0("update_M_Empirical_main: empirical covariance is ", nrow(empicical_cov_main), " x ",
+                        ncol(empicical_cov_main),
                         " but there are ", n_params_main_expected, " main parameters."))
           }
-          proposed_covariance_check <- variance_scale * empicical_cov_main
+          proposed_covariance_check <-  variance_scale * empicical_cov_main
           if (is.null(proposed_covariance_check) ||
-              length(proposed_covariance_check) == 0L ||
+              length(proposed_covariance_check) == 0 ||
               any(!is.finite(proposed_covariance_check)) ||
               !is.matrix(proposed_covariance_check) ||
               nrow(proposed_covariance_check) != ncol(proposed_covariance_check) ||
@@ -592,7 +607,8 @@ update_M_Empirical_main <- function( debug,
                 ## Inverse diag-metric:
                 ##
                 proposed_variance_vec  <- variance_scale * c(EHMC_burnin_as_Rcpp_List$snaper_s_vec_main_empirical)
-                if (!is.null(per_iteration_variance_vec_main)) proposed_variance_vec <- c(per_iteration_variance_vec_main)
+                if (!is.null(per_iteration_variance_vec_main))
+                    proposed_variance_vec <-  c(per_iteration_variance_vec_main)
                 M_inv_main_vec_current <- c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
                 M_inv_main_diag        <- c(ratio_M_effective * c(proposed_variance_vec) + (1.0 - ratio_M_effective) * c(M_inv_main_vec_current))
                 M_inv_main_diag_sqrt   <- c(sqrt(M_inv_main_diag))
@@ -611,13 +627,16 @@ update_M_Empirical_main <- function( debug,
                 ##
                 ## Dummy dense parameters:
                 ## (nrow = n_params_main, because with ONE main parameter diag(x) of a length-1 vector
-                ##  builds a floor(x) x floor(x) identity - 0x0 for a variance below 1 - instead of the 1x1 matrix x.)
+                ##  builds a floor(x) x floor(x) identity - 0x0 for a variance below 1 - instead of the 1x1 matrix
+                ##  x.)
                 ##
-                n_params_main_diag_shape <- length(EHMC_Metric_as_Rcpp_List$M_main_vec)
-                EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag(c(EHMC_Metric_as_Rcpp_List$M_main_vec),     nrow = n_params_main_diag_shape)
+                n_params_main_diag_shape <-  length(EHMC_Metric_as_Rcpp_List$M_main_vec)
+                EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag( c(EHMC_Metric_as_Rcpp_List$M_main_vec),
+                                                                        nrow = n_params_main_diag_shape)
                 EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(c(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec), nrow = n_params_main_diag_shape)
                 EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), nrow = n_params_main_diag_shape)
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(c(M_inv_main_diag_sqrt), nrow = n_params_main_diag_shape)
+                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag( c(M_inv_main_diag_sqrt),
+                                                                        nrow = n_params_main_diag_shape)
  
           
                 # outs <- update_M_diag_Empirical_main(     
@@ -650,20 +669,21 @@ update_M_Empirical_main <- function( debug,
                 ##
                 M_inv_dense_main_current <- EHMC_Metric_as_Rcpp_List$M_inv_dense_main
                 ##
-                adaptive_shrinkage_diagnostics <- NULL
+                adaptive_shrinkage_diagnostics <-  NULL
                 if (!is.null(adaptive_shrinkage_state)) {
-                      adaptive_shrinkage_state <- fn_update_adaptive_metric_shrinkage(
+                      adaptive_shrinkage_state <-  fn_update_adaptive_metric_shrinkage(
                             state = adaptive_shrinkage_state,
                             main_draws = NULL,
                             covariance_proposal = variance_scale * empicical_cov_main,
                             ratio_M_effective = ratio_M_effective)
                       if (is.null(adaptive_shrinkage_state$unshrunk_covariance)) {
-                            stop("update_M_Empirical_main: adaptive shrinkage state did not return unshrunk_covariance.")
+                            stop("update_M_Empirical_main: adaptive shrinkage state did not return ",
+                                 "unshrunk_covariance.")
                       }
-                      adaptive_shrinkage_resolution <- fn_resolve_adaptive_metric_shrinkage(
+                      adaptive_shrinkage_resolution <-  fn_resolve_adaptive_metric_shrinkage(
                             state = adaptive_shrinkage_state,
                             covariance_matrix = adaptive_shrinkage_state$unshrunk_covariance)
-                      adaptive_shrinkage_diagnostics <- list(
+                      adaptive_shrinkage_diagnostics <-  list(
                             shrinkage = adaptive_shrinkage_resolution$shrinkage,
                             applied = ratio_M_effective > 0,
                             details = adaptive_shrinkage_resolution$diagnostics)
@@ -740,44 +760,147 @@ update_M_Hessian_main <- function( metric_shape_main,
                                    Model_args_as_Rcpp_List,
                                    ii,
                                    n_adapt,
-                                   main_vec_for_Hessian
+                                   main_vec_for_Hessian,
+                                   theta_main_vectors_all_chains = NULL,
+                                   theta_us_vectors_all_chains = NULL,
+                                   compute_M_dense_sqrt = FALSE,
+                                   Hessian_metric_offdiagonal_shrinkage = 0,
+                                   Hessian_metric_shrinkage_state = NULL
 ) {
+
+        ##
+        ## ---- The main block's Hessian (given the nuisance) at EACH chain's current state, averaged over the
+        ##      chains. The curvature of the main parameters depends on the nuisance values (e.g. in a non-centred
+        ##      hierarchical model the curvature of a log scale grows with the squares of the nuisance
+        ##      coordinates), so it is taken at the chains' own nuisance values: at the nuisance centre, whose
+        ##      early values are the near-zero initial values, the curvature was close to the prior's alone, M_inv
+        ##      was far too large and the step size collapsed. Without the chain states (an older caller), the one
+        ##      point main_vec_for_Hessian with the nuisance centre, as before. Each chain's Hessian costs 2
+        ##      gradient evaluations per main coordinate (central differences of the gradient), returned as
+        ##      n_grad_evals_Hessian:
+        ##
+        if (is.null(theta_main_vectors_all_chains)) {
+              theta_main_vectors_all_chains <-  matrix(main_vec_for_Hessian, ncol = 1)
+              theta_us_vectors_all_chains <-  matrix(if (is.null(EHMC_burnin_as_Rcpp_List$snaper_m_vec_us)) {
+                                                           numeric(0)
+                                                     } else EHMC_burnin_as_Rcpp_List$snaper_m_vec_us, ncol = 1)
+        }
+        theta_main_vectors_all_chains <-  as.matrix(theta_main_vectors_all_chains)
+        n_chains_for_Hessian <-  ncol(theta_main_vectors_all_chains)
+        n_params_main_for_Hessian <-  nrow(theta_main_vectors_all_chains)
+        if (is.null(theta_us_vectors_all_chains)) {
+              theta_us_vectors_all_chains <-  matrix(numeric(0), nrow = 0, ncol = n_chains_for_Hessian)
+        }
+        theta_us_vectors_all_chains <-  as.matrix(theta_us_vectors_all_chains)
+        n_grad_evals_Hessian <-  2 * n_params_main_for_Hessian * n_chains_for_Hessian
+        Hessian_metric_shrinkage_lambda <-  NA_real_
 
         if (metric_shape_main == "dense") { 
           
                 ## //////////// update M_dense (for main param) using Hessian (num_diff)
                 try({
                   
-                  Rcpp_update_M_dense_using_Hessian_num_diff <- fn_Rcpp_wrapper_update_M_dense_main_Hessian(
-                    M_dense_main = EHMC_Metric_as_Rcpp_List$M_dense_main,
-                    M_inv_dense_main = EHMC_Metric_as_Rcpp_List$M_inv_dense_main,
-                    M_inv_dense_main_chol = EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol,
-                    shrinkage_factor = shrinkage_factor,
-                    ratio_Hess_main = ratio_M_main,
-                    interval_width = interval_width_main,
-                    num_diff_e = num_diff_e,
-                    Model_type = Model_type,
-                    force_autodiff = force_autodiff_for_metric,
-                    force_PartialLog = force_PartialLog_for_metric,
-                    multi_attempts = force_multi_attempts_for_metric,
-                    theta_main_vec = main_vec_for_Hessian,
-                    theta_us_vec = EHMC_burnin_as_Rcpp_List$snaper_m_vec_us,
-                    y = y,
-                    Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
-                    ii = ii,
-                    n_burnin = n_adapt,
-                    metric_type = "Hessian")
-                  
-                  M_dense_main_non_scaled <-     Rcpp_update_M_dense_using_Hessian_num_diff[[1]]
-                  M_inv_dense_main_non_scaled <- Rcpp_update_M_dense_using_Hessian_num_diff[[2]]
-                  M_inv_dense_main_chol_non_scaled <- Rcpp_update_M_dense_using_Hessian_num_diff[[3]]
-                  
-                  ## Diag-Metric:
-                  M_main_diag          <- diag(M_dense_main_non_scaled)
-                  M_main_diag_sqrt     <- sqrt(M_main_diag)
-                  ## inverse Diag-metric:
-                  M_inv_main_diag      <- recip(M_main_diag)
+                  Hessian_dense_per_chain <-  lapply(seq_len(n_chains_for_Hessian), function(chain_index) {
+
+                        fn_Rcpp_wrapper_update_M_dense_main_Hessian(
+                              M_dense_main = EHMC_Metric_as_Rcpp_List$M_dense_main,
+                              M_inv_dense_main = EHMC_Metric_as_Rcpp_List$M_inv_dense_main,
+                              M_inv_dense_main_chol = EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol,
+                              shrinkage_factor = shrinkage_factor,
+                              ratio_Hess_main = 1,
+                              interval_width = interval_width_main,
+                              num_diff_e = num_diff_e,
+                              Model_type = Model_type,
+                              force_autodiff = force_autodiff_for_metric,
+                              force_PartialLog = force_PartialLog_for_metric,
+                              multi_attempts = force_multi_attempts_for_metric,
+                              theta_main_vec = theta_main_vectors_all_chains[, chain_index],
+                              theta_us_vec = theta_us_vectors_all_chains[, chain_index],
+                              y = y,
+                              Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                              ii = ii,
+                              n_burnin = n_adapt,
+                              metric_type = "Hessian")[[1]]
+                  })
+
+                  Hessian_dense_mean <-  Reduce(`+`, Hessian_dense_per_chain) / n_chains_for_Hessian
+                  M_dense_main_current <-  EHMC_Metric_as_Rcpp_List$M_dense_main
+                  M_dense_main_new <-  if (identical(dim(M_dense_main_current), dim(Hessian_dense_mean))) {
+                        (1.0 - ratio_M_main) * M_dense_main_current + ratio_M_main * Hessian_dense_mean
+                  } else Hessian_dense_mean
+                  M_dense_main_new <-  Rcpp_near_PD(0.5 * (M_dense_main_new + t(M_dense_main_new)))
+                  M_inv_dense_main_new <-  Rcpp_solve(M_dense_main_new)
+                  M_inv_dense_main_new <-  Rcpp_near_PD(0.5 * (M_inv_dense_main_new + t(M_inv_dense_main_new)))
+                  ##
+                  ## ---- the off-diagonal shrinkage of the inverse metric towards its diagonal, as for the
+                  ##      empirical dense metric: "adaptive" = Schafer-Strimmer (the noise of the correlations of
+                  ##      the averaged Hessians' inverses across the updates over their signal,
+                  ##      fn_resolve_adaptive_metric_shrinkage()); a number = the off-diagonals x (1 - that
+                  ##      number); the metric is then the inverse of the shrunk inverse:
+                  if (identical(Hessian_metric_offdiagonal_shrinkage, "adaptive") &&
+                      !is.null(Hessian_metric_shrinkage_state)) {
+                        covariance_proposal <-  Rcpp_solve(Hessian_dense_mean)
+                        covariance_proposal <-  Rcpp_near_PD(0.5 * (covariance_proposal + t(covariance_proposal)))
+                        Hessian_metric_shrinkage_state <-  fn_update_adaptive_metric_shrinkage(
+                              state = Hessian_metric_shrinkage_state,
+                              main_draws = NULL,
+                              covariance_proposal = covariance_proposal,
+                              ratio_M_effective = ratio_M_main)
+                        shrinkage_resolution <-  fn_resolve_adaptive_metric_shrinkage(
+                              state = Hessian_metric_shrinkage_state,
+                              covariance_matrix = M_inv_dense_main_new)
+                        M_inv_dense_main_new <-  shrinkage_resolution$covariance_matrix
+                        Hessian_metric_shrinkage_lambda <-  shrinkage_resolution$shrinkage
+                  } else if (is.numeric(Hessian_metric_offdiagonal_shrinkage) &&
+                             Hessian_metric_offdiagonal_shrinkage > 0) {
+                        M_inv_dense_main_new <-  fn_shrink_metric_pooled_offdiagonal(
+                              covariance_matrix = M_inv_dense_main_new,
+                              metric_pooled_offdiagonal_shrinkage = Hessian_metric_offdiagonal_shrinkage)
+                        Hessian_metric_shrinkage_lambda <-  Hessian_metric_offdiagonal_shrinkage
+                  }
+                  M_inv_dense_main_new <-  Rcpp_near_PD(0.5 * (M_inv_dense_main_new + t(M_inv_dense_main_new)))
+                  M_dense_main_new <-  Rcpp_solve(M_inv_dense_main_new)
+                  M_dense_main_new <-  0.5 * (M_dense_main_new + t(M_dense_main_new))
+                  ##
+                  # Rcpp_update_M_dense_using_Hessian_num_diff <- fn_Rcpp_wrapper_update_M_dense_main_Hessian(
+                  #   M_dense_main = EHMC_Metric_as_Rcpp_List$M_dense_main,
+                  #   M_inv_dense_main = EHMC_Metric_as_Rcpp_List$M_inv_dense_main,
+                  #   M_inv_dense_main_chol = EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol,
+                  #   shrinkage_factor = shrinkage_factor,
+                  #   ratio_Hess_main = ratio_M_main,
+                  #   interval_width = interval_width_main,
+                  #   num_diff_e = num_diff_e,
+                  #   Model_type = Model_type,
+                  #   force_autodiff = force_autodiff_for_metric,
+                  #   force_PartialLog = force_PartialLog_for_metric,
+                  #   multi_attempts = force_multi_attempts_for_metric,
+                  #   theta_main_vec = main_vec_for_Hessian,
+                  #   theta_us_vec = EHMC_burnin_as_Rcpp_List$snaper_m_vec_us,
+                  #   y = y,
+                  #   Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                  #   ii = ii,
+                  #   n_burnin = n_adapt,
+                  #   metric_type = "Hessian")
+                  # 
+                  # M_dense_main_non_scaled <-     Rcpp_update_M_dense_using_Hessian_num_diff[[1]]
+                  # M_inv_dense_main_non_scaled <- Rcpp_update_M_dense_using_Hessian_num_diff[[2]]
+                  # M_inv_dense_main_chol_non_scaled <- Rcpp_update_M_dense_using_Hessian_num_diff[[3]]
+                  # 
+                  # ## Diag-Metric:
+                  # M_main_diag          <- diag(M_dense_main_non_scaled)
+                  # M_main_diag_sqrt     <- sqrt(M_main_diag)
+                  # ## inverse Diag-metric:
+                  # M_inv_main_diag      <- recip(M_main_diag)
+                  # M_inv_main_diag_sqrt <- sqrt(M_inv_main_diag)
+                  ##
+                  M_dense_main_non_scaled <-  M_dense_main_new
+                  M_inv_dense_main_non_scaled <-  M_inv_dense_main_new
+                  M_inv_dense_main_chol_non_scaled <-  Rcpp_Chol(M_inv_dense_main_new)
+                  ## the diagonal, as the empirical dense update sets it (M_inv's diagonal and its reciprocal):
+                  M_inv_main_diag      <- diag(M_inv_dense_main_new)
                   M_inv_main_diag_sqrt <- sqrt(M_inv_main_diag)
+                  M_main_diag          <- recip(M_inv_main_diag)
+                  M_main_diag_sqrt     <- sqrt(M_main_diag)
                   
                   EHMC_Metric_as_Rcpp_List$M_dense_main          <- M_dense_main_non_scaled
                   if (compute_M_dense_sqrt) EHMC_burnin_as_Rcpp_List$M_dense_sqrt <- pracma::sqrtm(M_dense_main_non_scaled)[[1]]
@@ -797,27 +920,59 @@ update_M_Hessian_main <- function( metric_shape_main,
                 ## //////////// update M_dense (for main param) using Hessian (num_diff)
                 try({
                   
-                  Rcpp_update_M_diag_using_Hessian_num_diff <- fn_Rcpp_wrapper_update_M_diag_Hessian( 
-                    M_main_vec = EHMC_Metric_as_Rcpp_List$M_main_vec,
-                    M_inv_main_vec = EHMC_Metric_as_Rcpp_List$M_inv_main_vec,
-                    shrinkage_factor = shrinkage_factor,
-                    ratio_Hess_main = ratio_M_main,
-                    interval_width = interval_width_main,
-                    num_diff_e = num_diff_e,
-                    Model_type = Model_type,
-                    force_autodiff = force_autodiff_for_metric,
-                    force_PartialLog = force_PartialLog_for_metric,
-                    multi_attempts = force_multi_attempts_for_metric,
-                    theta_main_vec = main_vec_for_Hessian,
-                    theta_us_vec = EHMC_burnin_as_Rcpp_List$snaper_m_vec_us,
-                    y = y,
-                    Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
-                    ii = ii,
-                    n_burnin = n_adapt,
-                    metric_type = "Hessian")
-                  
-                  M_main_diag <-     Rcpp_update_M_diag_using_Hessian_num_diff[[1]]
-                  M_inv_main_diag <- Rcpp_update_M_diag_using_Hessian_num_diff[[2]]
+                  Hessian_diag_per_chain <-  vapply(seq_len(n_chains_for_Hessian), function(chain_index) {
+
+                        as.numeric(fn_Rcpp_wrapper_update_M_diag_Hessian(
+                              M_main_vec = EHMC_Metric_as_Rcpp_List$M_main_vec,
+                              M_inv_main_vec = EHMC_Metric_as_Rcpp_List$M_inv_main_vec,
+                              shrinkage_factor = shrinkage_factor,
+                              ratio_Hess_main = 1,
+                              interval_width = interval_width_main,
+                              num_diff_e = num_diff_e,
+                              Model_type = Model_type,
+                              force_autodiff = force_autodiff_for_metric,
+                              force_PartialLog = force_PartialLog_for_metric,
+                              multi_attempts = force_multi_attempts_for_metric,
+                              theta_main_vec = theta_main_vectors_all_chains[, chain_index],
+                              theta_us_vec = theta_us_vectors_all_chains[, chain_index],
+                              y = y,
+                              Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                              ii = ii,
+                              n_burnin = n_adapt,
+                              metric_type = "Hessian")[[1]])
+                  }, numeric(n_params_main_for_Hessian))
+
+                  Hessian_diag_mean <-  rowMeans(matrix(Hessian_diag_per_chain, nrow = n_params_main_for_Hessian))
+                  ## (M = (1 - ratio) M + ratio H, kept positive, as the C++ update does it)
+                  Hessian_diag_floor <-  max(1e-8, 1e-6 * max(Hessian_diag_mean))
+                  M_main_diag_new <-  (1.0 - ratio_M_main) * as.numeric(EHMC_Metric_as_Rcpp_List$M_main_vec) +
+                                      ratio_M_main * Hessian_diag_mean
+                  M_main_diag_new <-  pmax(M_main_diag_new, Hessian_diag_floor)
+                  ##
+                  # Rcpp_update_M_diag_using_Hessian_num_diff <- fn_Rcpp_wrapper_update_M_diag_Hessian( 
+                  #   M_main_vec = EHMC_Metric_as_Rcpp_List$M_main_vec,
+                  #   M_inv_main_vec = EHMC_Metric_as_Rcpp_List$M_inv_main_vec,
+                  #   shrinkage_factor = shrinkage_factor,
+                  #   ratio_Hess_main = ratio_M_main,
+                  #   interval_width = interval_width_main,
+                  #   num_diff_e = num_diff_e,
+                  #   Model_type = Model_type,
+                  #   force_autodiff = force_autodiff_for_metric,
+                  #   force_PartialLog = force_PartialLog_for_metric,
+                  #   multi_attempts = force_multi_attempts_for_metric,
+                  #   theta_main_vec = main_vec_for_Hessian,
+                  #   theta_us_vec = EHMC_burnin_as_Rcpp_List$snaper_m_vec_us,
+                  #   y = y,
+                  #   Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                  #   ii = ii,
+                  #   n_burnin = n_adapt,
+                  #   metric_type = "Hessian")
+                  # 
+                  # M_main_diag <-     Rcpp_update_M_diag_using_Hessian_num_diff[[1]]
+                  # M_inv_main_diag <- Rcpp_update_M_diag_using_Hessian_num_diff[[2]]
+                  ##
+                  M_main_diag <-      M_main_diag_new
+                  M_inv_main_diag <-  1.0 / M_main_diag_new
                   ##
                   M_main_diag_sqrt     <- sqrt(M_main_diag)
                   M_inv_main_diag_sqrt <- sqrt(M_inv_main_diag)
@@ -828,20 +983,26 @@ update_M_Hessian_main <- function( metric_shape_main,
                   ##
                   ## And still update the "dense" parameters:
                   ##
-                  EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag(10)
-                  EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(10)
-                  EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(10)
-                  EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(10)
+                  ## (left as they are, as the empirical diagonal update leaves them: these were 10 x 10
+                  ##  identities whatever the number of main parameters)
+                  # EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag(10)
+                  # EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(10)
+                  # EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(10)
+                  # EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(10)
                   
                 })
           
         }
   
+        # return(list(  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+        #               EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
         return(list(  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
-                      EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List))
+                      EHMC_burnin_as_Rcpp_List = EHMC_burnin_as_Rcpp_List,
+                      n_grad_evals_Hessian = n_grad_evals_Hessian,
+                      Hessian_metric_shrinkage_state = Hessian_metric_shrinkage_state,
+                      Hessian_metric_shrinkage_lambda = Hessian_metric_shrinkage_lambda))
 
 }
-
 
 
 

@@ -25,6 +25,7 @@ void kmp_set_blocktime(int) __attribute__((weak));
 
 inline void fn_put_WCP_team_of_this_thread_to_sleep_after_burnin_iteration(const std::string &Model_type,
                                                                            const int n_threads_WCP) {
+
 #if defined(_OPENMP)
         const bool built_in_model = (Model_type == "LC_MVP") || (Model_type == "MVP") ||
                                     (Model_type == "LC_MVOP") || (Model_type == "MVOP");
@@ -42,6 +43,7 @@ inline void fn_put_WCP_team_of_this_thread_to_sleep_after_burnin_iteration(const
         (void) Model_type;
         (void) n_threads_WCP;
 #endif
+
 }
 
 ////
@@ -57,30 +59,38 @@ inline void fn_put_WCP_team_of_this_thread_to_sleep_after_burnin_iteration(const
 const double minimum_gap_ms_for_putting_WCP_team_to_sleep_after_burnin_iteration = 25.0;
 
 inline long long fn_steady_clock_nanoseconds_now() {
+
         return std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::steady_clock::now().time_since_epoch()).count();
+
 }
 
 //// the time the last chain of the latest burn-in iteration finished (0 before the first):
 inline std::atomic<long long> &fn_end_of_last_burnin_iteration_nanoseconds() {
+
         static std::atomic<long long> end_of_last_burnin_iteration_nanoseconds{0};
         return end_of_last_burnin_iteration_nanoseconds;
+
 }
 
 //// the gap since then, in milliseconds (0 before the first iteration), read when an iteration starts:
 inline double fn_gap_since_last_burnin_iteration_ms() {
+
         const long long end_of_last = fn_end_of_last_burnin_iteration_nanoseconds().load();
         if (end_of_last <= 0) return 0.0;
         return 1e-6 * static_cast<double>(fn_steady_clock_nanoseconds_now() - end_of_last);
+
 }
 
 //// a chain's end recorded (the latest of the iteration's chains is kept):
 inline void fn_record_end_of_burnin_iteration_chain() {
+
         const long long now = fn_steady_clock_nanoseconds_now();
         std::atomic<long long> &end_of_last = fn_end_of_last_burnin_iteration_nanoseconds();
         long long previous = end_of_last.load();
         while (previous < now && !end_of_last.compare_exchange_weak(previous, now)) {
         }
+
 }
 
 

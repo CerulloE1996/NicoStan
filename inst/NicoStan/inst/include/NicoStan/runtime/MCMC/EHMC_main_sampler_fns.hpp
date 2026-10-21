@@ -18,7 +18,6 @@
  
  
  
-using namespace Eigen;
  
  
  
@@ -379,8 +378,10 @@ ALWAYS_INLINE  void                                        fn_standard_HMC_main_
                         EHMC_args_as_cpp_struct.tau_main_ii = EHMC_args_as_cpp_struct.eps_main; 
                 }
                 // Compute L_ii:
-                int  L_ii = std::ceil(  EHMC_args_as_cpp_struct.tau_main_ii / EHMC_args_as_cpp_struct.eps_main );
-                if (L_ii < 1) { L_ii = 1 ; }
+                const int L_ii = fn_number_of_leapfrog_steps_from_tau_eps_and_max_L(
+                    EHMC_args_as_cpp_struct.tau_main_ii,
+                    EHMC_args_as_cpp_struct.eps_main,
+                    EHMC_args_as_cpp_struct.max_L);
                 EHMC_args_as_cpp_struct.L_main_ii = L_ii;  //// recorded per iteration with debug = TRUE
                 
                 //// initial lp  (and grad)
@@ -487,6 +488,17 @@ ALWAYS_INLINE  void                                        fn_standard_HMC_main_
               }
 
       } catch (...) {
+            //// (a diagnostic: the message of the first failed gradient of this chain, written to stderr; the
+            ////  failure is recorded below as before; message_of_the_first_failed_gradient_of_each_chain.hpp)
+            try {
+                  throw;
+            } catch (const std::exception &failed_gradient) {
+                  fn_write_the_message_of_the_first_failed_gradient_of_this_chain("main parameters",
+                                                                                 failed_gradient.what());
+            } catch (...) {
+                  fn_write_the_message_of_the_first_failed_gradient_of_this_chain("main parameters",
+                                                                                 "not a std::exception");
+            }
         
                 // std::cout << "  Could not evaluate lp_grad function when sampling main parameters " << ")\n";
           

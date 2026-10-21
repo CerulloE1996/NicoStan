@@ -15,7 +15,6 @@
  
  
  
-using namespace Eigen;
  
   
   
@@ -158,9 +157,9 @@ ALWAYS_INLINE  void leapfrog_integrator_diag_M_standard_HMC_nuisance_InPlace(   
 //   // #endif
 //   
 //   // Precompute per-component rotation angles
-//   Eigen::ArrayXd angle = (1.0 / M_inv_us_vec.array()).array() * eps_2;
-//   Eigen::ArrayXd cos_t = angle.cos();
-//   Eigen::ArrayXd sin_t = angle.sin();
+//   Eigen::Array<double, -1, 1> angle = (1.0 / M_inv_us_vec.array()).array() * eps_2;
+//   Eigen::Array<double, -1, 1> cos_t = angle.cos();
+//   Eigen::Array<double, -1, 1> sin_t = angle.sin();
 // 
 //   for (int l = 0; l < L_ii; l++) {
 // 
@@ -171,7 +170,7 @@ ALWAYS_INLINE  void leapfrog_integrator_diag_M_standard_HMC_nuisance_InPlace(   
 //     
 //             // #ifdef _WIN32
 //                          // velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * grad_us.array()  * M_inv_us_vec.array();
-//                          // Eigen::ArrayXd grad_corrected = grad_us.array() + (1.0 - ((1.0/M_inv_us_vec.array()).array())) * theta_us_vec_proposed_ref.array();
+//                          // Eigen::Array<double, -1, 1> grad_corrected = grad_us.array() + (1.0 - ((1.0/M_inv_us_vec.array()).array())) * theta_us_vec_proposed_ref.array();
 //                          // velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * M_inv_us_vec.array() * grad_corrected;
 //             // #else
 //             //           velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * lp_and_grad_outs.segment(1, n_nuisance).array()  * M_inv_us_vec.array();
@@ -259,12 +258,12 @@ ALWAYS_INLINE  void leapfrog_integrator_diag_M_standard_HMC_nuisance_InPlace(   
 //             // angle_i = ω_i * eps_2 = eps_2 / √M_i
 //             //
 //             // OLD (WRONG): angle = M_us_vec.array() * eps_2
-//             Eigen::ArrayXd sqrt_M     = M_us_vec.array().sqrt();
-//             Eigen::ArrayXd inv_sqrt_M = M_inv_us_vec.array().sqrt();  // = 1/√M
-//             Eigen::ArrayXd omega      = inv_sqrt_M;                    // ω_i = 1/√M_i
-//             Eigen::ArrayXd angle      = omega * eps_2;                 // ω_i * eps_2
-//             Eigen::ArrayXd cos_t      = angle.cos();
-//             Eigen::ArrayXd sin_t      = angle.sin();
+//             Eigen::Array<double, -1, 1> sqrt_M     = M_us_vec.array().sqrt();
+//             Eigen::Array<double, -1, 1> inv_sqrt_M = M_inv_us_vec.array().sqrt();  // = 1/√M
+//             Eigen::Array<double, -1, 1> omega      = inv_sqrt_M;                    // ω_i = 1/√M_i
+//             Eigen::Array<double, -1, 1> angle      = omega * eps_2;                 // ω_i * eps_2
+//             Eigen::Array<double, -1, 1> cos_t      = angle.cos();
+//             Eigen::Array<double, -1, 1> sin_t      = angle.sin();
 //             
 //             for (int l = 0; l < L_ii; l++) {
 //                       
@@ -338,37 +337,42 @@ ALWAYS_INLINE void leapfrog_integrator_diag_M_diffusion_HMC_nuisance_InPlace( Ei
 ) {
   
         const int n_nuisance = velocity_us_vec_proposed_ref.size();
-        Eigen::Matrix<double, -1, 1> grad_us = lp_and_grad_outs.segment(1, n_nuisance);
         
-        // Per-component frequencies: omega_i = 1/sqrt(M_i)  (A = I reference measure)
         const Eigen::Matrix<double, -1, 1> inv_sqrt_M = M_inv_us_vec.array().sqrt();   // = 1/sqrt(M_i)
         const Eigen::Matrix<double, -1, 1> sqrt_M     = inv_sqrt_M.array().inverse();          // = sqrt(M_i)
         const Eigen::Matrix<double, -1, 1> angle      = eps_2 * inv_sqrt_M;            // omega_i * eps_2
         const Eigen::Matrix<double, -1, 1> cos_t      = angle.array().cos();
         const Eigen::Matrix<double, -1, 1> sin_t      = angle.array().sin();
+        //// (the two products of the rotation, made once per trajectory, as the separate passes evaluated them)
+        const Eigen::Matrix<double, -1, 1> sqrt_M_sin_t     = (sqrt_M.array() * sin_t.array()).matrix();
+        const Eigen::Matrix<double, -1, 1> inv_sqrt_M_sin_t = (inv_sqrt_M.array() * sin_t.array()).matrix();
+        
+        //// ---- each step in ONE pass over the nuisance parameters (the same arithmetic, in the same order, as
+        ////      the half kick, the rotation around theta_hat and, from the second step on, the previous step's
+        ////      closing half kick written as separate passes); the gradient is read in place and no copies of it,
+        ////      of theta or of v are made. Independent elements: vectorised.
+        const double half_eps_1 = 0.5 * eps_1;
+        double* __restrict velocity_us = velocity_us_vec_proposed_ref.data();
+        double* __restrict theta_us = theta_us_vec_proposed_ref.data();
+        const double* __restrict grad_us = lp_and_grad_outs.data() + 1;
+        const double* __restrict M_inv_us = M_inv_us_vec.data();
+        const double* __restrict theta_hat = theta_hat_us_vec.data();
+        const double* __restrict cos_of_angle = cos_t.data();
+        const double* __restrict sqrt_M_sin = sqrt_M_sin_t.data();
+        const double* __restrict inv_sqrt_M_sin = inv_sqrt_M_sin_t.data();
         
         for (int l = 0; l < L_ii; l++) {
             if (Model_args_as_cpp_struct.burnin_leapfrog_steps != nullptr) {
                 ++(*Model_args_as_cpp_struct.burnin_leapfrog_steps);
             }
-          
-                 // ---- Velocity half-kick ----
-                 // v += (eps_1/2) * (M⁻¹ * grad_log_post + (θ - θ̂))
-                 // velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * (M_inv_us_vec.array() * grad_us.array() + theta_us_vec_proposed_ref.array() - theta_hat_us_vec.array());
-                 velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * M_inv_us_vec.array() * (grad_us.array() + theta_us_vec_proposed_ref.array() - theta_hat_us_vec.array());
-          
-                 // ---- Exact uniform rotation (all ω = 1) ---- // Shift to center: θ̃ = θ - θ̂
-                 us_theta_vec_current_segment.array() = theta_us_vec_proposed_ref.array() - theta_hat_us_vec.array(); 
-                 us_velocity_vec_current_segment = velocity_us_vec_proposed_ref;
-                 
-                 // Rotate (simple, uniform — cos/sin are scalars)  // shift back:
-                 // theta_us_vec_proposed_ref.array() = cos_eps_2 * us_theta_vec_current_segment.array() + sin_eps_2 * us_velocity_vec_current_segment.array() + theta_hat_us_vec.array(); 
-                 // velocity_us_vec_proposed_ref.array() = cos_eps_2 * us_velocity_vec_current_segment.array() - sin_eps_2 * us_theta_vec_current_segment.array();
-                 theta_us_vec_proposed_ref.array()    = cos_t.array() * us_theta_vec_current_segment.array()
-                                                      + sqrt_M.array() * sin_t.array() * us_velocity_vec_current_segment.array() + theta_hat_us_vec.array();
-                 velocity_us_vec_proposed_ref.array() = cos_t.array() * us_velocity_vec_current_segment.array() - inv_sqrt_M.array() * sin_t.array() * us_theta_vec_current_segment.array();
+                 for (int i = 0; i < n_nuisance; ++i) {
+                       const double kick = half_eps_1 * M_inv_us[i] * ((grad_us[i] + theta_us[i]) - theta_hat[i]);
+                       const double velocity = l > 0 ? (velocity_us[i] + kick) + kick : velocity_us[i] + kick;
+                       const double distance = theta_us[i] - theta_hat[i];
+                       theta_us[i] = cos_of_angle[i] * distance + sqrt_M_sin[i] * velocity + theta_hat[i];
+                       velocity_us[i] = cos_of_angle[i] * velocity - inv_sqrt_M_sin[i] * distance;
+                 }
                    
-                 // ---- Recompute gradient at new θ ----
                  fn_lp_grad_InPlace(lp_and_grad_outs, Model_type,
                                     force_autodiff, force_PartialLog, multi_attempts,
                                     theta_main_vec_initial_ref, theta_us_vec_proposed_ref,
@@ -377,11 +381,12 @@ ALWAYS_INLINE void leapfrog_integrator_diag_M_diffusion_HMC_nuisance_InPlace( Ei
                                     Stan_model_as_cpp_struct,
                                     LC_MVP_ws_structs,
                                     n_threads_WCP);
-                 grad_us = lp_and_grad_outs.segment(1, n_nuisance);
-                 
-                 // ---- Velocity half-kick (with new θ and gradient) ----
-                 // velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * (M_inv_us_vec.array() * grad_us.array() + theta_us_vec_proposed_ref.array() - theta_hat_us_vec.array());
-                 velocity_us_vec_proposed_ref.array() += 0.5 * eps_1 * M_inv_us_vec.array() * (grad_us.array() + theta_us_vec_proposed_ref.array() - theta_hat_us_vec.array());
+                 //// (the closing half kick: in the next step's pass, or below after the last step)
+        }
+        
+        //// ---- the last step's closing half kick
+        for (int i = 0; i < n_nuisance; ++i) {
+              velocity_us[i] += half_eps_1 * M_inv_us[i] * ((grad_us[i] + theta_us[i]) - theta_hat[i]);
         }
   
 }
@@ -463,10 +468,12 @@ ALWAYS_INLINE  void         fn_Diffusion_HMC_nuisance_only_single_iter_InPlace_p
                 EHMC_args_as_cpp_struct.tau_us_ii = EHMC_args_as_cpp_struct.eps_us; 
               }
               // Compute L_ii:
-              int L_ii;
-              if (EHMC_args_as_cpp_struct.diffusion_HMC == true)   L_ii = std::ceil( EHMC_args_as_cpp_struct.tau_us_ii /  eps_1 );
-              if (EHMC_args_as_cpp_struct.diffusion_HMC == false)  L_ii = std::ceil( EHMC_args_as_cpp_struct.tau_us_ii /  EHMC_args_as_cpp_struct.eps_us );
-              if (L_ii < 1) { L_ii = 1 ; }
+              const double eps_of_the_nuisance_trajectory = EHMC_args_as_cpp_struct.diffusion_HMC
+                  ? eps_1 : EHMC_args_as_cpp_struct.eps_us;
+              const int L_ii = fn_number_of_leapfrog_steps_from_tau_eps_and_max_L(
+                  EHMC_args_as_cpp_struct.tau_us_ii,
+                  eps_of_the_nuisance_trajectory,
+                  EHMC_args_as_cpp_struct.max_L);
 
               // if (grad_option_temp != "no_testing")  { //// --------------------------------------------------------------------------------
               //        const bool force_PartialLog_temp = true;
@@ -631,6 +638,17 @@ ALWAYS_INLINE  void         fn_Diffusion_HMC_nuisance_only_single_iter_InPlace_p
           }
 
       } catch (...) { // if iteration fails (recorded as us_div)
+            //// (a diagnostic: the message of the first failed gradient of this chain, written to stderr; the
+            ////  failure is recorded below as before; message_of_the_first_failed_gradient_of_each_chain.hpp)
+            try {
+                  throw;
+            } catch (const std::exception &failed_gradient) {
+                  fn_write_the_message_of_the_first_failed_gradient_of_this_chain("nuisance parameters",
+                                                                                 failed_gradient.what());
+            } catch (...) {
+                  fn_write_the_message_of_the_first_failed_gradient_of_this_chain("nuisance parameters",
+                                                                                 "not a std::exception");
+            }
         
                 // std::cout << "  Could not evaluate lp_grad function when sampling nuisance parameters " << ")\n";
 

@@ -14,6 +14,7 @@
 // 0: released/already empty; 1: live AD state, untouched; 2: unexpected failure.
 extern "C" NICOSTAN_BRIDGE_MEMORY_EXPORT
 int nicostan_bs_release_thread_memory_v1() noexcept {
+
     try {
         auto* stack = stan::math::ChainableStack::instance_;
         if (stack == nullptr) return 0;
@@ -42,6 +43,7 @@ int nicostan_bs_release_thread_memory_v1() noexcept {
     } catch (...) {
         return 2;
     }
+
 }
 
 #undef NICOSTAN_BRIDGE_MEMORY_EXPORT

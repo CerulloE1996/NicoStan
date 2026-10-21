@@ -21,6 +21,10 @@ fn_reset_stan_load_timer <- function() {
     invisible(.Call(`_NicoStan_fn_reset_stan_load_timer`))
 }
 
+Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace <- function(positions_from_0) {
+    invisible(.Call(`_NicoStan_Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace`, positions_from_0))
+}
+
 Rcpp_fn_check_joint_trajectory <- function(EHMC_args_as_Rcpp_List) {
     .Call(`_NicoStan_Rcpp_fn_check_joint_trajectory`, EHMC_args_as_Rcpp_List)
 }

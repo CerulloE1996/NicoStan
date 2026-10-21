@@ -33,9 +33,9 @@ get_BayesMVP_Stan_paths <- function() {
 
 
 
-#' Create a BridgeStan model while preserving one TBB runtime
+#' Create a BridgeStan model whilst preserving one TBB runtime
 #' @keywords internal
-R_fn_create_BridgeStan_model <- function( lib,
+R_fn_create_BridgeStan_model <-  function( lib,
                                           data,
                                           seed = 123,
                                           stanc_args = NULL,
@@ -75,6 +75,8 @@ R_fn_create_BridgeStan_model <- function( lib,
 #' init_bs_model_external
 #' @export
 init_bs_model_external <- function( stream = NULL,
+                                    compile,
+                                    force_recompile,
                                     Stan_data_list,
                                     Stan_model_file_path,
                                     stanc_args = NULL,
@@ -116,14 +118,15 @@ init_bs_model_external <- function( stream = NULL,
               
               ##
               ## ---- Proper JSON object (the normal case): no parse / rewrite round trip.
-              ##      convert_stan_data_list_to_JSON() writes the data with cmdstanr::write_stan_json(), i.e. a JSON
-              ##      object starting with "{", which BridgeStan and CmdStan read natively. The fromJSON / unwrap /
-              ##      write_json / re-read path below is only needed for LEGACY double-encoded files (a JSON string
-              ##      wrapped in an array). For an N = 2500 data set that round trip took ~3.2 s per call, and one fit
-              ##      can reach this function more than once (initialise_model() runs when the model object is created
-              ##      with data, again in R_fn_sample_model, and once more there after a non-identity test re-ordering).
-              ##      A JSON object is therefore only checked with jsonlite::validate() (a C-level syntax check that
-              ##      builds no R object) and passed on unchanged; the file on disk is not rewritten:
+              ##      convert_stan_data_list_to_JSON() writes the data with cmdstanr::write_stan_json(), i.e. a
+              ##      JSON object starting with "{", which BridgeStan and CmdStan read natively. The fromJSON /
+              ##      unwrap / write_json / re-read path below is only needed for LEGACY double-encoded files (a
+              ##      JSON string wrapped in an array). For an N = 2500 data set that round trip took ~3.2 s per
+              ##      call, and one fit can reach this function more than once (initialise_model() runs when the
+              ##      model object is created with data, again in R_fn_sample_model, and once more there after a
+              ##      non-identity test re-ordering). A JSON object is therefore only checked with
+              ##      jsonlite::validate() (a C-level syntax check that builds no R object) and passed on
+              ##      unchanged; the file on disk is not rewritten:
               ##
               ## (only LEADING white space is trimmed for the "{" check: a two-sided trimws() scans the whole
               ##  multi-MB string, ~0.5 s for an N = 50000 data set):
@@ -149,8 +152,10 @@ init_bs_model_external <- function( stream = NULL,
               parsed <- tryCatch({
                 jsonlite::fromJSON(raw_content, simplifyVector = FALSE)
               }, error = function(e) {
+
                 stop("Invalid JSON in file: ", e$message)
               })
+
               
               # Check if it's wrapped in an array containing a string
               if (is.character(parsed) && length(parsed) == 1) {
@@ -167,13 +172,15 @@ init_bs_model_external <- function( stream = NULL,
               # }
               
               # Preserve singleton/empty array ranks when unwrapping legacy JSON.
-              # Rewritten ATOMICALLY (temporary file + rename): this file is shared by concurrent fits with the same
-              # data, and an in-place rewrite let another process read it half-written ("premature EOF"):
+              # Rewritten ATOMICALLY (temporary file + rename): this file is shared by concurrent fits with the
+              # same data, and an in-place rewrite let another process read it half-written ("premature EOF"):
               fn_write_file_atomically( target_file_path                = json_file_path,
                                         fn_write_to_temporary_file_path = function(temporary_file_path) {
+
                                               jsonlite::write_json( x = json_data, path = temporary_file_path, 
                                                                     auto_unbox = TRUE, digits = NA, pretty = FALSE)
                                         })
+
               
               # Read the validated string for bridgestan
               validated_json_string <- paste(readLines(json_file_path), collapse = "")
@@ -200,51 +207,105 @@ init_bs_model_external <- function( stream = NULL,
         ## ("empty_nested() must be false..."). make skips .so files it considers
         ## up-to-date, so a stale non-threads .so would never be rebuilt -- detect
         ## it by its embedded flag and delete it to force a fresh, threads build:
-        page_release_linux <- identical(x = Sys.info()[["sysname"]], y = "Linux")
-        if (page_release_linux) {
-              memory_compile_options <- R_fn_bridge_memory_compile_options(
+        page_release_linux <-  identical(x = Sys.info()[["sysname"]], y = "Linux")
+        model_so_file <-  normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
+        model_library_needs_build <-  !file.exists(model_so_file)
+        ## (a library older than its Stan file was not built from that file: it was reused before, whatever its
+        ##  Stan file, e.g. a reduce_sum_chunked version written again after its library was built; now the fit stops,
+        ##  naming both files and their times, so that the library is built once beforehand, never inside a fit:
+        ##  models already built are never built again)
+        if (!model_library_needs_build && file.exists(Stan_model_file_path) &&
+            (file.info(model_so_file)$mtime < file.info(Stan_model_file_path)$mtime)) {
+              stop(paste0("The model library ", model_so_file, " (", format(file.info(model_so_file)$mtime),
+                          ") is older than its Stan file ", Stan_model_file_path, " (",
+                          format(file.info(Stan_model_file_path)$mtime), "), so it was not built from it. Build ",
+                          "the library again, once, beforehand, in its own process."))
+        }
+        if (!is.logical(compile) || length(compile) != 1 || is.na(compile) ||
+            !is.logical(force_recompile) || length(force_recompile) != 1 || is.na(force_recompile)) {
+              stop("compile and force_recompile must each be TRUE or FALSE.")
+        }
+        if (model_library_needs_build && !compile) {
+              stop(paste0("compile = FALSE: the model library is missing: ", model_so_file,
+                          ". Build it separately before the fit."))
+        }
+        if (!model_library_needs_build && force_recompile) {
+              stop(paste0("force_recompile = TRUE: the existing library is retained: ", model_so_file,
+                          ". Rebuilding an existing library requires a separate build."))
+        }
+        if (page_release_linux && model_library_needs_build) {
+              memory_compile_options <-  R_fn_bridge_memory_compile_options(
                     model_file = Stan_model_file_path,
                     make_args = make_args,
                     stanc_args = stanc_args,
                     release_header = NULL)
-              original_bridgestan_path <- getFromNamespace(
+              original_bridgestan_path <-  utils::getFromNamespace(
                     "get_bridgestan_path", "bridgestan")(download = FALSE)
-              page_release_runtime <- R_fn_bridge_memory_prepare_runtime(
+              proof_source <-  tempfile(pattern = "nicostan_parallel_source_", fileext = ".stan")
+              writeLines(R_fn_Stan_parallel_call_names(code = R_fn_read_Stan_source_with_includes(
+                    model_file = Stan_model_file_path, stanc_args = memory_compile_options$stanc_args)),
+                    con = proof_source, useBytes = TRUE)
+              unit_upstream_proof <-  R_fn_bridge_memory_proof_of_unit_upstream(
+                    model_file = proof_source, make_args = memory_compile_options$make_args)
+              page_release_runtime <-  R_fn_bridge_memory_prepare_runtime(
+                    unit_upstream_proof = unit_upstream_proof,
                     release_header = NULL,
                     original_bridgestan_path = original_bridgestan_path)
               bridgestan::set_bridgestan_path(page_release_runtime$bridgestan_path)
               on.exit(bridgestan::set_bridgestan_path(original_bridgestan_path), add = TRUE)
-              stanc_args <- memory_compile_options$stanc_args
-              make_args <- memory_compile_options$make_args
-              page_release_fingerprint_file <- paste0(
+              ## (the selected runtime may be a reused copy with its own make/local; inspect that actual copy)
+              if (isTRUE(unit_upstream_proof$proven)) {
+                    selected_controls <-  R_fn_bridge_memory_build_controls_allow_unit_proof(
+                          make_args = memory_compile_options$make_args)
+                    if (!isTRUE(selected_controls)) {
+                          unit_upstream_proof$proven <-  FALSE
+                          unit_upstream_proof$reason <-  attr(selected_controls, "reason")
+                          page_release_runtime <-  R_fn_bridge_memory_prepare_runtime(
+                                unit_upstream_proof = unit_upstream_proof,
+                                release_header = NULL,
+                                original_bridgestan_path = original_bridgestan_path)
+                          bridgestan::set_bridgestan_path(page_release_runtime$bridgestan_path)
+                    }
+              }
+              stanc_args <-  memory_compile_options$stanc_args
+              make_args <-  memory_compile_options$make_args
+              page_release_fingerprint_file <-  paste0(
                     tools::file_path_sans_ext(Stan_model_file_path),
                     "_page_release_runtime.txt")
-              page_release_fingerprint <- paste0(
+              page_release_fingerprint <-  paste0(
                     "runtime_key=", page_release_runtime$runtime_key,
-                    "; release_header_md5=", memory_compile_options$release_header_md5)
+                    "; release_header_md5=", memory_compile_options$release_header_md5,
+                    "; reduce_sum_upstream_proof=",
+                    unit_upstream_proof$reason)
         }
-        model_so_file <- normalizePath(transform_stan_path(Stan_model_file_path))
+        model_so_file <- normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
         ##
         if (file.exists(model_so_file)) {
-              raw_so <- readBin( con = model_so_file,
+              raw_so <-  readBin( con = model_so_file,
                                  what = "raw",
                                  n = file.info(model_so_file)$size)
               ##
               if (length(grepRaw( pattern = "STAN_THREADS=false",
                                   x = raw_so,
                                   fixed = TRUE)) > 0) {
-                    unlink(x = c(model_so_file, paste0(tools::file_path_sans_ext(Stan_model_file_path), ".o")))
+                    # unlink(x = c(model_so_file,
+                    #              paste0(tools::file_path_sans_ext(Stan_model_file_path), ".o")))
+                    stop(paste0("The existing library was built with STAN_THREADS=false and is retained: ",
+                                model_so_file, ". A thread-safe library must be built separately."))
               }
         }
-        if (page_release_linux && file.exists(model_so_file) &&
+        ## (an existing library is retained; a runtime fingerprint never triggers a rebuild)
+        if (FALSE && page_release_linux && file.exists(model_so_file) &&
             (!R_fn_bridge_memory_has_export(model_so_file) ||
              !file.exists(page_release_fingerprint_file) ||
              !identical(x = readLines(con = page_release_fingerprint_file, warn = FALSE),
                         y = page_release_fingerprint))) {
-              unlink(x = c(model_so_file, paste0(tools::file_path_sans_ext(Stan_model_file_path), ".o")))
+              # unlink(x = c(model_so_file,
+              #              paste0(tools::file_path_sans_ext(Stan_model_file_path), ".o")))
         }
         ##
-        bs_model <- R_fn_create_BridgeStan_model( lib = Stan_model_file_path,
+        bs_model <- R_fn_create_BridgeStan_model( lib = if (model_library_needs_build) Stan_model_file_path else
+                                                        model_so_file,
                                                   data = validated_json_string,
                                                   seed = 123,
                                                   stanc_args = stanc_args,
@@ -257,11 +318,11 @@ init_bs_model_external <- function( stream = NULL,
         #       writeLines(text = page_release_fingerprint,
         #                  con = page_release_fingerprint_file)
         # }
-        if (page_release_linux &&
+        if (page_release_linux && model_library_needs_build &&
             !(file.exists(page_release_fingerprint_file) &&
               identical(x = readLines(con = page_release_fingerprint_file, warn = FALSE),
                         y = page_release_fingerprint))) {
-              temporary_fingerprint_file <- tempfile(pattern = "page_release_fingerprint_",
+              temporary_fingerprint_file <-  tempfile(pattern = "page_release_fingerprint_",
                                                      tmpdir = dirname(page_release_fingerprint_file),
                                                      fileext = ".txt.tmp")
               writeLines(text = page_release_fingerprint,
@@ -272,7 +333,7 @@ init_bs_model_external <- function( stream = NULL,
         json_file_path <- normalizePath(json_file_path)
         ##
         Stan_model_file_path <- normalizePath(Stan_model_file_path)
-        model_so_file <- normalizePath(transform_stan_path(Stan_model_file_path))
+        model_so_file <- normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
         
         return(list(bs_model = bs_model, 
                     json_file_path = json_file_path, 
@@ -280,7 +341,6 @@ init_bs_model_external <- function( stream = NULL,
                     Stan_model_file_path = Stan_model_file_path))
   
 }
-
 
 
 

@@ -1,7 +1,7 @@
 #### ===========================================================================================================
 ## R_fn_burnin_debug_record.R
 ##
-## ---- the burn-in debug record of the tau updates (debug = TRUE only; 6 Oct 2026) ---------------------------
+## ---- the burn-in debug record of the tau updates (debug = TRUE only) ---------------------------
 ##
 ##      One entry per tau update of the main or the joint block (record$records), for offline tests of
 ##      trajectory-length criteria on the real models. Each entry holds the iteration, the block and its number
@@ -65,14 +65,19 @@ fn_burnin_debug_record_add_tau_update <-  function( record,
                                adam_update_performed     = isTRUE(update$adam_update_performed))
                 ##
                 ## ---- "LQ_ESSR_spectral", main block: the update's arguments and result (see above):
+##
                 spectral_inputs <-  update$spectral_update_inputs
                 if (!is.null(spectral_inputs)) {
                         is_spectral_entry <-  vapply(record$records, function(previous) {
+
                                 !is.null(previous$spectral_update)
                         }, logical(1))
+
                         was_performed <-  vapply(record$records, function(previous) {
+
                                 isTRUE(previous$adam_update_performed)
                         }, logical(1))
+
                         n_spectral_updates <-  sum(is_spectral_entry) + 1
                         first_performed <-  isTRUE(update$adam_update_performed) &&
                                             !any(is_spectral_entry & was_performed)
@@ -94,18 +99,16 @@ fn_burnin_debug_record_add_tau_update <-  function( record,
                 record$records[[length(record$records) + 1]] <-  entry
                 record
         }, error = function(error_object) {
+
                 record$errors <-  c(record$errors, paste0("iteration ", iteration, ": ",
                                                           conditionMessage(error_object)))
                 record
         })
+
         ##
         return(new_record)
 
 }
-
-
-
-
 
 
 

@@ -9,7 +9,6 @@
  
  
  
-using namespace Eigen;
 
  
 
@@ -420,7 +419,8 @@ Eigen::Matrix<double, -1, -1>  compute_PD_Hessian_main(     const double shrinka
 }
 
 
-void update_M_dense_main_Hessian_InPlace( Eigen::Ref<Eigen::Matrix<double, -1, -1>> M_dense_main,  /// to be updated 
+void update_M_dense_main_Hessian_InPlace( Eigen::Ref<Eigen::Matrix<double, -1, -1>> M_dense_main,
+                                          /// to be updated
                                           Eigen::Ref<Eigen::Matrix<double, -1, -1>> M_inv_dense_main, /// to be updated 
                                           Eigen::Ref<Eigen::Matrix<double, -1, -1>> M_inv_dense_main_chol, /// to be updated 
                                           const double shrinkage_factor,
@@ -571,7 +571,7 @@ void update_M_dense_main_Hessian_InPlace( Eigen::Ref<Eigen::Matrix<double, -1, -
           M_inv_dense_main = M_dense_main.inverse();
           
           // update M_inv_dense_main_chol
-          Eigen::LLT<Eigen::MatrixXd> llt(M_inv_dense_main);
+          Eigen::LLT<Eigen::Matrix<double, -1, -1>> llt(M_inv_dense_main);
           if (llt.info() == Eigen::Success) {
             
              M_inv_dense_main_chol = llt.matrixL();
@@ -700,7 +700,10 @@ Eigen::Matrix<double, -1, 1> compute_PD_Hessian_diag_main(  const double shrinka
                           LC_MVP_ws_structs[0] = LC_MVP_ws_struct;
                           
                           // Compute diagonal Hessian
-                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e, shrinkage_factor, Model_type,
+                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e,
+                                                                                   shrinkage_factor,
+                                                                                   Model_type,
+                                                                                   
                                                                                     force_autodiff, force_PartialLog, multi_attemps,
                                                                                     theta_main_vec_ref, theta_us_vec_ref, y_ref,
                                                                                     Model_args_as_cpp_struct, 
@@ -772,7 +775,10 @@ Eigen::Matrix<double, -1, 1> compute_PD_Hessian_diag_main(  const double shrinka
                           LC_MVP_ws_structs[0] = LC_MVP_ws_struct;
                           
                           // Compute diagonal Hessian
-                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e, shrinkage_factor, Model_type,
+                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e,
+                                                                                   shrinkage_factor,
+                                                                                   Model_type,
+                                                                                   
                                                                                     force_autodiff, force_PartialLog, multi_attemps,
                                                                                     theta_main_vec_ref, theta_us_vec_ref, y_ref,
                                                                                     Model_args_as_cpp_struct,
@@ -835,7 +841,10 @@ void update_M_diag_main_Hessian_InPlace(  Eigen::Ref<Eigen::Matrix<double, -1, 1
                           LC_MVP_ws_structs[0] = LC_MVP_ws_struct;
                           
                           // Compute diagonal Hessian
-                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e, shrinkage_factor, Model_type,
+                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e,
+                                                                                   shrinkage_factor,
+                                                                                   Model_type,
+                                                                                   
                                                                                     force_autodiff, force_PartialLog, multi_attemps,
                                                                                     theta_main_vec_ref, theta_us_vec_ref, y_ref, 
                                                                                     Model_args_as_cpp_struct, 
@@ -908,7 +917,10 @@ void update_M_diag_main_Hessian_InPlace(  Eigen::Ref<Eigen::Matrix<double, -1, 1
                           LC_MVP_ws_structs[0] = LC_MVP_ws_struct;
                           
                           // Compute diagonal Hessian
-                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e, shrinkage_factor, Model_type,
+                          Hessian_diag = num_diff_Hessian_diag_main_given_nuisance( num_diff_e,
+                                                                                   shrinkage_factor,
+                                                                                   Model_type,
+                                                                                   
                                                                                     force_autodiff, force_PartialLog, multi_attemps,
                                                                                     theta_main_vec_ref, theta_us_vec_ref, y_ref, 
                                                                                     Model_args_as_cpp_struct,

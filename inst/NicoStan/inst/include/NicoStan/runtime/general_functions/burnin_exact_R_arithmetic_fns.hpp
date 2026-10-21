@@ -348,7 +348,9 @@ inline int fn_exact_R_weighted_proposal_mean(   const std::vector<const double *
         //// ---- %*%: R's default matprod checks both operands before trusting the BLAS:
         if (fn_exact_R_matprod_may_have_NaN_or_Inf(staging_matrix.data(), staging_matrix.size()) ||
             fn_exact_R_matprod_may_have_NaN_or_Inf(staging_weights.data(), staging_weights.size())) {
+
               return 2;
+
         }
 
         if (n_rows == 0) return 0;
@@ -564,7 +566,9 @@ inline int fn_exact_R_crossprod_vector_matrix(   const double *v,
 
         if (fn_exact_R_matprod_may_have_NaN_or_Inf(v, n_rows) ||
             fn_exact_R_matprod_may_have_NaN_or_Inf(Y, n_rows * static_cast<std::size_t>(n_columns))) {
+
               return 2;
+
         }
 
         const char trans_T = 'T';
@@ -639,7 +643,9 @@ inline int fn_exact_R_update_snaper_w_minibatch(   const double *X,
         //// crossprod(X, direction):
         if (fn_exact_R_matprod_may_have_NaN_or_Inf(X, n_rows * n_columns_size) ||
             fn_exact_R_matprod_may_have_NaN_or_Inf(direction, n_rows)) {
+
               return 2;
+
         }
         std::vector<double> projection(n_columns_size);
         {

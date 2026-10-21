@@ -1,0 +1,13 @@
+Package: NicoSIMD
+Type: Package
+Title: NicoSIMD: AVX2, AVX-512 and NEON Math, Fused Log Densities and Fused Functions for Stan Models
+Version: 0.1.9000
+Date: 2026-10-16
+Author: Enzo Cerullo
+Maintainer: Enzo Cerullo <enzo.cerullo@bath.edu>
+Description: Header-only C++ (AVX2, AVX-512, and NEON through SIMDe) versions of the elementwise math, log densities and general functions of Stan models, called from Stan as external nico_ functions; used by NicoStan and BayesMVP when installed.
+License: GPL-3
+Imports: utils
+SystemRequirements: GNU make, C++17, an x86-64 CPU with AVX2 (AVX-512 where the CPU has it)
+Encoding: UTF-8
+Depends: R (>= 3.5.0)

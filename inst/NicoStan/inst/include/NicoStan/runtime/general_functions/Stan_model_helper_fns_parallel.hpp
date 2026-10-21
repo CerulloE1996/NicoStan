@@ -116,7 +116,9 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
               char* error_msg = nullptr;
         
               // Thread-local model instance
-              bs_model* local_model = shared_Stan_model.bs_model_construct(json_file_path.c_str(), 123, &error_msg);
+              bs_model* local_model = shared_Stan_model.bs_model_construct(json_file_path.c_str(),
+                                                                           123,
+                                                                           &error_msg);
               
               const int n_iter = unc_params_trace_input_main[0].cols();
               
@@ -178,9 +180,18 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
                         // nuisance block first, main block second. An EMPTY nuisance trace
                         // (n_nuisance_to_track = 0) means the block was not stored: zero-fill it
                         // (main.cpp validated the shape and printed the caveat).
-                        if (unc_params_trace_input_nuisance.size() > 0) {
+                        if (unc_params_trace_input_nuisance.size() > 0 &&
+                            unc_params_trace_input_nuisance[kk].rows() == n_nuisance) {
                           for (int p = 0; p < n_nuisance; ++p) {
                             theta_unc_input(p) = unc_params_trace_input_nuisance[kk](p, ii);
+                          }
+                        } else if (unc_params_trace_input_nuisance.size() > 0) {
+                          //// only the blocks named in nuisance_to_track were kept: each row back at its position
+                          const std::vector<int> &positions =
+                                nicostan_positions_of_the_nuisance_values_kept_in_the_trace();
+                          theta_unc_input.head(n_nuisance).setZero();
+                          for (int j = 0; j < static_cast<int>(positions.size()); ++j) {
+                            theta_unc_input(positions[j]) = unc_params_trace_input_nuisance[kk](j, ii);
                           }
                         } else {
                           theta_unc_input.head(n_nuisance).setZero();

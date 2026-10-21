@@ -15,32 +15,41 @@ R_fn_validate_frozen_sampling_geometry <-  function( EHMC_args_as_Rcpp_List,
         tolerance = 1e-7) {
 
         fn_stop <-  function(reason) {
+
                 stop(paste0("Frozen sampling geometry is invalid: ", reason), call. = FALSE)
         }
 
+
         fn_require_list <-  function(value, label) {
+
                 if (!is.list(value)) fn_stop(paste0(label, " must be a list."))
                 invisible(TRUE)
         }
 
+
         fn_get_field <-  function(value, field, label) {
+
                 if (!(field %in% names(value))) {
                         fn_stop(paste0(label, "$", field, " is missing."))
                 }
                 value[[field]]
         }
 
+
         fn_require_flag <-  function(value, label) {
+
                 if (!is.logical(value) || length(value) != 1 || is.na(value)) {
                         fn_stop(paste0(label, " must be one non-missing logical value."))
                 }
                 isTRUE(value)
         }
 
+
         fn_require_numeric <-  function(value,
                                        label,
                                        expected_length = NULL,
                                        positive = FALSE) {
+
                 if (!is.numeric(value) || is.complex(value) ||
                     (!is.null(expected_length) && length(value) != expected_length) ||
                     any(!is.finite(value))) {
@@ -54,10 +63,12 @@ R_fn_validate_frozen_sampling_geometry <-  function( EHMC_args_as_Rcpp_List,
                 invisible(value)
         }
 
+
         fn_require_matrix <-  function(value,
                                       label,
                                       expected_nrow = NULL,
                                       expected_ncol) {
+
                 if (!is.matrix(value) || !is.numeric(value) || is.complex(value) ||
                     (!is.null(expected_nrow) && nrow(value) != expected_nrow) ||
                     ncol(value) != expected_ncol) {
@@ -75,7 +86,9 @@ R_fn_validate_frozen_sampling_geometry <-  function( EHMC_args_as_Rcpp_List,
                 invisible(value)
         }
 
+
         fn_require_close <-  function(actual, target, label) {
+
                 residual <-  actual - target
                 if (any(!is.finite(residual)) || any(abs(residual) > tolerance)) {
                         fn_stop(paste0(label, " exceeds tolerance = ", format(tolerance, scientific = TRUE), "."))
@@ -83,7 +96,9 @@ R_fn_validate_frozen_sampling_geometry <-  function( EHMC_args_as_Rcpp_List,
                 invisible(TRUE)
         }
 
+
         fn_require_spd <-  function(value, label) {
+
                 if (any(abs(value - t(value)) > tolerance)) {
                         fn_stop(paste0(label, " must be symmetric within tolerance = ",
                                        format(tolerance, scientific = TRUE), "."))
@@ -91,10 +106,13 @@ R_fn_validate_frozen_sampling_geometry <-  function( EHMC_args_as_Rcpp_List,
                 tryCatch(
                         base::chol(value),
                         error = function(error_condition) {
+
                                 fn_stop(paste0(label, " must be positive definite."))
                         })
+
                 invisible(TRUE)
         }
+
 
         fn_require_list(EHMC_args_as_Rcpp_List, "EHMC_args_as_Rcpp_List")
         fn_require_list(EHMC_Metric_as_Rcpp_List, "EHMC_Metric_as_Rcpp_List")
@@ -287,8 +305,6 @@ R_fn_validate_frozen_sampling_geometry <-  function( EHMC_args_as_Rcpp_List,
 
         return(invisible(TRUE))
 }
-
-
 
 
 

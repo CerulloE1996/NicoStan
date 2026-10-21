@@ -17,8 +17,12 @@
 #' @param efficiency_info The efficiency_info of a fit's summary, or the list of its
 #'   get_efficiency_metrics().
 #' @param target_ESS The target ESS: one positive number.
-#' @param quantities "generated_quantities" (default; e.g. the sensitivities, specificities and prevalences of a
-#'   latent class model) or "main" (the main parameters used for the summary's diagnostics).
+#' @param quantities "parameters_of_interest" (default: the parameters of interest of the fit, over which every
+#'   min-ESS-based efficiency measure of the summary is computed, whatever the burn-in adaptation block; see
+#'   parameter_families_of_interest_for_min_ESS in $sample()), "main" (every main parameter, i.e. the parameters
+#'   block except the nuisance parameters), "joint" (every main parameter and the tracked nuisance parameters; NA
+#'   when none are tracked) or "generated_quantities" (e.g. the sensitivities, specificities and prevalences of a
+#'   latent class model).
 #' @param ESS_type "min_of_bulk_tail_and_sd" (default: the smallest of the three), "bulk", "tail" or "sd" (the ESS
 #'   of the centred squared draws, ESS(theta^2), i.e. the ESS for the posterior SD).
 #' @return The gradient evaluations, or NA when one of the ingredients is missing.
@@ -31,10 +35,12 @@
 #' @export
 fn_gradient_evaluations_to_target_ESS <-  function( efficiency_info,
                                                     target_ESS,
-                                                    quantities = "generated_quantities",
+                                                    ## quantities = "generated_quantities",
+                                                    quantities = "parameters_of_interest",
                                                     ESS_type = "min_of_bulk_tail_and_sd"
 ) {
 
+        ##
         if (!is.list(efficiency_info)) {
               stop(paste0("fn_gradient_evaluations_to_target_ESS: efficiency_info must be the ",
                           "efficiency_info list of a summary or the list of its ",
@@ -43,9 +49,14 @@ fn_gradient_evaluations_to_target_ESS <-  function( efficiency_info,
         if (!is.numeric(target_ESS) || length(target_ESS) != 1 || !is.finite(target_ESS) || target_ESS <= 0) {
               stop("fn_gradient_evaluations_to_target_ESS: target_ESS must be one positive number.")
         }
-        if (!identical(quantities, "generated_quantities") && !identical(quantities, "main")) {
-              stop(paste0("fn_gradient_evaluations_to_target_ESS: quantities must be \"generated_quantities\" ",
-                          "or \"main\"."))
+        # if (!identical(quantities, "generated_quantities") && !identical(quantities, "main")) {
+        #       stop(paste0("fn_gradient_evaluations_to_target_ESS: quantities must be \"generated_quantities\" ",
+        #                   "or \"main\"."))
+        # }
+        if (!(quantities %in% c("parameters_of_interest", "main", "joint", "generated_quantities")) ||
+            length(quantities) != 1) {
+              stop(paste0("fn_gradient_evaluations_to_target_ESS: quantities must be ",
+                          "\"parameters_of_interest\", \"main\", \"joint\" or \"generated_quantities\"."))
         }
         ESS_types <-  c("min_of_bulk_tail_and_sd", "bulk", "tail", "sd")
         if (!is.character(ESS_type) || length(ESS_type) != 1 || !(ESS_type %in% ESS_types)) {
@@ -56,16 +67,35 @@ fn_gradient_evaluations_to_target_ESS <-  function( efficiency_info,
         ## ---- the smallest ESS of each type over the chosen quantities:
         ##
         fn_value_or_NA <-  function(value) {
+
               if (is.null(value) || length(value) != 1 || !is.finite(value)) NA_real_ else as.numeric(value)
         }
-        ESS_by_type <-  if (identical(quantities, "generated_quantities")) {
-              c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_gq),
-                 tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_gq),
-                 sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_gq))
+
+        # ESS_by_type <-  if (identical(quantities, "generated_quantities")) {
+        #       c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_gq),
+        #          tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_gq),
+        #          sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_gq))
+        # } else {
+        #       c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_main),
+        #          tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_main),
+        #          sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_main))
+        # }
+        if (identical(quantities, "parameters_of_interest")) {
+              ESS_by_type <-  c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_parameters_of_interest),
+                                 tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_parameters_of_interest),
+                                 sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_parameters_of_interest))
+        } else if (identical(quantities, "main")) {
+              ESS_by_type <-  c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_main),
+                                 tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_main),
+                                 sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_main))
+        } else if (identical(quantities, "joint")) {
+              ESS_by_type <-  c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_joint),
+                                 tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_joint),
+                                 sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_joint))
         } else {
-              c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_main),
-                 tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_main),
-                 sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_main))
+              ESS_by_type <-  c( bulk = fn_value_or_NA(efficiency_info$Min_ESS_gq),
+                                 tail = fn_value_or_NA(efficiency_info$Min_ESS_tail_gq),
+                                 sd   = fn_value_or_NA(efficiency_info$Min_ESS_sd_gq))
         }
         ESS <-  if (identical(ESS_type, "min_of_bulk_tail_and_sd")) {
               if (anyNA(ESS_by_type)) NA_real_ else min(ESS_by_type)
@@ -78,9 +108,8 @@ fn_gradient_evaluations_to_target_ESS <-  function( efficiency_info,
         }
         ##
         return(n_grad_evals_burnin + (target_ESS / ESS) * n_grad_evals_sampling)
-
+##
 }
-
 
 
 

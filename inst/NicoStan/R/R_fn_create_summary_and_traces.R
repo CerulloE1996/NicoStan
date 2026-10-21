@@ -131,6 +131,7 @@ thin_mcmc <- function(trace,
         
         # Apply thinning to each chain
         thinned_trace <- lapply(trace, function(chain) {
+
           if (!is.matrix(chain)) {
             stop("Each chain must be a matrix")
           }
@@ -145,6 +146,7 @@ thin_mcmc <- function(trace,
           # Return thinned chain
           chain[, keep_indices, drop = FALSE]
         })
+
         
         return(thinned_trace)
   
@@ -209,8 +211,155 @@ permute_3d_draws_array <- function(array,
 
 
 #### --------------------------------------------------------------------------------------------------------------------------------------------------
+fn_names_of_structurally_fixed_stan_parameter_values <- function(Stan_model_source,
+                                                                 parameter_names) {
+
+        if (!is.character(Stan_model_source) || length(Stan_model_source) != 1) {
+              stop("Stan_model_source must be one character string.")
+        }
+        if (!is.character(parameter_names)) {
+              stop("parameter_names must be a character vector.")
+        }
+        ##
+        ## Remove comments before reading the parameter declarations:
+        ##
+        Stan_model_source_without_comments <- gsub(pattern = "//[^\\n]*",
+                                                   replacement = "",
+                                                   x = Stan_model_source,
+                                                   perl = TRUE)
+        Stan_model_source_without_comments <- gsub(pattern = "(?s)/\\*.*?\\*/",
+                                                   replacement = "",
+                                                   x = Stan_model_source_without_comments,
+                                                   perl = TRUE)
+        parameters_block_match <- regexec(pattern = "(?s)parameters\\s*\\{(.*?)\\}",
+                                           text = Stan_model_source_without_comments,
+                                           perl = TRUE)
+        parameters_block_parts <- regmatches(Stan_model_source_without_comments,
+                                             parameters_block_match)[[1]]
+        if (length(parameters_block_parts) < 2) {
+              stop("A Stan parameters block could not be read from Stan_model_source.")
+        }
+        stan_parameter_declarations <- strsplit(parameters_block_parts[2], ";", fixed = TRUE)[[1]]
+        structurally_fixed_parameter_names <- character(0)
+        ##
+        ## These Stan types have constrained entries which are fixed by their definition:
+        ## cholesky factors have a structural upper triangle, and correlation matrices have a unit diagonal.
+        ##
+        structural_type_pattern <- paste0(
+              "^\\s*((?:array\\s*\\[[^]]*\\]\\s*)*)",
+              "(cholesky_factor_corr|cholesky_factor_cov|corr_matrix)\\s*\\[[^]]*\\]\\s*",
+              "([A-Za-z][A-Za-z0-9_]*)\\s*$")
+        for (stan_parameter_declaration in stan_parameter_declarations) {
+              declaration_match <- regexec(pattern = structural_type_pattern,
+                                           text = stan_parameter_declaration,
+                                           perl = TRUE)
+              declaration_parts <- regmatches(stan_parameter_declaration, declaration_match)[[1]]
+              if (length(declaration_parts) < 4) {
+                    next
+              }
+              array_prefix_matches <- gregexpr(pattern = "array\\s*\\[[^]]*\\]",
+                                               text = declaration_parts[2],
+                                               perl = TRUE)[[1]]
+              array_rank <- if (length(array_prefix_matches) == 1 &&
+                                array_prefix_matches[1] == -1) 0 else
+                    length(array_prefix_matches)
+              parameter_name_pattern <- paste0("^", declaration_parts[4], "\\[([^]]+)\\]$")
+              parameter_name_matches <- regexec(pattern = parameter_name_pattern,
+                                                text = parameter_names,
+                                                perl = TRUE)
+              parameter_name_parts <- regmatches(parameter_names, parameter_name_matches)
+              for (parameter_name_index in seq_along(parameter_name_parts)) {
+                    if (length(parameter_name_parts[[parameter_name_index]]) < 2) {
+                          next
+                    }
+                    parameter_indices <- as.integer(strsplit(
+                          parameter_name_parts[[parameter_name_index]][2],
+                          ",\\s*",
+                          perl = TRUE)[[1]])
+                    if (length(parameter_indices) != array_rank + 2 || anyNA(parameter_indices)) {
+                          next
+                    }
+                    matrix_row <- parameter_indices[length(parameter_indices) - 1]
+                    matrix_column <- parameter_indices[length(parameter_indices)]
+                    parameter_type <- declaration_parts[3]
+                    is_structurally_fixed <- if (parameter_type == "cholesky_factor_corr") {
+                          matrix_row < matrix_column || (matrix_row == 1 && matrix_column == 1)
+                    } else if (parameter_type == "cholesky_factor_cov") {
+                          matrix_row < matrix_column
+                    } else {
+                          matrix_row == matrix_column
+                    }
+                    if (is_structurally_fixed) {
+                          structurally_fixed_parameter_names <- c(
+                                structurally_fixed_parameter_names,
+                                parameter_names[parameter_name_index])
+                    }
+              }
+        }
+        unique(structurally_fixed_parameter_names)
+}
+
+
+
 #' create_summary_and_traces
 #' @export
+##
+## ---- The draws of the nuisance blocks held by NicoStan (reduce_sum_chunked) on their own scale: NicoStan holds
+##      each block on its unconstrained scale, so the rows of a constrained block (the blocks one after the other,
+##      each block's size its terms times its values per term, worked out from the data) are put back on its
+##      constrained scale with Stan's own transforms (lower a: a + exp(u); upper b: b - exp(u); lower a and upper
+##      b: a + (b - a) inv_logit(u); offset a and multiplier b: a + b u) -
+##
+fn_nuisance_draws_on_the_constrained_scale <-  function(nuisance_trace,
+                                                        nuisance_blocks_held_by_NicoStan,
+                                                        Stan_data_list) {
+
+        fn_value_from_the_data <-  function(expression) {
+
+              value <-  tryCatch(eval(parse(text = expression), envir = Stan_data_list),
+                                 error = function(e) NA_real_)
+              if (!is.numeric(value) || length(value) != 1) value <-  NA_real_
+              return(value)
+        }
+
+        first_row_of_the_block <-  1
+        for (i in seq_len(nrow(nuisance_blocks_held_by_NicoStan))) {
+
+              block <-  nuisance_blocks_held_by_NicoStan[i, ]
+              size_of_the_block <-  fn_value_from_the_data(block$terms) *
+                                    fn_value_from_the_data(block$values_per_term)
+              if (is.na(size_of_the_block)) {
+                    message(colourise(paste0("create_summary_and_traces: the size of the nuisance block ",
+                                             block$name, " cannot be worked out from the data, so the draws of ",
+                                             "the constrained nuisance blocks are left on their unconstrained ",
+                                             "scale"), "red"))
+                    return(nuisance_trace)
+              }
+              rows <-  first_row_of_the_block + seq_len(size_of_the_block) - 1
+              first_row_of_the_block <-  first_row_of_the_block + size_of_the_block
+              if (!nzchar(block$constraint)) next
+              a <-  fn_value_from_the_data(block$first_bound)
+              b <-  fn_value_from_the_data(block$second_bound)
+              if (is.na(a) || is.na(b) || max(rows) > dim(nuisance_trace)[1]) {
+                    message(colourise(paste0("create_summary_and_traces: the bounds of the nuisance block ",
+                                             block$name, " (", block$first_bound, ", ", block$second_bound,
+                                             ") cannot be worked out from the data, so its draws are left on ",
+                                             "their unconstrained scale"), "red"))
+                    next
+              }
+              u <-  nuisance_trace[rows, , , drop = FALSE]
+              nuisance_trace[rows, , ] <-  switch(block$constraint,
+                                                  "lower"              = a + exp(u),
+                                                  "upper"              = b - exp(u),
+                                                  "lower_upper"        = a + (b - a) * stats::plogis(u),
+                                                  "offset_multiplier"  = a + b * u)
+        }
+
+        return(nuisance_trace)
+
+}
+##
+##
 create_summary_and_traces <- function(    model_results,
                                           ##
                                           compute_main_params = TRUE, # excludes nuisance params. and log-lik 
@@ -272,7 +421,7 @@ create_summary_and_traces <- function(    model_results,
         ##
         if (n_nuisance_names > 0) {
 
-              constrain_model_unc_num <- tryCatch(model_results$init_object$bs_model$param_unc_num(),
+              constrain_model_unc_num <-  tryCatch(model_results$init_object$bs_model$param_unc_num(),
                                                   error = function(e) NA_integer_)
               ##
               if (!is.na(constrain_model_unc_num) && (constrain_model_unc_num == n_params_main)) {
@@ -309,6 +458,7 @@ create_summary_and_traces <- function(    model_results,
         n_iter <- dim(main_trace[[1]])[2]
         ##
         ## ---- Thread budget for the summary:
+##
         ##      This function used to set mc.cores, OMP_NUM_THREADS and the RcppParallel/TBB pool to
         ##      parallel::detectCores() (192 on the local HPC). That ignored the thread count the caller had set,
         ##      ignored taskset / CPU-affinity limits (detectCores() counts every CPU in the machine), and the TBB
@@ -316,15 +466,20 @@ create_summary_and_traces <- function(    model_results,
         ##      Now: the caller's n_threads if given, otherwise the number of sampling chains, never more than the
         ##      CPUs this process may run on; the previous settings are restored when this function exits.
         ##
-        n_cpus_available_to_this_process <-  length(tryCatch(parallel::mcaffinity(), error = function(error_object) NULL))
+        n_cpus_available_to_this_process <-  length(tryCatch(parallel::mcaffinity(),
+                                                             error = function(error_object) NULL))
         if (n_cpus_available_to_this_process < 1) n_cpus_available_to_this_process <-  parallel::detectCores()
         ##
-        n_threads_summary <-  if_null_then_set_to(n_threads, min(n_chains_sampling, n_cpus_available_to_this_process))
+        n_threads_summary <-  if_null_then_set_to(n_threads,
+                                                  min(n_chains_sampling, n_cpus_available_to_this_process))
         ##
-        if (!(is.numeric(n_threads_summary) && length(n_threads_summary) == 1 && is.finite(n_threads_summary) && n_threads_summary >= 1)) {
+        if (!(is.numeric(n_threads_summary) && length(n_threads_summary) == 1 && is.finite(n_threads_summary) &&
+              n_threads_summary >= 1)) {
+
               stop(paste0("create_summary_and_traces: n_threads must be a single number >= 1, got: ",
                           paste(format(n_threads), collapse = ", ")))
         }
+
         n_threads_summary <-  min(round(n_threads_summary), n_cpus_available_to_this_process)
         ##
         previous_mc_cores <-  getOption("mc.cores")
@@ -333,7 +488,8 @@ create_summary_and_traces <- function(    model_results,
         ##
         on.exit({
               options(mc.cores = previous_mc_cores)
-              if (is.na(previous_OMP_NUM_THREADS)) Sys.unsetenv("OMP_NUM_THREADS") else Sys.setenv(OMP_NUM_THREADS = previous_OMP_NUM_THREADS)
+              if (is.na(previous_OMP_NUM_THREADS)) Sys.unsetenv("OMP_NUM_THREADS") else
+              Sys.setenv(OMP_NUM_THREADS = previous_OMP_NUM_THREADS)
               if (is.na(previous_RcppParallel_num_threads)) {
                     RcppParallel::setThreadOptions(numThreads = "auto")
               } else {
@@ -382,12 +538,14 @@ create_summary_and_traces <- function(    model_results,
                 ## Read log_lik traces
                 if (Model_type != "Stan") {
                     log_lik_trace <- lapply(0:(n_chains - 1), function(i) {
+
                       read_binary_trace(
                         file.path(use_disk_path, paste0("chain_", i, "_loglik.bin")),
                         n_params = model_results$init_object$model_args_list$N,
                         n_iter = n_iter
                       )
                     })
+
                 }
           
         } else {    ## Data is in RAM as usual
@@ -399,7 +557,8 @@ create_summary_and_traces <- function(    model_results,
                   ## needed to constrain a model that declares the nuisance block); what comes back
                   ## is then empty / zero-row and must be treated as absent, not thinned or fed to
                   ## param_constrain:
-                  first_chain <- if (is.list(nuisance_trace) && length(nuisance_trace) > 0) nuisance_trace[[1]] else nuisance_trace
+                  first_chain <-  if (is.list(nuisance_trace) && length(nuisance_trace) > 0)
+                                      nuisance_trace[[1]] else nuisance_trace
                   if (is.null(first_chain) || length(first_chain) == 0 || NROW(first_chain) == 0) {
                     nuisance_trace <- NULL
                   }
@@ -448,8 +607,10 @@ create_summary_and_traces <- function(    model_results,
                 
                 if (save_log_lik_trace == TRUE) {
                   if (Model_type != "Stan") {
-                    if (length(model_results$sampling_object[[6]]) > 0 && NROW(model_results$sampling_object[[6]][[1]]) == 0) {
-                      stop("save_log_lik_trace = TRUE, but the model was sampled with store_log_lik_trace = FALSE, so there is no log-lik trace. ",
+                    if (length(model_results$sampling_object[[6]]) > 0 &&
+                        NROW(model_results$sampling_object[[6]][[1]]) == 0) {
+                      stop("save_log_lik_trace = TRUE, but the model was sampled with store_log_lik_trace = ",
+                           "FALSE, so there is no log-lik trace. ",
                            "Re-run the sampler with store_log_lik_trace = TRUE (the default).")
                     }
                     log_lik_trace_mnl_models <-  model_results$sampling_object[[6]] 
@@ -522,7 +683,9 @@ create_summary_and_traces <- function(    model_results,
                 if (sample_nuisance == TRUE) {
                     n_nuisance <- n_nuisance
                     ## what was ACTUALLY stored (0 when the sampler was told not to keep it):
-                    n_nuisance_tracked <- if (is.null(nuisance_trace)) 0L else NROW(if (is.list(nuisance_trace)) nuisance_trace[[1]] else nuisance_trace)
+                    n_nuisance_tracked <- if (is.null(nuisance_trace)) 0L else
+                                          NROW(if (is.list(nuisance_trace)) nuisance_trace[[1]] else
+                                               nuisance_trace)
                 } else { 
                     n_nuisance <- 0
                     n_nuisance_tracked <- 0
@@ -554,9 +717,16 @@ create_summary_and_traces <- function(    model_results,
                 }
                 if (isTRUE(x = compute_nested_rhat)) {
                     if (nested_rhat_grouping$status %in% c("ok", "singleton_groups")) {
-                        cat("Nested R-hat: ", nested_rhat_grouping$n_superchains, " actual starting-state groups x ",
-                            nested_rhat_grouping$n_chains_per_superchain, " chains = ", nested_rhat_grouping$n_chains_used,
-                            "; ", nested_rhat_grouping$n_chains_omitted, " excluded from nRhat ONLY. ESS uses all chains.\n", sep = "")
+                        cat("Nested R-hat: ",
+                            nested_rhat_grouping$n_superchains,
+                            " actual starting-state groups x ",
+                            nested_rhat_grouping$n_chains_per_superchain,
+                            " chains = ",
+                            nested_rhat_grouping$n_chains_used,
+                            "; ",
+                            nested_rhat_grouping$n_chains_omitted,
+                            " excluded from nRhat ONLY. ESS uses all chains.\n",
+                            sep = "")
                     } else {
                         warning("Nested R-hat unavailable: ", nested_rhat_grouping$status, call. = FALSE)
                     }
@@ -573,8 +743,9 @@ create_summary_and_traces <- function(    model_results,
                   model_so_file <-  model_results$init_object$dummy_model_so_file
                 }
                 
-                ## a model with NO data gets an empty OBJECT ({}), not an empty ARRAY. Written ATOMICALLY (temporary
-                ## file + rename; the shared stan_data folder is read by concurrent fits - see fn_write_file_atomically):
+                ## a model with NO data gets an empty OBJECT ({}), not an empty ARRAY. Written ATOMICALLY
+                ## (temporary file + rename; the shared stan_data folder is read by concurrent fits - see
+                ## fn_write_file_atomically):
                 fn_write_stan_json_atomically( stan_data_list = model_results$init_object$Stan_data_list,
                                                json_file_path = json_file_path)
                 
@@ -769,11 +940,13 @@ create_summary_and_traces <- function(    model_results,
                          }
                          
                          traces <- lapply(0:(n_chains - 1), function(i) {
+
                              read_binary_trace(
                                filepath = file.path(trace_dir, paste0("chain_", i, "_constrained.bin")),
                                n_params = n_params,
                                n_iter = n_iter)
                          })
+
                          
                          return(traces)
              
@@ -826,13 +999,13 @@ create_summary_and_traces <- function(    model_results,
              ## same quantity and throws "n_nuisance (...) + n_params_main (...) does not match the
              ## model's unconstrained dimension" when the two disagree.
              ##
-             constrain_model_unc_num <- tryCatch(model_results$init_object$bs_model$param_unc_num(),
+             constrain_model_unc_num <-  tryCatch(model_results$init_object$bs_model$param_unc_num(),
                                                  error = function(e) NA_integer_)
              ##
              if (!is.na(constrain_model_unc_num) && (constrain_model_unc_num == n_params_main)) {
 
-                   n_nuisance_for_constrain <- 0L
-                   nuisance_trace_for_constrain <- list()
+                   n_nuisance_for_constrain <-  0L
+                   nuisance_trace_for_constrain <-  list()
                    ##
                    if (n_nuisance > 0) {
                      message("create_summary_and_traces: the model used for param_constrain declares ",
@@ -843,7 +1016,7 @@ create_summary_and_traces <- function(    model_results,
 
              } else {
 
-                   n_nuisance_for_constrain <- n_nuisance
+                   n_nuisance_for_constrain <-  n_nuisance
                    nuisance_trace_for_constrain <- if (is.null(nuisance_trace)) list() else nuisance_trace
 
              }
@@ -854,7 +1027,8 @@ create_summary_and_traces <- function(    model_results,
                                                                                             unc_params_trace_input_nuisance = nuisance_trace_for_constrain,
                                                                                             pars_indicies_to_track = pars_indicies_to_track,
                                                                                             n_params_full = n_params_full,
-                                                                                            n_nuisance = n_nuisance_for_constrain,
+                                                                                            n_nuisance =
+                                                                                                n_nuisance_for_constrain,
                                                                                             n_params_main = n_params_main,
                                                                                             model_so_file = model_so_file,
                                                                                             json_file_path = json_file_path,
@@ -869,13 +1043,93 @@ create_summary_and_traces <- function(    model_results,
                                                                       n_params = n_params_full,
                                                                       trace_dir = use_disk_path_post_hoc_dir)
              
+             } else if ((n_nuisance_for_constrain == 0) && (n_nuisance > 0) && is.list(nuisance_trace) &&
+                        (length(nuisance_trace) > 0) && (NROW(nuisance_trace[[1]]) == n_nuisance)) {
+
+                     ## ---- the nuisance blocks held by NicoStan (reduce_sum_chunked): the model reads them through
+                     ##      NicoStan's readers, so each draw's nuisance values are set first (the values used
+                     ##      outside NicoStan's gradient call), then that draw is constrained, draw by draw:
+                     library_name_of_the_model <-  tools::file_path_sans_ext(basename(model_so_file))
+                     bs_model_for_constrain <-  model_results$init_object$bs_model
+                     rng_for_constrain <-  bs_model_for_constrain$new_rng(seed = 1)
+                     all_param_outs_trace <-  lapply(seq_along(main_trace), function(kk) {
+
+                           n_iter_of_chain <-  NCOL(main_trace[[kk]])
+                           outputs_of_chain <-  matrix(NA_real_, nrow = length(pars_indicies_to_track),
+                                                       ncol = n_iter_of_chain)
+                           for (ii in seq_len(n_iter_of_chain)) {
+                                 do.call(".C", list( "nicostan_set_the_nuisance_values_used_outside_NicoStan_R",
+                                                     as.double(nuisance_trace[[kk]][, ii]),
+                                                     as.integer(n_nuisance),
+                                                     PACKAGE = library_name_of_the_model))
+                                 constrained <-  bs_model_for_constrain$param_constrain(
+                                                       theta_unc   = as.double(main_trace[[kk]][, ii]),
+                                                       include_tp  = TRUE,
+                                                       include_gq  = TRUE,
+                                                       rng         = rng_for_constrain)
+                                 outputs_of_chain[, ii] <-  constrained[pars_indicies_to_track + 1]
+                           }
+                           outputs_of_chain
+                     })
+
+                     ## (never a silent NaN: a draw whose constrained parameters-block values are not
+                     ##  all finite stops here, naming the chain and draw; the transformed parameters and
+                     ##  generated quantities may be NaN by the model's own design, as in Stan, so their
+                     ##  values that are not finite are counted and named instead)
+                     rows_of_the_parameters_block <-  seq_len(n_params_main_constrained)
+                     for (kk in seq_along(all_param_outs_trace)) {
+                           draws_not_finite <-  which(colSums(!is.finite(
+                                                     all_param_outs_trace[[kk]][rows_of_the_parameters_block, ,
+                                                                                drop = FALSE])) > 0)
+                           if (length(draws_not_finite) > 0) {
+                                 stop(paste0("create_summary_and_traces: the constrained parameters-block ",
+                                             "values of ",
+                                             length(draws_not_finite), " draws of chain ", kk, " (first: draw ",
+                                             draws_not_finite[1], ") are not all finite, with the nuisance ",
+                                             "blocks held by NicoStan"))
+                           }
+                     }
+                     rows_not_finite <-  which(rowSums(!is.finite(do.call(cbind, all_param_outs_trace))) > 0)
+                     if (length(rows_not_finite) > 0) {
+                           names_not_finite <-  tryCatch(bs_names_inc_tp_and_gq[rows_not_finite],
+                                                         error = function(e) as.character(rows_not_finite))
+                           message(paste0("create_summary_and_traces: ", length(rows_not_finite),
+                                          " transformed parameters / generated quantities have values ",
+                                          "that are not finite (as the model computes them): ",
+                                          paste0(utils::head(names_not_finite, 10), collapse = ", ")))
+                     }
+
              } else {
                      
+                     ## ---- nuisance blocks held by NicoStan (reduce_sum_chunked): the sampler's own constrain
+                     ##      puts the kept values back at their positions, so the transformed parameters and the
+                     ##      generated quantities use each draw's own nuisance values. A value that was NOT kept
+                     ##      cannot be reconstructed: a quantity computed from it would not be the posterior's,
+                     ##      so this STOPS rather than save a wrong one (e.g. Se / Sp from the cutpoints of a
+                     ##      random-cutpoint model); a model whose constrain takes the main block alone
+                     ##      (n_nuisance_for_constrain = 0, the built-in skeletons) needs none of them:
+                     if (n_nuisance > 0 && n_nuisance_for_constrain > 0) {
+                           ## (the positions are re-set here because they are one per library and another model
+                           ##  may have sampled since; with every value kept they are simply all of them)
+                           if (n_nuisance_for_constrain == n_nuisance) {
+                                 Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace(
+                                       positions_from_0 = as.integer(seq_len(n_nuisance) - 1L))
+                           } else {
+                                 stop(paste0("create_summary_and_traces: the model holds ", n_nuisance,
+                                             " nuisance values by NicoStan and only ", n_nuisance_for_constrain,
+                                             " of them were kept (nuisance_to_track), so every transformed ",
+                                             "parameter and generated quantity computed from the rest is not ",
+                                             "the posterior's. Run with nuisance_to_track naming every block ",
+                                             "the summaries need, e.g. c(\"beta_z\", \"C_raw\")."))
+                           }
+                     }
+                     ##
                      all_param_outs_trace <- fn_compute_param_constrain_from_trace_parallel( unc_params_trace_input_main = main_trace,
                                                                                             unc_params_trace_input_nuisance = nuisance_trace_for_constrain,
                                                                                             pars_indicies_to_track = pars_indicies_to_track,
                                                                                             n_params_full = n_params_full,
-                                                                                            n_nuisance = n_nuisance_for_constrain,
+                                                                                            n_nuisance =
+                                                                                                n_nuisance_for_constrain,
                                                                                             n_params_main = n_params_main,
                                                                                             model_so_file = model_so_file,
                                                                                             json_file_path = json_file_path,
@@ -1167,6 +1421,7 @@ create_summary_and_traces <- function(    model_results,
                           unlist(lapply(fitted_ordinal_slot_of_original_ordinal_test,
                                         function(k) start_of_fitted_slot[k]:end_of_fitted_slot[k]))
                     fn_re_index_cutpoint_rows <-  function(trace_array, row_names, family_name) {
+
                           family_rows <-  grep(paste0("^", family_name, "\\[[0-9]+,[0-9]+\\]$"), row_names)
                           if (length(family_rows) == 0) return(list(trace_array = trace_array, done = FALSE))
                           indices <-  do.call(rbind, lapply(strsplit(sub(paste0("^", family_name, "\\[(.*)\\]$"),
@@ -1182,6 +1437,7 @@ create_summary_and_traces <- function(    model_results,
                           trace_array[family_rows, , ] <-  trace_array[fitted_rows, , , drop = FALSE]
                           return(list(trace_array = trace_array, done = TRUE))
                     }
+
                     re_indexed <-  fn_re_index_cutpoint_rows( trace_params_main, names_of_main_trace_rows,
                                                               "C_unc_vec")
                     trace_params_main <-  re_indexed$trace_array
@@ -1224,8 +1480,18 @@ create_summary_and_traces <- function(    model_results,
             # tictoc::tic("Timer 8")
             
             Min_ESS_main <- NULL
-            Min_ESS_sd_main <- NULL
-            Min_ESS_tail_main <- NULL
+            Min_ESS_sd_main <-  NULL
+            Min_ESS_tail_main <-  NULL
+            ## (the min ESS over the parameters of interest, which every efficiency measure uses, and over the
+            ##  joint block, i.e. every main parameter and the tracked nuisance parameters)
+            Min_ESS_parameters_of_interest <-  NULL
+            Min_ESS_sd_parameters_of_interest <-  NULL
+            Min_ESS_tail_parameters_of_interest <-  NULL
+            parameters_of_interest <-  NULL
+            parameter_families_of_interest_for_min_ESS <-  NULL
+            Min_ESS_joint <-  NULL
+            Min_ESS_sd_joint <-  NULL
+            Min_ESS_tail_joint <-  NULL
             summary_tibble_main_params <- NULL
             names_main <- pars_names[index_params_main]
             
@@ -1244,10 +1510,12 @@ create_summary_and_traces <- function(    model_results,
                                                                                       compute_nested_rhat = compute_nested_rhat,
                                                                                       n_chains = n_chains_sampling, 
                                                                                       n_superchains = n_superchains,
-                                                                                      nested_rhat_grouping = nested_rhat_grouping)
+                                                                                      nested_rhat_grouping =
+                                                                                          nested_rhat_grouping)
                             
                             
-                  ## Missing parameter diagnostics must not silently become infinite efficiency or apparent convergence.
+                  ## Missing parameter diagnostics must not silently become infinite efficiency or apparent
+                  ## convergence.
                   ##
                   ## ---- LC_MVP / LC_MVOP with known (fixed) correlations: the raw coordinate of a known
                   ##      correlation (its Omega_unconstrained_vec entry) is not a model parameter (the
@@ -1288,28 +1556,147 @@ create_summary_and_traces <- function(    model_results,
                                     rows_of_main_parameters_in_diagnostics[-rows_left_out]
                         }
                   }
+                  rows_of_main_parameters_for_ESS <- rows_of_main_parameters_in_diagnostics
+                  Stan_model_file_path <- model_results$init_object$Stan_model_file_path
+                  if (identical(Model_type, "Stan") &&
+                      is.character(Stan_model_file_path) &&
+                      length(Stan_model_file_path) == 1 &&
+                      file.exists(Stan_model_file_path)) {
+                        Stan_model_source <- paste0(readLines(con = Stan_model_file_path, warn = FALSE),
+                                                    collapse = "\n")
+                        names_of_structurally_fixed_parameters <-
+                              fn_names_of_structurally_fixed_stan_parameter_values(
+                                    Stan_model_source = Stan_model_source,
+                                    parameter_names =
+                                          summary_tibble_main_params$parameter[
+                                                rows_of_main_parameters_for_ESS])
+                        rows_left_out <- which(
+                              summary_tibble_main_params$parameter[
+                                    rows_of_main_parameters_for_ESS] %in%
+                                    names_of_structurally_fixed_parameters)
+                        if (length(rows_left_out) > 0) {
+                              message(colourise(paste0(
+                                    "Structurally fixed Stan parameter values left out of main ESS diagnostics: ",
+                                    paste(summary_tibble_main_params$parameter[
+                                                rows_of_main_parameters_for_ESS][rows_left_out],
+                                          collapse = ", ")), "cyan"))
+                              rows_of_main_parameters_for_ESS <-
+                                    rows_of_main_parameters_for_ESS[-rows_left_out]
+                        }
+                  }
                   # main_ess_values <- summary_tibble_main_params$n_eff[seq_len(length.out =
                   #                                                       n_params_main_constrained)]
                   # main_rhat_values <- summary_tibble_main_params$Rhat[seq_len(length.out =
                   #                                                       n_params_main_constrained)]
-                  main_ess_values <- summary_tibble_main_params$n_eff[rows_of_main_parameters_in_diagnostics]
-                  main_rhat_values <- summary_tibble_main_params$Rhat[rows_of_main_parameters_in_diagnostics]
+                  main_ess_values <-  summary_tibble_main_params$n_eff[rows_of_main_parameters_for_ESS]
+                  main_rhat_values <-  summary_tibble_main_params$Rhat[rows_of_main_parameters_in_diagnostics]
                   Min_ESS_main <- if (length(x = main_ess_values) > 0 && all(is.finite(x = main_ess_values)))
                       min(main_ess_values) else NA_real_
-                  ## the same minimum for the ESS of the centred squared draws (n_eff_sd, the posterior SD's ESS; Enzo, 4 Oct 2026):
+                  ## the same minimum for the ESS of the centred squared draws (n_eff_sd, the posterior SD's ESS):
                   # main_ess_sd_values <- summary_tibble_main_params$n_eff_sd[seq_len(length.out =
                   #                                                             n_params_main_constrained)]
                   main_ess_sd_values <-
-                        summary_tibble_main_params$n_eff_sd[rows_of_main_parameters_in_diagnostics]
-                  Min_ESS_sd_main <- if (length(x = main_ess_sd_values) > 0 && all(is.finite(x = main_ess_sd_values)))
+                        summary_tibble_main_params$n_eff_sd[rows_of_main_parameters_for_ESS]
+                  Min_ESS_sd_main <-  if (length(x = main_ess_sd_values) > 0 &&
+                                          all(is.finite(x = main_ess_sd_values)))
                       min(main_ess_sd_values) else NA_real_
                   ## the same minimum for the tail ESS:
                   main_ess_tail_values <-
-                        summary_tibble_main_params$n_eff_tail[rows_of_main_parameters_in_diagnostics]
-                  Min_ESS_tail_main <- if (length(x = main_ess_tail_values) > 0 &&
+                        summary_tibble_main_params$n_eff_tail[rows_of_main_parameters_for_ESS]
+                  Min_ESS_tail_main <-  if (length(x = main_ess_tail_values) > 0 &&
                                            all(is.finite(x = main_ess_tail_values))) {
                       min(main_ess_tail_values)
                   } else NA_real_
+                  ##
+                  ## ---- primary: the min ESS over the parameters of interest, which every efficiency
+                  ##      measure below uses, whatever the burn-in adaptation block (main, joint or
+                  ##      interest_only), so that fits with different blocks are compared on the same
+                  ##      parameters. The parameters of interest are the main parameters of
+                  ##      parameter_families_of_interest_for_min_ESS ($sample(); NULL there = interest_only,
+                  ##      else the built-in LC_MVP / LC_MVOP set, else every main parameter). The secondary
+                  ##      min ESS (Min_ESS_main above) is over every main parameter, i.e. the parameters block
+                  ##      except the nuisance parameters:
+                  ##
+                  fn_smallest_value_or_NA <-  function(values) {
+
+                        if (length(x = values) > 0 && all(is.finite(x = values))) min(values) else NA_real_
+                  }
+
+                  parameter_families_of_interest_for_min_ESS <-
+                        model_results$parameter_families_of_interest_for_min_ESS
+                  rows_of_parameters_of_interest <-  rows_of_main_parameters_for_ESS
+                  if (length(x = parameter_families_of_interest_for_min_ESS) > 0) {
+                        names_of_main_parameters_for_ESS <-
+                              summary_tibble_main_params$parameter[rows_of_main_parameters_for_ESS]
+                        families_of_main_parameters_for_ESS <-
+                              sub(pattern = "[.\\[].*$", replacement = "",
+                                  x = names_of_main_parameters_for_ESS)
+                        is_parameter_of_interest <-  families_of_main_parameters_for_ESS %in%
+                                                     parameter_families_of_interest_for_min_ESS
+                        if (!any(is_parameter_of_interest)) {
+                              stop(paste0("parameter_families_of_interest_for_min_ESS: ",
+                                          paste(parameter_families_of_interest_for_min_ESS, collapse = ", "),
+                                          " match(es) no main parameter; the main parameter families are: ",
+                                          paste(unique(families_of_main_parameters_for_ESS),
+                                                collapse = ", "), "."))
+                        }
+                        rows_of_parameters_of_interest <-  rows_of_main_parameters_for_ESS[
+                              is_parameter_of_interest]
+                  }
+                  Min_ESS_parameters_of_interest <-  fn_smallest_value_or_NA(
+                        summary_tibble_main_params$n_eff[rows_of_parameters_of_interest])
+                  Min_ESS_sd_parameters_of_interest <-  fn_smallest_value_or_NA(
+                        summary_tibble_main_params$n_eff_sd[rows_of_parameters_of_interest])
+                  Min_ESS_tail_parameters_of_interest <-  fn_smallest_value_or_NA(
+                        summary_tibble_main_params$n_eff_tail[rows_of_parameters_of_interest])
+                  parameters_of_interest <-  summary_tibble_main_params$parameter[rows_of_parameters_of_interest]
+                  ##
+                  ## ---- tertiary: the min ESS over the joint block, i.e. every main parameter and the tracked
+                  ##      nuisance parameters; only with n_nuisance_to_track > 0 (otherwise no nuisance draws are
+                  ##      stored, so it stays NA):
+                  ##
+                  Min_ESS_joint <-  NA_real_
+                  Min_ESS_sd_joint <-  NA_real_
+                  Min_ESS_tail_joint <-  NA_real_
+                  if (!is.null(nuisance_trace)) {
+                        Min_ESS_of_tracked_nuisance_by_type <-  tryCatch(expr = {
+                              nuisance_trace_by_chain <-  if (is.list(nuisance_trace)) nuisance_trace else
+                                                          list(nuisance_trace)
+                              n_tracked_nuisance <-  NROW(nuisance_trace_by_chain[[1]])
+                              n_iterations_of_tracked_nuisance <-  NCOL(nuisance_trace_by_chain[[1]])
+                              tracked_nuisance_trace_array <-  array(dim = c(n_tracked_nuisance,
+                                                                             n_iterations_of_tracked_nuisance,
+                                                                             length(nuisance_trace_by_chain)))
+                              for (kk in seq_along(nuisance_trace_by_chain)) {
+                                    tracked_nuisance_trace_array[, , kk] <-
+                                          as.matrix(nuisance_trace_by_chain[[kk]])
+                              }
+                              summary_tibble_tracked_nuisance <-  generate_summary_tibble(
+                                    n_threads = n_cores,
+                                    trace = tracked_nuisance_trace_array,
+                                    param_names = paste0("nuisance[", seq_len(n_tracked_nuisance), "]"),
+                                    n_to_compute = n_tracked_nuisance,
+                                    compute_nested_rhat = FALSE,
+                                    n_chains = length(nuisance_trace_by_chain),
+                                    n_superchains = n_superchains,
+                                    nested_rhat_grouping = nested_rhat_grouping)
+                              c( bulk = fn_smallest_value_or_NA(summary_tibble_tracked_nuisance$n_eff),
+                                 tail = fn_smallest_value_or_NA(summary_tibble_tracked_nuisance$n_eff_tail),
+                                 sd   = fn_smallest_value_or_NA(summary_tibble_tracked_nuisance$n_eff_sd))
+                        }, error = function(condition) {
+
+                              message(paste0("min ESS (joint) not computed: ", conditionMessage(condition)))
+                              c(bulk = NA_real_, tail = NA_real_, sd = NA_real_)
+                        })
+
+                        Min_ESS_joint <-  min(Min_ESS_main,
+                                              Min_ESS_of_tracked_nuisance_by_type[["bulk"]])
+                        Min_ESS_sd_joint <-  min(Min_ESS_sd_main,
+                                                 Min_ESS_of_tracked_nuisance_by_type[["sd"]])
+                        Min_ESS_tail_joint <-  min(Min_ESS_tail_main,
+                                                   Min_ESS_of_tracked_nuisance_by_type[["tail"]])
+                  }
+                  ##
                   Max_rhat_main <- if (length(x = main_rhat_values) > 0 && !anyNA(x = main_rhat_values))
                       max(main_rhat_values) else NA_real_
                   Max_nested_rhat_main <- NULL
@@ -1318,7 +1705,8 @@ create_summary_and_traces <- function(    model_results,
                      #                                                               n_params_main_constrained)]
                      main_nested_rhat_values <-
                            summary_tibble_main_params$n_Rhat[rows_of_main_parameters_in_diagnostics]
-                     Max_nested_rhat_main <- if (length(x = main_nested_rhat_values) > 0 && !anyNA(x = main_nested_rhat_values))
+                     Max_nested_rhat_main <- if (length(x = main_nested_rhat_values) > 0 &&
+                                                 !anyNA(x = main_nested_rhat_values))
                          max(main_nested_rhat_values) else NA_real_
                   } 
                         
@@ -1452,7 +1840,7 @@ create_summary_and_traces <- function(    model_results,
                                         parameters = names_total)
          ##
          try({
-           summaries_toc_result <- tictoc::toc(log = TRUE)
+           summaries_toc_result <-  tictoc::toc(log = TRUE)
            print(summaries_toc_result)
            tictoc::tic.clearlog()
            ## elapsed seconds straight from toc()'s numbers. Parsing the "X sec elapsed" text with "\\d+\\.\\d+"
@@ -1475,34 +1863,60 @@ create_summary_and_traces <- function(    model_results,
             message(((paste("L (main) = L_main_during_sampling", round(L_main_during_sampling, 1)))))
          })
       
-         ESS_per_sec_samp <- Min_ESS_main / time_sampling
-         ESS_per_sec_total <- Min_ESS_main / time_total
-         ESS_sd_per_sec_samp <- if (is.null(Min_ESS_sd_main)) NA_real_ else Min_ESS_sd_main / time_sampling
-         ESS_sd_per_sec_total <- if (is.null(Min_ESS_sd_main)) NA_real_ else Min_ESS_sd_main / time_total
-         Min_ess_sd_per_grad_main_samp <- NA_real_
+         # ESS_per_sec_samp <- Min_ESS_main / time_sampling
+         # ESS_per_sec_total <- Min_ESS_main / time_total
+         # ESS_sd_per_sec_samp <-  if (is.null(Min_ESS_sd_main)) NA_real_ else Min_ESS_sd_main / time_sampling
+         # ESS_sd_per_sec_total <-  if (is.null(Min_ESS_sd_main)) NA_real_ else Min_ESS_sd_main / time_total
+         ## (over the parameters of interest)
+         ESS_per_sec_samp <- Min_ESS_parameters_of_interest / time_sampling
+         ESS_per_sec_total <- Min_ESS_parameters_of_interest / time_total
+         ESS_sd_per_sec_samp <-  if (is.null(Min_ESS_sd_parameters_of_interest)) NA_real_ else
+                                       Min_ESS_sd_parameters_of_interest / time_sampling
+         ESS_sd_per_sec_total <-  if (is.null(Min_ESS_sd_parameters_of_interest)) NA_real_ else
+                                        Min_ESS_sd_parameters_of_interest / time_total
+         Min_ess_sd_per_grad_main_samp <-  NA_real_
         
          try({
             message(((paste("Max R-hat (parameters block, main only) = ", round(Max_rhat_main, 4)))))
          }, silent = TRUE)
          try({
-            message(((paste("Max nested R-hat (parameters block, main only) = ", round(Max_nested_rhat_main, 4)))))
+            message(((paste( "Max nested R-hat (parameters block, main only) = ",
+                             round(Max_nested_rhat_main, 4)))))
          }, silent = TRUE)
          try({
-            message(((paste("Min ESS (parameters block, main only) = ", round(Min_ESS_main, 0)))))
+            ## primary (every efficiency measure from here on uses it), secondary and tertiary min ESS:
+            message(paste0("Min ESS (parameters of interest: ",
+                           if (length(x = parameter_families_of_interest_for_min_ESS) > 0) {
+                                 paste(parameter_families_of_interest_for_min_ESS, collapse = ", ")
+                           } else "every main parameter", ") = ", round(Min_ESS_parameters_of_interest, 0),
+                           " (tail ", round(Min_ESS_tail_parameters_of_interest, 0), ", ESS(theta^2) ",
+                           round(Min_ESS_sd_parameters_of_interest, 0), ")"))
+            message(paste0("Min ESS (main only: every main parameter, i.e. the parameters block except the ",
+                           "nuisance parameters) = ", round(Min_ESS_main, 0)))
+            message(paste0("Min ESS (joint: every main parameter and the tracked nuisance parameters) = ",
+                           if (is.na(Min_ESS_joint)) "not computed (no nuisance parameters tracked)" else
+                                 round(Min_ESS_joint, 0)))
             ##
-            message(((paste("Min ESS / sec [samp.] (parameters block, main only) = ", signif(ESS_per_sec_samp, 3)))))
-            message(((paste("Min ESS / sec [overall] (parameters block, main only) = ", signif(ESS_per_sec_total, 3)))))
+            # message(((paste("Min ESS / sec [samp.] (parameters block, main only) = ",
+            #                 signif(ESS_per_sec_samp, 3)))))
+            # message(((paste("Min ESS / sec [overall] (parameters block, main only) = ",
+            #                 signif(ESS_per_sec_total, 3)))))
+            message(paste0("Min ESS / sec [samp.] (parameters of interest) = ", signif(ESS_per_sec_samp, 3)))
+            message(paste0("Min ESS / sec [overall] (parameters of interest) = ", signif(ESS_per_sec_total, 3)))
          }, silent = TRUE)
          try({
-            message(((paste("Min ESS(theta^2) [posterior SD's ESS] (parameters block, main only) = ", round(Min_ESS_sd_main, 0)))))
-            message(((paste("Min ESS(theta^2) / sec [samp.] (parameters block, main only) = ", signif(ESS_sd_per_sec_samp, 3)))))
+            message(((paste("Min ESS(theta^2) [posterior SD's ESS] (parameters block, main only) = ",
+                            round(Min_ESS_sd_main, 0)))))
+            message(((paste("Min ESS(theta^2) / sec [samp.] (parameters block, main only) = ",
+                            signif(ESS_sd_per_sec_samp, 3)))))
          }, silent = TRUE)
          try({ 
             L_main_during_sampling <- (EHMC_args_as_Rcpp_List$tau_main / EHMC_args_as_Rcpp_List$eps_main)
             ## n_grad_evals_sampling_main <- L_main_during_sampling * n_iter * n_chains_sampling
-            ## executed gradients: the sampler takes L_ii = max(1, ceiling(tau_ii / eps)) steps with tau_ii ~ U(0, 2 * tau) when the
-            ## sampling trajectory length is randomised, so the expected count per iteration is
-            ## ( f * (f + 1) / 2 + (a - f) * (f + 1) ) / a with a = 2 * tau / eps and f = floor(a) (max(1, ceiling(tau / eps)) without jitter):
+            ## executed gradients: the sampler takes L_ii = max(1, ceiling(tau_ii / eps)) steps with tau_ii ~ U(0,
+            ## 2 * tau) when the sampling trajectory length is randomised, so the expected count per iteration is
+            ## ( f * (f + 1) / 2 + (a - f) * (f + 1) ) / a with a = 2 * tau / eps and f = floor(a) (max(1,
+            ## ceiling(tau / eps)) without jitter):
             ## L_main_expected_steps_sampling <- if (is.null(EHMC_args_as_Rcpp_List$randomize_tau) || isTRUE(EHMC_args_as_Rcpp_List$randomize_tau)) {
             ##       upper_bound_in_steps <- 2 * L_main_during_sampling
             ##       whole_steps_below_upper_bound <- floor(upper_bound_in_steps)
@@ -1511,45 +1925,70 @@ create_summary_and_traces <- function(    model_results,
             ## } else max(1, ceiling(L_main_during_sampling))
             ## n_grad_evals_sampling_main <- L_main_expected_steps_sampling * n_iter * n_chains_sampling
             ##
-            ## gradient EVALUATIONS per chain for the native sampling path (runtime/MCMC; one sampling call per chain covers all
-            ## n_iter iterations and the endpoint-reuse flag lives for that call):
-            ##     main-only (no nuisance) or standard joint HMC (diffusion off, not partitioned):  (E[L] + 1) * n_iter
-            ##     joint diffusion, kick_flow_kick (endpoint gradient reused):                       E[L] * n_iter + 1
-            ##     joint diffusion, flow_kick_flow:                                                  (E[L] + 1) * n_iter + 1
-            ##     partitioned:  (E[L_main] + 1) * n_iter main, and (E[L_us] + 1) * n_iter nuisance (below)
-            ## with E[L] = E[max(1, ceiling(tau_ii / eps))], tau_ii ~ U(0, 2 * max(tau, eps)) (the sampler raises tau to eps first):
-            fn_expected_leapfrog_steps_sampling <- function(tau, eps, randomize_tau_sampling) {
-                  steps_nominal <- max(tau, eps) / eps
+            ## gradient EVALUATIONS per chain for the native sampling path (runtime/MCMC; one sampling call per
+            ## chain covers all n_iter iterations and the endpoint-reuse flag lives for that call):
+            ##     main-only (no nuisance) or standard joint HMC (diffusion off, not partitioned):  (E[L] + 1) *
+            ##     n_iter
+            ##     joint diffusion, kick_flow_kick (endpoint gradient reused):                       E[L] * n_iter
+            ##       + 1
+            ##     joint diffusion, flow_kick_flow:                                                  (E[L] + 1) *
+            ##     n_iter + 1 partitioned:  (E[L_main] + 1) * n_iter main, and (E[L_us] + 1) * n_iter nuisance
+            ##     (below)
+            ## with E[L] = E[max(1, ceiling(tau_ii / eps))], tau_ii ~ U(0, 2 * max(tau, eps)) (the sampler raises
+            ## tau to eps first):
+            fn_expected_leapfrog_steps_sampling <-  function(tau, eps, randomize_tau_sampling) {
+
+                  steps_nominal <-  max(tau, eps) / eps
                   if (!isTRUE(randomize_tau_sampling)) return(max(1, ceiling(steps_nominal)))
-                  upper_bound_in_steps <- 2 * steps_nominal
-                  whole_steps_below_upper_bound <- floor(upper_bound_in_steps)
+                  upper_bound_in_steps <-  2 * steps_nominal
+                  whole_steps_below_upper_bound <-  floor(upper_bound_in_steps)
                   return(( whole_steps_below_upper_bound * (whole_steps_below_upper_bound + 1) / 2 +
-                           (upper_bound_in_steps - whole_steps_below_upper_bound) * (whole_steps_below_upper_bound + 1) ) / upper_bound_in_steps)
+                           (upper_bound_in_steps - whole_steps_below_upper_bound) *
+                           (whole_steps_below_upper_bound + 1) ) / upper_bound_in_steps)
             }
-            randomize_tau_sampling_used <- if (!is.null(model_results$randomize_tau_sampling)) {
+
+            randomize_tau_sampling_used <-  if (!is.null(model_results$randomize_tau_sampling)) {
                   isTRUE(model_results$randomize_tau_sampling)
             } else (is.null(EHMC_args_as_Rcpp_List$randomize_tau) || isTRUE(EHMC_args_as_Rcpp_List$randomize_tau))
-            diffusion_HMC_integrator_used <- if (is.null(EHMC_args_as_Rcpp_List$diffusion_HMC_integrator)) "kick_flow_kick" else EHMC_args_as_Rcpp_List$diffusion_HMC_integrator
-            has_nuisance_parameters <- isTRUE(sample_nuisance) && isTRUE(n_nuisance > 0)
-            is_joint_diffusion_path <- has_nuisance_parameters && isTRUE(diffusion_HMC) && !isTRUE(partitioned_HMC)
-            endpoint_evaluations_per_iteration <- if (is_joint_diffusion_path && identical(diffusion_HMC_integrator_used, "kick_flow_kick")) 0 else 1
-            start_of_call_evaluations_per_chain <- if (is_joint_diffusion_path) 1 else 0
-            L_main_expected_steps_sampling <- fn_expected_leapfrog_steps_sampling( tau = EHMC_args_as_Rcpp_List$tau_main,
-                                                                                   eps = EHMC_args_as_Rcpp_List$eps_main,
-                                                                                   randomize_tau_sampling = randomize_tau_sampling_used)
-            n_grad_evals_sampling_main <- ((L_main_expected_steps_sampling + endpoint_evaluations_per_iteration) * n_iter + start_of_call_evaluations_per_chain) * n_chains_sampling
-            Min_ess_per_grad_main_samp <-  Min_ESS_main / n_grad_evals_sampling_main
-            Min_ess_sd_per_grad_main_samp <-  Min_ESS_sd_main / n_grad_evals_sampling_main
+            diffusion_HMC_integrator_used <-  if (is.null(EHMC_args_as_Rcpp_List$diffusion_HMC_integrator))
+                                                  "kick_flow_kick" else
+                                              EHMC_args_as_Rcpp_List$diffusion_HMC_integrator
+            has_nuisance_parameters <-  isTRUE(sample_nuisance) && isTRUE(n_nuisance > 0)
+            is_joint_diffusion_path <-  has_nuisance_parameters && isTRUE(diffusion_HMC) &&
+                                        !isTRUE(partitioned_HMC)
+            endpoint_evaluations_per_iteration <-  if (is_joint_diffusion_path &&
+                                                       identical(diffusion_HMC_integrator_used, "kick_flow_kick"))
+                                                       0 else 1
+            start_of_call_evaluations_per_chain <-  if (is_joint_diffusion_path) 1 else 0
+            L_main_expected_steps_sampling <-  fn_expected_leapfrog_steps_sampling(
+                tau =
+                     EHMC_args_as_Rcpp_List$tau_main,
+                eps =
+                    EHMC_args_as_Rcpp_List$eps_main,
+                randomize_tau_sampling =
+                    randomize_tau_sampling_used)
+            n_grad_evals_sampling_main <- ((L_main_expected_steps_sampling + endpoint_evaluations_per_iteration) *
+                                           n_iter + start_of_call_evaluations_per_chain) * n_chains_sampling
+            # Min_ess_per_grad_main_samp <-  Min_ESS_main / n_grad_evals_sampling_main
+            # Min_ess_sd_per_grad_main_samp <-  Min_ESS_sd_main / n_grad_evals_sampling_main
+            Min_ess_per_grad_main_samp <-  Min_ESS_parameters_of_interest / n_grad_evals_sampling_main
+            Min_ess_sd_per_grad_main_samp <-  Min_ESS_sd_parameters_of_interest / n_grad_evals_sampling_main
          }, silent = TRUE)
          try({
             L_us_during_sampling <- (EHMC_args_as_Rcpp_List$tau_us / EHMC_args_as_Rcpp_List$eps_us)
             ## n_grad_evals_sampling_us <-  L_us_during_sampling  * n_iter * n_chains_sampling
-            ## nuisance gradient evaluations (partitioned path): expected executed steps at tau_us / eps_us + 1 per iteration:
-            L_us_expected_steps_sampling <- fn_expected_leapfrog_steps_sampling( tau = EHMC_args_as_Rcpp_List$tau_us,
-                                                                                 eps = EHMC_args_as_Rcpp_List$eps_us,
-                                                                                 randomize_tau_sampling = randomize_tau_sampling_used)
+            ## nuisance gradient evaluations (partitioned path): expected executed steps at tau_us / eps_us + 1
+            ## per iteration:
+            L_us_expected_steps_sampling <-  fn_expected_leapfrog_steps_sampling(
+                tau =
+                     EHMC_args_as_Rcpp_List$tau_us,
+                eps =
+                    EHMC_args_as_Rcpp_List$eps_us,
+                randomize_tau_sampling =
+                    randomize_tau_sampling_used)
             n_grad_evals_sampling_us <-  (L_us_expected_steps_sampling + 1) * n_iter * n_chains_sampling
-            Min_ess_per_grad_us_samp <-  Min_ESS_main / n_grad_evals_sampling_us
+            # Min_ess_per_grad_us_samp <-  Min_ESS_main / n_grad_evals_sampling_us
+            Min_ess_per_grad_us_samp <-  Min_ESS_parameters_of_interest / n_grad_evals_sampling_us
          }, silent = TRUE)
          try({ 
                 if (partitioned_HMC == TRUE) { ## i.e. if nuisance are sampledseperately 
@@ -1569,21 +2008,27 @@ create_summary_and_traces <- function(    model_results,
                                                       (weight_nuisance_grad + weight_main_grad)
                 }
                 
-            message(((paste("Min ESS / grad [samp., weighted] (parameters block, main only) = ", signif(1000 *  Min_ess_per_grad_samp_weighted, 3)))))
+            message(((paste( "Min ESS / grad [samp., weighted] (parameters block, main only) = ",
+                             signif(1000 *  Min_ess_per_grad_samp_weighted, 3)))))
          }, silent = TRUE)
          try({
-            message(((paste("Min ESS(theta^2) / grad [samp.] (parameters block, main only) = ", signif(1000 *  Min_ess_sd_per_grad_main_samp, 3)))))
+            message(((paste("Min ESS(theta^2) / grad [samp.] (parameters block, main only) = ",
+                            signif(1000 *  Min_ess_sd_per_grad_main_samp, 3)))))
          }, silent = TRUE)
          try({ 
             grad_evals_per_sec <- ESS_per_sec_samp / Min_ess_per_grad_samp_weighted
-            message(((paste("Grad evals / sec [samp.] (parameters block, main only) = ", signif(grad_evals_per_sec, 3)))))
+            message(((paste( "Grad evals / sec [samp.] (parameters block, main only) = ",
+                             signif(grad_evals_per_sec, 3)))))
          }, silent = TRUE)
          ##
          try({ 
                 sampling_time_to_Min_ESS <- time_sampling
-                sampling_time_to_100_ESS <- (100 / Min_ESS_main) * sampling_time_to_Min_ESS
-                sampling_time_to_1000_ESS <- (1000 / Min_ESS_main) * sampling_time_to_Min_ESS
-                sampling_time_to_10000_ESS <- (10000 / Min_ESS_main) * sampling_time_to_Min_ESS
+                # sampling_time_to_100_ESS <- (100 / Min_ESS_main) * sampling_time_to_Min_ESS
+                sampling_time_to_100_ESS <- (100 / Min_ESS_parameters_of_interest) * sampling_time_to_Min_ESS
+                # sampling_time_to_1000_ESS <- (1000 / Min_ESS_main) * sampling_time_to_Min_ESS
+                sampling_time_to_1000_ESS <- (1000 / Min_ESS_parameters_of_interest) * sampling_time_to_Min_ESS
+                # sampling_time_to_10000_ESS <- (10000 / Min_ESS_main) * sampling_time_to_Min_ESS
+                sampling_time_to_10000_ESS <- (10000 / Min_ESS_parameters_of_interest) * sampling_time_to_Min_ESS
                 
                 ## w/o summary time
                 total_time_to_100_ESS_wo_summaries <-   time_burnin + sampling_time_to_100_ESS
@@ -1593,9 +2038,12 @@ create_summary_and_traces <- function(    model_results,
                 ## w/ summary time (note: assuming that time_summaries scales linearly w/ 
                 # the min ESS required (i.e. n_iter and/or n_chains_sampling) Might be over-estimate)
                 summary_time_to_Min_ESS <- time_summaries
-                summary_time_to_100_ESS <- (100 / Min_ESS_main) * summary_time_to_Min_ESS
-                summary_time_to_1000_ESS <- (1000 / Min_ESS_main) * summary_time_to_Min_ESS
-                summary_time_to_10000_ESS <- (10000 / Min_ESS_main) * summary_time_to_Min_ESS
+                # summary_time_to_100_ESS <- (100 / Min_ESS_main) * summary_time_to_Min_ESS
+                summary_time_to_100_ESS <- (100 / Min_ESS_parameters_of_interest) * summary_time_to_Min_ESS
+                # summary_time_to_1000_ESS <- (1000 / Min_ESS_main) * summary_time_to_Min_ESS
+                summary_time_to_1000_ESS <- (1000 / Min_ESS_parameters_of_interest) * summary_time_to_Min_ESS
+                # summary_time_to_10000_ESS <- (10000 / Min_ESS_main) * summary_time_to_Min_ESS
+                summary_time_to_10000_ESS <- (10000 / Min_ESS_parameters_of_interest) * summary_time_to_Min_ESS
                 
                 total_time_to_100_ESS_with_summaries <-   time_burnin + sampling_time_to_100_ESS   + summary_time_to_100_ESS
                 total_time_to_1000_ESS_with_summaries <-  time_burnin + sampling_time_to_1000_ESS  + summary_time_to_1000_ESS
@@ -1633,7 +2081,8 @@ create_summary_and_traces <- function(    model_results,
                                     trace_generated_quantities_tibble = trace_generated_quantities_tibble)
          ##
          HMC_info <- list(  tau_main = EHMC_args_as_Rcpp_List$tau_main,
-                            tau_jitter_sampling_type = if (is.null(model_results$tau_jitter_sampling_type)) "uniform" else model_results$tau_jitter_sampling_type,
+                            tau_jitter_sampling_type = if (is.null(model_results$tau_jitter_sampling_type))
+                                                           "uniform" else model_results$tau_jitter_sampling_type,
                             eps_main = EHMC_args_as_Rcpp_List$eps_main,
                             tau_us = EHMC_args_as_Rcpp_List$tau_us,
                             eps_us = EHMC_args_as_Rcpp_List$eps_us,
@@ -1658,11 +2107,14 @@ create_summary_and_traces <- function(    model_results,
                             n_superchains = n_superchains,
                             nested_rhat_grouping = nested_rhat_grouping,
                             burnin_schedule = model_results$burnin_schedule,
-                            ## pooled metric estimator settings as the sampler reported them (NULL for a run made before they existed):
+                            ## pooled metric estimator settings as the sampler reported them (NULL for a run made
+                            ## before they existed):
                             metric_estimator = model_results$metric_estimator,
                             metric_pooled_window_resets = model_results$metric_pooled_window_resets,
-                            metric_pooled_window_reset_iterations = model_results$metric_pooled_window_reset_iterations,
-                            metric_pooled_offdiagonal_shrinkage = model_results$metric_pooled_offdiagonal_shrinkage,
+                            metric_pooled_window_reset_iterations =
+                                model_results$metric_pooled_window_reset_iterations,
+                            metric_pooled_offdiagonal_shrinkage =
+                                model_results$metric_pooled_offdiagonal_shrinkage,
                             interval_width_main = interval_width_main,
                             interval_width_nuisance = interval_width_nuisance,
                             force_autodiff = force_autodiff,
@@ -1692,21 +2144,22 @@ create_summary_and_traces <- function(    model_results,
           ##      class model), from their per-quantity values (NicoStan's C++ diagnostics); quantities with an
           ##      undefined ESS (draws that never change) are left out and counted:
           ##
-          Min_ESS_gq <- NA_real_
-          Min_ESS_tail_gq <- NA_real_
-          Min_ESS_sd_gq <- NA_real_
-          n_gq_with_an_undefined_ESS_left_out <- NA_real_
+          Min_ESS_gq <-  NA_real_
+          Min_ESS_tail_gq <-  NA_real_
+          Min_ESS_sd_gq <-  NA_real_
+          n_gq_with_an_undefined_ESS_left_out <-  NA_real_
           try({
                 if (!is.null(summary_tibble_generated_quantities) &&
                     nrow(summary_tibble_generated_quantities) > 0) {
-                      gq_ESS_defined <- is.finite(summary_tibble_generated_quantities$n_eff) &
+                      gq_ESS_defined <-  is.finite(summary_tibble_generated_quantities$n_eff) &
                                         is.finite(summary_tibble_generated_quantities$n_eff_tail) &
                                         is.finite(summary_tibble_generated_quantities$n_eff_sd)
-                      n_gq_with_an_undefined_ESS_left_out <- sum(!gq_ESS_defined)
+                      n_gq_with_an_undefined_ESS_left_out <-  sum(!gq_ESS_defined)
                       if (any(gq_ESS_defined)) {
-                            Min_ESS_gq <- min(summary_tibble_generated_quantities$n_eff[gq_ESS_defined])
-                            Min_ESS_tail_gq <- min(summary_tibble_generated_quantities$n_eff_tail[gq_ESS_defined])
-                            Min_ESS_sd_gq <- min(summary_tibble_generated_quantities$n_eff_sd[gq_ESS_defined])
+                            Min_ESS_gq <-  min(summary_tibble_generated_quantities$n_eff[gq_ESS_defined])
+                            Min_ESS_tail_gq <-
+                                min(summary_tibble_generated_quantities$n_eff_tail[gq_ESS_defined])
+                            Min_ESS_sd_gq <-  min(summary_tibble_generated_quantities$n_eff_sd[gq_ESS_defined])
                       }
                 }
           }, silent = TRUE)
@@ -1717,25 +2170,29 @@ create_summary_and_traces <- function(    model_results,
           ##      (pre_burnin_L steps at each of its iterations, or its recorded L history when its trajectory
           ##      length was set in tau units):
           ##
-          n_grad_evals_main_burnin <- NA_real_
-          n_grad_evals_pre_burnin <- NA_real_
+          n_grad_evals_main_burnin <-  NA_real_
+          n_grad_evals_pre_burnin <-  NA_real_
           try({
-                randomize_tau_burnin_used <- !isFALSE(model_results$randomize_tau_burnin)
-                fn_expected_executed_leapfrog_steps_at_L <- function(L) {
+                randomize_tau_burnin_used <-  !isFALSE(model_results$randomize_tau_burnin)
+                fn_expected_executed_leapfrog_steps_at_L <-  function(L) {
+
                       fn_expected_leapfrog_steps_sampling( tau = L,
                                                            eps = 1,
                                                            randomize_tau_sampling = randomize_tau_burnin_used)
                 }
-                fn_burnin_gradient_evaluations_of_L_history <- function(L_recorded) {
-                      L_recorded <- as.numeric(L_recorded)
+
+                fn_burnin_gradient_evaluations_of_L_history <-  function(L_recorded) {
+
+                      L_recorded <-  as.numeric(L_recorded)
                       if (length(L_recorded) == 0 || anyNA(L_recorded)) return(NA_real_)
-                      L_in_force <- pmax(1, c(1, L_recorded[-length(L_recorded)]))
+                      L_in_force <-  pmax(1, c(1, L_recorded[-length(L_recorded)]))
                       n_chains_burnin * sum(vapply(X = L_in_force, FUN = fn_expected_executed_leapfrog_steps_at_L,
                                                    FUN.VALUE = numeric(1)))
                 }
-                n_grad_evals_main_burnin <- fn_burnin_gradient_evaluations_of_L_history(
+
+                n_grad_evals_main_burnin <-  fn_burnin_gradient_evaluations_of_L_history(
                                                   burnin_object$L_main_during_burnin_vec)
-                n_grad_evals_pre_burnin <- if (!isTRUE(model_results$pre_burnin_n_iter_run > 0)) {
+                n_grad_evals_pre_burnin <-  if (!isTRUE(model_results$pre_burnin_n_iter_run > 0)) {
                       0
                 } else if (is.numeric(model_results$pre_burnin_L) && length(model_results$pre_burnin_L) == 1) {
                       n_chains_burnin * model_results$pre_burnin_n_iter_run *
@@ -1745,21 +2202,57 @@ create_summary_and_traces <- function(    model_results,
                             model_results$pre_burnin_L_main_during_burnin_vec)
                 }
           }, silent = TRUE)
-          n_grad_evals_burnin <- n_grad_evals_main_burnin + n_grad_evals_pre_burnin
+          ## (+ the gradient evaluations of the Hessian main metric's updates, metric_type_main = "Hessian";
+          ##  0 otherwise)
+          n_grad_evals_Hessian_metric_burnin <-  if (is.numeric(burnin_object$n_grad_evals_Hessian_metric)) {
+                burnin_object$n_grad_evals_Hessian_metric
+          } else 0
+          ## (+ the gradient evaluations of the eps calibration on the sampling chains, between the burn-in and
+          ##  the sampling (R_fn_calibrate_eps_on_sampling_chains_to_adapt_delta.R): each block is n_iter
+          ##  iterations of every sampling chain at the block's eps, counted as the sampling's are; 0 without
+          ##  the calibration)
+          n_grad_evals_eps_calibration_on_sampling_chains <-  0
+          eps_calibration_on_sampling_chains <-  model_results$eps_calibration_on_sampling_chains
+          if (!is.null(eps_calibration_on_sampling_chains)) {
+                n_grad_evals_eps_calibration_on_sampling_chains <-  NA_real_
+                try({
+                      blocks <-  eps_calibration_on_sampling_chains$blocks
+                      n_grad_evals_of_blocks <-  rep(x = NA_real_, times = nrow(blocks))
+                      for (block_row in seq_len(nrow(blocks))) {
+                            L_main_expected_steps_of_block <-  fn_expected_leapfrog_steps_sampling(
+                                  tau = eps_calibration_on_sampling_chains$tau_main,
+                                  eps = blocks$eps_main[block_row],
+                                  randomize_tau_sampling = randomize_tau_sampling_used)
+                            n_grad_evals_of_blocks[block_row] <-
+                                  ((L_main_expected_steps_of_block + endpoint_evaluations_per_iteration) *
+                                   blocks$n_iter[block_row] + start_of_call_evaluations_per_chain) *
+                                  blocks$n_chains[block_row]
+                      }
+                      n_grad_evals_eps_calibration_on_sampling_chains <-  sum(n_grad_evals_of_blocks)
+                }, silent = TRUE)
+          }
+          # n_grad_evals_burnin <- n_grad_evals_main_burnin + n_grad_evals_pre_burnin
+          # n_grad_evals_burnin <-  n_grad_evals_main_burnin + n_grad_evals_pre_burnin +
+          #                        n_grad_evals_Hessian_metric_burnin
+          n_grad_evals_burnin <-  n_grad_evals_main_burnin + n_grad_evals_pre_burnin +
+                                 n_grad_evals_Hessian_metric_burnin +
+                                 n_grad_evals_eps_calibration_on_sampling_chains
           ##
           ## ---- ESS per sampling gradient evaluation (all sampling chains) for each ESS type:
           ##
-          n_grad_evals_sampling <- if (exists("n_grad_evals_sampling_main", inherits = FALSE)) {
+          n_grad_evals_sampling <-  if (exists("n_grad_evals_sampling_main", inherits = FALSE)) {
                 n_grad_evals_sampling_main
           } else NA_real_
-          if (!exists("Min_ess_per_grad_main_samp", inherits = FALSE)) Min_ess_per_grad_main_samp <- NA_real_
-          fn_ESS_per_sampling_gradient <- function(ESS) {
+          if (!exists("Min_ess_per_grad_main_samp", inherits = FALSE)) Min_ess_per_grad_main_samp <-  NA_real_
+          fn_ESS_per_sampling_gradient <-  function(ESS) {
+
                 if (is.null(ESS)) NA_real_ else ESS / n_grad_evals_sampling
           }
-          Min_ess_tail_per_grad_main_samp <- fn_ESS_per_sampling_gradient(Min_ESS_tail_main)
-          Min_ess_per_grad_gq_samp <- fn_ESS_per_sampling_gradient(Min_ESS_gq)
-          Min_ess_tail_per_grad_gq_samp <- fn_ESS_per_sampling_gradient(Min_ESS_tail_gq)
-          Min_ess_sd_per_grad_gq_samp <- fn_ESS_per_sampling_gradient(Min_ESS_sd_gq)
+
+          Min_ess_tail_per_grad_main_samp <-  fn_ESS_per_sampling_gradient(Min_ESS_tail_main)
+          Min_ess_per_grad_gq_samp <-  fn_ESS_per_sampling_gradient(Min_ESS_gq)
+          Min_ess_tail_per_grad_gq_samp <-  fn_ESS_per_sampling_gradient(Min_ESS_tail_gq)
+          Min_ess_sd_per_grad_gq_samp <-  fn_ESS_per_sampling_gradient(Min_ESS_sd_gq)
           try({
                 message(paste0("Min ESS (bulk / tail / theta^2) over the generated quantities = ",
                                round(Min_ESS_gq), " / ", round(Min_ESS_tail_gq), " / ", round(Min_ESS_sd_gq),
@@ -1782,9 +2275,27 @@ create_summary_and_traces <- function(    model_results,
                                                 Max_nested_rhat_main = Max_nested_rhat_main,
                                                 ##
                                                 Min_ESS_main = Min_ESS_main, 
+                                                ## the primary min ESS (over the parameters of interest; every
+                                                ## ESS rate and time to a target ESS uses it) and the tertiary one
+                                                ## (joint: every main parameter and the tracked nuisance
+                                                ## parameters; NA when none are tracked):
+                                                Min_ESS_parameters_of_interest = Min_ESS_parameters_of_interest,
+                                                Min_ESS_tail_parameters_of_interest =
+                                                      Min_ESS_tail_parameters_of_interest,
+                                                Min_ESS_sd_parameters_of_interest =
+                                                      Min_ESS_sd_parameters_of_interest,
+                                                parameters_of_interest = parameters_of_interest,
+                                                parameter_families_of_interest_for_min_ESS =
+                                                      parameter_families_of_interest_for_min_ESS,
+                                                Min_ESS_joint = Min_ESS_joint,
+                                                Min_ESS_tail_joint = Min_ESS_tail_joint,
+                                                Min_ESS_sd_joint = Min_ESS_sd_joint,
+                                                tau_adaptation_block =
+                                                      model_results$burnin_object$tau_adaptation_block,
                                                 ESS_per_sec_samp = ESS_per_sec_samp, 
                                                 ESS_per_sec_total = ESS_per_sec_total,
-                                                ## the posterior SD's ESS (n_eff_sd) and its rates, alongside the bulk ones above (Enzo, 4 Oct 2026):
+                                                ## the posterior SD's ESS (n_eff_sd) and its rates, alongside the
+                                                ## bulk ones above:
                                                 Min_ESS_sd_main = Min_ESS_sd_main,
                                                 ESS_sd_per_sec_samp = ESS_sd_per_sec_samp,
                                                 ESS_sd_per_sec_total = ESS_sd_per_sec_total,
@@ -1796,17 +2307,22 @@ create_summary_and_traces <- function(    model_results,
                                                 time_total_wo_summaries = time_total_wo_summaries, 
                                                 time_total = time_total, 
                                                 ##
-                                                ## End-of-iteration adaptation settings; NULL for older burn-in objects.
+                                                ## End-of-iteration adaptation settings; NULL for older burn-in
+                                                ## objects.
                                                 L_main_during_burnin_vec = burnin_object$L_main_during_burnin_vec,
                                                 L_us_during_burnin_vec = burnin_object$L_us_during_burnin_vec,
-                                                tau_main_during_burnin_vec = burnin_object$tau_main_during_burnin_vec,
-                                                eps_main_during_burnin_vec = burnin_object$eps_main_during_burnin_vec,
+                                                tau_main_during_burnin_vec =
+                                                    burnin_object$tau_main_during_burnin_vec,
+                                                eps_main_during_burnin_vec =
+                                                    burnin_object$eps_main_during_burnin_vec,
                                                 tau_us_during_burnin_vec = burnin_object$tau_us_during_burnin_vec,
                                                 eps_us_during_burnin_vec = burnin_object$eps_us_during_burnin_vec,
                                                 ChEES_criterion_ema_vec = burnin_object$ChEES_criterion_ema_vec,
-                                                ChEES_per_tau_gradient_vec = burnin_object$ChEES_per_tau_gradient_vec,
+                                                ChEES_per_tau_gradient_vec =
+                                                    burnin_object$ChEES_per_tau_gradient_vec,
                                                 tau_adaptation_version = burnin_object$tau_adaptation_version,
-                                                tau_adaptation_iteration_vec = burnin_object$tau_adaptation_iteration_vec,
+                                                tau_adaptation_iteration_vec =
+                                                    burnin_object$tau_adaptation_iteration_vec,
                                                 L_main_during_burnin = L_main_during_burnin,
                                                 L_main_during_sampling = L_main_during_sampling,
                                                 L_us_during_burnin = L_us_during_burnin,
@@ -1830,6 +2346,7 @@ create_summary_and_traces <- function(    model_results,
                                                       total_time_to_10000_ESS_with_summaries,
                                                 ##
                                                 ## ---- ESS types per sampling gradient; gradient evaluations:
+##
                                                 Min_ESS_tail_main = Min_ESS_tail_main,
                                                 Min_ess_per_grad_main_samp = Min_ess_per_grad_main_samp,
                                                 Min_ess_tail_per_grad_main_samp = Min_ess_tail_per_grad_main_samp,
@@ -1844,6 +2361,10 @@ create_summary_and_traces <- function(    model_results,
                                                 n_grad_evals_sampling = n_grad_evals_sampling,
                                                 n_grad_evals_main_burnin = n_grad_evals_main_burnin,
                                                 n_grad_evals_pre_burnin = n_grad_evals_pre_burnin,
+                                                n_grad_evals_Hessian_metric_burnin =
+                                                      n_grad_evals_Hessian_metric_burnin,
+                                                n_grad_evals_eps_calibration_on_sampling_chains =
+                                                      n_grad_evals_eps_calibration_on_sampling_chains,
                                                 n_grad_evals_burnin = n_grad_evals_burnin)
           ##
           ## Final lists to output
@@ -1859,6 +2380,31 @@ create_summary_and_traces <- function(    model_results,
                   ##
                   for (kk in 1:n_chains_sampling) {
                     nuisance_trace[1:n_nuisance_names, 1:n_iter, kk] <- all_param_outs_trace[[kk]][1:n_nuisance_names, 1:n_iter]
+                  }
+                } else if (!is.null(nuisance_trace) && is.list(nuisance_trace) && length(nuisance_trace) > 0 &&
+                           NROW(nuisance_trace[[1]]) > 0) {
+                  ## (the nuisance blocks held by NicoStan (reduce_sum_chunked) are not in the model's
+                  ##  constrained output; they are unconstrained, so NicoStan's own nuisance draws are their
+                  ##  values: the blocks in the order of nuisance_params, each in Stan's order of its values)
+                  nuisance_draws_of_each_chain <-  nuisance_trace
+                  n_values <-  NROW(nuisance_draws_of_each_chain[[1]])
+                  n_iter_kept <-  NCOL(nuisance_draws_of_each_chain[[1]])
+                  nuisance_trace <-  array(dim = c(n_values, n_iter_kept, length(nuisance_draws_of_each_chain)))
+                  for (kk in seq_along(nuisance_draws_of_each_chain)) {
+                    nuisance_trace[, , kk] <-  as.matrix(nuisance_draws_of_each_chain[[kk]])
+                  }
+                  ## (a constrained block (e.g. matrix<lower=-7.5, upper=2.5> C_raw) is held on its unconstrained
+                  ##  scale: its draws are put back on its own, constrained scale with Stan's own transforms, as
+                  ##  Stan returns them; its rows: the blocks one after the other, each block's size worked out from
+                  ##  the data)
+                  nuisance_blocks_of_the_model <-  model_results$init_object$nuisance_blocks_held_by_NicoStan
+                  if (!is.null(nuisance_blocks_of_the_model$constraint) &&
+                      any(nzchar(nuisance_blocks_of_the_model$constraint))) {
+                    nuisance_trace <-  fn_nuisance_draws_on_the_constrained_scale(
+                                             nuisance_trace                    = nuisance_trace,
+                                             nuisance_blocks_held_by_NicoStan  = nuisance_blocks_of_the_model,
+                                             Stan_data_list                    =
+                                                   model_results$init_object$Stan_data_list)
                   }
                 } else {
                   nuisance_trace <- NULL
@@ -1884,7 +2430,8 @@ create_summary_and_traces <- function(    model_results,
           output_list <- list(  summaries = summaries, ### summary info (incl. efficiency info + divergences)
                                 adaptation = model_results[c("burnin_algorithm", "trajectory_adaptation_version",
                                                              "trajectory_criterion", "trajectory_coordinates",
-                                                             "trajectory_parameter_block", "tau_adaptation_enabled",
+                                                             "trajectory_parameter_block",
+                                                             "tau_adaptation_enabled",
                                                              "randomize_tau_burnin", "randomize_tau_sampling",
                                                              "bulk_local_tuner", "bulk_local_tuner_metadata")],
                                 traces = traces      ### trace arrays + trace tibbles

@@ -292,9 +292,9 @@ files_of_the_models_with_other_names = {
 }
 ## The note shown under a model's heading
 note_of_each_model = {
-    "stochastic_volatility_non_centred": "NicoStan writes its reduce_sum_chunked version itself, from "
+    "stochastic_volatility_non_centred": "NicoStan writes its nico_reduce_sum version itself, from "
                                          "nuisance_params.",
-    "stochastic_volatility_centred": "NicoStan writes its reduce_sum_chunked version itself, from "
+    "stochastic_volatility_centred": "NicoStan writes its nico_reduce_sum version itself, from "
                                      "nuisance_params.",
 }
 for title, model in benchmark_models:

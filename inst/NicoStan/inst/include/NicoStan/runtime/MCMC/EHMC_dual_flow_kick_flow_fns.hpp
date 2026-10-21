@@ -327,7 +327,8 @@ ALWAYS_INLINE void leapfrog_integrator_diag_M_diffusion_HMC_dual_flow_kick_flow_
                                     n_threads_WCP);
                 if (!std::isfinite(lp_and_grad_outs(0))) return;
                 velocity_main_vec_proposed_ref.array() +=
-                    eps * M_inv_main_vec.array() * lp_and_grad_outs.segment(1 + n_nuisance, n_params_main).array();
+                    eps * M_inv_main_vec.array() * lp_and_grad_outs.segment(1 + n_nuisance,
+                                               n_params_main).array();
                 velocity_us_vec_proposed_ref.array() +=
                     eps * M_inv_us_vec.array() * (lp_and_grad_outs.segment(1, n_nuisance).array()
                                                 + theta_us_vec_proposed_ref.array() - theta_hat_us_vec.array());
@@ -437,7 +438,8 @@ ALWAYS_INLINE void leapfrog_integrator_diag_M_diffusion_HMC_dual_Id_M_us_zero_th
                                     n_threads_WCP);
                 if (!std::isfinite(lp_and_grad_outs(0))) return;
                 velocity_main_vec_proposed_ref.array() +=
-                    eps * M_inv_main_vec.array() * lp_and_grad_outs.segment(1 + n_nuisance, n_params_main).array();
+                    eps * M_inv_main_vec.array() * lp_and_grad_outs.segment(1 + n_nuisance,
+                                               n_params_main).array();
                 velocity_us_vec_proposed_ref.array() +=
                     eps * (lp_and_grad_outs.segment(1, n_nuisance).array() + theta_us_vec_proposed_ref.array());
                 //// Full interior flows; the trajectory finishes with a half flow.

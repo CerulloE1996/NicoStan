@@ -20,7 +20,6 @@
  
  
  
-using namespace Eigen;
  
  
  
@@ -45,6 +44,7 @@ inline void fn_seed_burnin_rng(T &rng,
                                const int chain_id,
                                const int iteration,
                                const std::uint32_t parameter_block) {
+
     std::seed_seq seed_sequence{static_cast<std::uint32_t>(incoming_chain_seed),
                                static_cast<std::uint32_t>(chain_id),
                                static_cast<std::uint32_t>(iteration),
@@ -57,6 +57,7 @@ inline void fn_seed_burnin_rng(T &rng,
     const std::uint64_t combined_seed = (static_cast<std::uint64_t>(seed_words[0]) << 32) | seed_words[1];
     rng.seed(combined_seed);
 #endif
+
 }
 
 
@@ -66,6 +67,7 @@ inline void fn_seed_burnin_rng(T &rng,
 inline int fn_chain_seed_int(const std::uint64_t global_seed,
                              const int chain_id,
                              const std::uint32_t parameter_block) {
+
     std::seed_seq seed_sequence{static_cast<std::uint32_t>(global_seed & 0xffffffffULL),
                                static_cast<std::uint32_t>(global_seed >> 32),
                                static_cast<std::uint32_t>(chain_id),
@@ -73,6 +75,7 @@ inline int fn_chain_seed_int(const std::uint64_t global_seed,
     std::uint32_t seed_word[1];
     seed_sequence.generate(seed_word, seed_word + 1);
     return static_cast<int>(seed_word[0] & 0x7fffffffU);
+
 }
 
 // Sampling iterations: seed from separate tuple fields (chain seed, chain, iteration, block), as the
@@ -83,6 +86,7 @@ inline void fn_seed_sampling_rng(T &rng,
                                  const int chain_id,
                                  const int iteration,
                                  const std::uint32_t parameter_block) {
+
     std::seed_seq seed_sequence{static_cast<std::uint32_t>(incoming_chain_seed),
                                static_cast<std::uint32_t>(chain_id),
                                static_cast<std::uint32_t>(iteration),
@@ -95,6 +99,7 @@ inline void fn_seed_sampling_rng(T &rng,
     const std::uint64_t combined_seed = (static_cast<std::uint64_t>(seed_words[0]) << 32) | seed_words[1];
     rng.seed(combined_seed);
 #endif
+
 }
 
  
@@ -177,12 +182,16 @@ struct BurninTauJitterOverride {
 };
 
 inline BurninTauJitterOverride &fn_burnin_tau_jitter_override() {
+
     static thread_local BurninTauJitterOverride state;
     return state;
+
 }
 
 inline void fn_clear_burnin_tau_jitter_override() {
+
     fn_burnin_tau_jitter_override() = BurninTauJitterOverride{};
+
 }
 
 class BurninTauJitterScope {
@@ -191,18 +200,22 @@ class BurninTauJitterScope {
 public:
     BurninTauJitterScope(const bool active, const double tau_main_ii, const double tau_us_ii)
       : previous_state(fn_burnin_tau_jitter_override()) {
+
         fn_burnin_tau_jitter_override() = BurninTauJitterOverride{active, tau_main_ii, tau_us_ii};
+
     }
 
     ~BurninTauJitterScope() {
+
         fn_burnin_tau_jitter_override() = previous_state;
+
     }
 
     BurninTauJitterScope(const BurninTauJitterScope &) = delete;
     BurninTauJitterScope &operator=(const BurninTauJitterScope &) = delete;
 };
 
-//// ---- Sampling-phase trajectory-length jitter sequence (5 Oct 2026). With tau_jitter_sampling_type = "halton"
+//// ---- Sampling-phase trajectory-length jitter sequence. With tau_jitter_sampling_type = "halton"
 ////      (R), the post-burn-in trajectory lengths of a chain follow the base-2 van der Corput (Halton) sequence,
 ////      t_i = 2 tau u_i, u_i = radical_inverse_2(i), i = 1, 2, ..., as in the SNAPER-HMC authors' implementation
 ////      (fun_mc), instead of iid U(0, 2 tau): the same marginal distribution of lengths, but spread evenly over
@@ -216,8 +229,10 @@ public:
 ////      fn_set_sampling_tau_jitter_halton() (native_api.cpp.in) and R_fn_sample() calls the one of the package
 ////      whose sampling function runs the fit.
 inline std::atomic<bool> &fn_sampling_tau_jitter_halton_flag() {
+
     static std::atomic<bool> flag{false};
     return flag;
+
 }
 
 struct SamplingTauJitterSequence {
@@ -226,17 +241,22 @@ struct SamplingTauJitterSequence {
 };
 
 inline SamplingTauJitterSequence &fn_sampling_tau_jitter_sequence() {
+
     static thread_local SamplingTauJitterSequence state;
     return state;
+
 }
 
 inline void fn_reset_sampling_tau_jitter_sequence() {
+
     fn_sampling_tau_jitter_sequence() = SamplingTauJitterSequence{};
+
 }
 
 //// the base-2 radical inverse of n >= 1 (0.5, 0.25, 0.75, 0.125, 0.625, ...): fun_mc's _halton(index) with
 //// n = index + 1
 ALWAYS_INLINE double fn_radical_inverse_base_2(unsigned long long n) {
+
     double value = 0.0;
     double digit_weight = 0.5;
     while (n > 0ULL) {
@@ -245,10 +265,12 @@ ALWAYS_INLINE double fn_radical_inverse_base_2(unsigned long long n) {
         digit_weight *= 0.5;
     }
     return value;
+
 }
 
 template<typename T>
 ALWAYS_INLINE double fn_generate_burnin_tau_ii(const double tau, T &rng, const bool main_block) {
+
     const BurninTauJitterOverride &state = fn_burnin_tau_jitter_override();
     if (state.active) return main_block ? state.tau_main_ii : state.tau_us_ii;
     if (fn_sampling_tau_jitter_halton_flag().load(std::memory_order_relaxed)) {
@@ -258,6 +280,7 @@ ALWAYS_INLINE double fn_generate_burnin_tau_ii(const double tau, T &rng, const b
         return 2.0 * tau * fn_radical_inverse_base_2(index);
     }
     return generate_random_tau_ii(tau, rng);
+
 }
 
 

@@ -40,6 +40,8 @@
  
  
 //// Define frd-declaration for AVX wrapper fn (or dummy fn if neither AVX-512 or AVX2 are available)
+namespace nico::math {
+
 #if  (defined(USE_AVX2) || defined(USE_AVX_512))
     //// #pragma message "defining fwd. declaration for fn_process_Ref_double_AVX"
     
@@ -60,6 +62,10 @@
 #endif
  
  
+}  // namespace nico::math
+
+using nico::math::fn_process_Ref_double_AVX;
+
 //// Macro's to force byte alignment on Windows (not needed on Linux)
 #ifdef _MSC_VER
     #define ALIGN64 __declspec(align(64))

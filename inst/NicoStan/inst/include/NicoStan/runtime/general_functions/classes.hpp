@@ -4,6 +4,19 @@
 
 
 #include <filesystem>
+#include <vector>
+
+
+////
+//// ---- The positions (from 0) of the nuisance values kept in each chain's nuisance trace, in the order they are
+////      stored (rows of the trace), set from R before the sampling (Rcpp_fn_set_the_positions_of_the_nuisance_
+////      values_kept_in_the_trace, from $sample()'s nuisance_to_track): empty = every nuisance value (or none, when
+////      the trace has 0 rows); otherwise only the values of the blocks named in nuisance_to_track.
+////
+inline std::vector<int> &nicostan_positions_of_the_nuisance_values_kept_in_the_trace() {
+      static std::vector<int> positions;
+      return positions;
+}
 
 
 class HMCResult {
@@ -247,7 +260,7 @@ class HMC_output_single_chain {
                 Eigen::Matrix<int, -1, 1> div_main;
                 Eigen::Matrix<double, -1, 1> p_jump_us;
                 Eigen::Matrix<double, -1, 1> p_jump_main;
-                //// debug = TRUE only (6 Oct 2026; empty otherwise): each iteration's jittered main-block
+                //// debug = TRUE only (empty otherwise): each iteration's jittered main-block
                 //// length tau_main_ii, its number of leapfrog steps L_main_ii and the main-parameter proposal
                 //// (the end of the trajectory, before the accept / reject step; parameters x iterations):
                 Eigen::Matrix<double, -1, 1> tau_main_ii;
@@ -490,11 +503,25 @@ class HMC_output_single_chain {
                         //// storing 60,000 x n_iter x n_chains doubles is pure cost. When it IS wanted,
                         //// the buffer is grown to the full length so no coordinate is dropped.
                         if (sample_nuisance && trace_nuisance().rows() > 0) {
-                            const int n_us = result.us_theta_vec().size();
-                            if (trace_nuisance().rows() != n_us) {
-                              trace_nuisance().resize(n_us, trace_nuisance().cols());
+                            const std::vector<int> &positions =
+                                  nicostan_positions_of_the_nuisance_values_kept_in_the_trace();
+                            const Eigen::Matrix<double, -1, 1> &us = result.us_theta_vec();
+                            if (positions.empty()) {
+                                  const int n_us = us.size();
+                                  if (trace_nuisance().rows() != n_us) {
+                                    trace_nuisance().resize(n_us, trace_nuisance().cols());
+                                  }
+                                  trace_nuisance().col(ii) = us;
+                            } else {
+                                  //// (only the blocks named in nuisance_to_track: one row per kept position)
+                                  const int n_kept = static_cast<int>(positions.size());
+                                  if (trace_nuisance().rows() != n_kept) {
+                                    trace_nuisance().resize(n_kept, trace_nuisance().cols());
+                                  }
+                                  for (int j = 0; j < n_kept; ++j) {
+                                    trace_nuisance()(j, ii) = us(positions[j]);
+                                  }
                             }
-                            trace_nuisance().col(ii) = result.us_theta_vec();
                         }
                         //// Store log-lik (a ZERO-ROW buffer = not wanted: store_log_lik_trace = FALSE):
                         if (trace_log_lik().rows() > 0) trace_log_lik().col(ii) = result.log_lik();

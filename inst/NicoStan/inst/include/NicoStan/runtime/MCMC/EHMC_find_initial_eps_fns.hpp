@@ -10,7 +10,6 @@
  
 
  
-using namespace Eigen;
 
  
 
@@ -26,11 +25,15 @@ struct serial_order_lp_grad_threads_scope {
       const int n_threads_previous;
 
       explicit serial_order_lp_grad_threads_scope(const int n_threads_search) : n_threads_previous(g_n_threads_serial_order_lp_grad) {
+
             g_n_threads_serial_order_lp_grad = n_threads_search;
+
       }
 
       ~serial_order_lp_grad_threads_scope() {
+
             g_n_threads_serial_order_lp_grad = n_threads_previous;
+
       }
 
 };

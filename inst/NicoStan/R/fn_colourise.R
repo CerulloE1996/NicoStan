@@ -16,7 +16,13 @@
   "light red" = "1;31",
   "light purple" = "1;35",
   "yellow" = "1;33",
-  "white" = "1;37"
+  "white" = "1;37",
+  "violet" = "38;5;99",
+  "orange" = "38;5;208",
+  "sky blue" = "38;5;117",
+  "lime" = "38;5;154",
+  "pink" = "38;5;205",
+  "teal" = "38;5;30"
 )
 
 .bg_colours <- c(
@@ -35,14 +41,18 @@
 #' rcmd_running
 #' @export
 rcmd_running <- function() {
+
   nchar(Sys.getenv('R_TESTS')) != 0
 }
 
 
 
+
 #' colourise
 #' @export
-colourise <- function(text, fg = "black", bg = NULL) {
+colourise <- function( text,
+                       fg = "black",
+                       bg = NULL) {
   
   term <- Sys.getenv()["TERM"]
   colour_terms <- c("xterm-color","xterm-256color", "screen", "screen-256color")
@@ -52,8 +62,10 @@ colourise <- function(text, fg = "black", bg = NULL) {
   }
   
   col_escape <- function(col) {
+
     paste0("\033[", col, "m")
   }
+
   
   col <- .fg_colours[tolower(fg)]
   if (!is.null(bg)) {
@@ -65,7 +77,6 @@ colourise <- function(text, fg = "black", bg = NULL) {
   paste0(init, text, reset)
   
 }
-
 
 
 

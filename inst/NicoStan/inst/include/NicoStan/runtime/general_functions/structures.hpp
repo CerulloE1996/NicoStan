@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "number_of_leapfrog_steps_from_tau_eps_and_max_L.hpp"
+
  
 #include <stan/model/model_base.hpp>  
  
@@ -246,6 +248,8 @@ struct   Model_fn_args_struct {
     double tau_us;
     double tau_us_ii;
     double eps_us;
+    //// No cap is supplied by a direct fixed-L timing call unless its argument list names max_L.
+    std::optional<int> max_L;
     
     //// general 
     bool diffusion_HMC;
@@ -267,10 +271,27 @@ struct   Model_fn_args_struct {
     //// TRUE if absent). FALSE when nothing will read it (create_summary_and_traces(save_log_lik_trace = FALSE)):
     //// at N = 10,000, 180 chains, 50 iterations it is 720 MB zero-filled up front and copied into R for nothing.
     bool store_log_lik_trace = true;
-    //// debug = TRUE (R_fn_sample_model; the R list element "debug", FALSE if absent; 6 Oct 2026): the sampling
+ //// debug = TRUE (R_fn_sample_model; the R list element "debug", FALSE if absent; ): the sampling
     //// phase records each iteration's own trajectory length and main-parameter proposal (sampling_diagnostics):
     bool debug = false;
-    //// OUTPUT ONLY (6 Oct 2026): the number of leapfrog steps of the current iteration's main-block
+    //// timing of a layout in one sampling call (the R list element
+    //// "n_untimed_iterations_before_timed_iterations"; 0 if absent): each chain runs this many untimed
+    //// iterations first, then records the start of its timed iterations, so that a layout's seconds per
+    //// iteration leave out each chain's start-up (its model loaded and its workspace touched):
+    int n_untimed_iterations_before_timed_iterations = 0;
+    //// whether each sampling chain hands its Stan model's memory pages back to the system when it has finished
+    //// (the R list element "release_memory_of_the_Stan_model_after_sampling"; 1 if absent, i.e. ordinary
+    //// sampling). The timing of a layout sets it to 0: a finished chain's release interrupts the chains still
+    //// being timed, so no chain of a timing call releases anything; the thread's memory is reused by its next
+    //// call. Separate from n_untimed_iterations_before_timed_iterations, so that a timing with no untimed
+    //// iterations is possible:
+    int release_memory_of_the_Stan_model_after_sampling = 1;
+    //// the leapfrog steps of each untimed iteration before the timed iterations (the R list element
+    //// "L_of_the_untimed_iterations_before_timed_iterations"; 0 if absent: the same trajectory as the timed
+    //// iterations). The untimed iteration only starts the threads, builds the tapes and
+    //// touches the memory, so 1 leapfrog step is enough; the timed iterations keep their own L:
+    int L_of_the_untimed_iterations_before_timed_iterations = 0;
+ //// OUTPUT ONLY: the number of leapfrog steps of the current iteration's main-block
     //// trajectory (the joint trajectory when partitioned_HMC = FALSE), L_ii = max(1, ceiling(tau_main_ii /
     //// eps_main)), set by the samplers where they compute it and recorded per iteration with debug = TRUE;
     //// no sampler reads it:
@@ -318,7 +339,7 @@ struct   Model_fn_args_struct {
    double tau_m_adam_main; // shared between all chains
    double tau_v_adam_main; // shared between all chains
    double eigen_max_main;   // shared between all chains
-   Eigen::VectorXi  index_main; // shared between all chains
+   Eigen::Matrix<int, -1, 1>  index_main; // shared between all chains
    Eigen::Matrix<double, -1, -1> M_dense_sqrt; // shared between all chains
    Eigen::Matrix<double, -1, 1>  snaper_m_vec_main;   // shared between all chains
    Eigen::Matrix<double, -1, 1>  snaper_s_vec_main_empirical;  // shared between all chains
@@ -333,7 +354,7 @@ struct   Model_fn_args_struct {
    double tau_m_adam_us;
    double tau_v_adam_us;
    double eigen_max_us;  
-   Eigen::VectorXi index_us;
+   Eigen::Matrix<int, -1, 1> index_us;
    Eigen::Matrix<double, -1, 1>  sqrt_M_us_vec;
    Eigen::Matrix<double, -1, 1>  snaper_m_vec_us; 
    Eigen::Matrix<double, -1, 1>  snaper_s_vec_us_empirical; 
@@ -350,7 +371,7 @@ struct   Model_fn_args_struct {
       double tau_m_adam_main_,
       double tau_v_adam_main_,
       double eigen_max_main_,  
-      Eigen::VectorXi  index_main_,
+      Eigen::Matrix<int, -1, 1>  index_main_,
       Eigen::Matrix<double, -1, -1> M_dense_sqrt_,
       Eigen::Matrix<double, -1, 1>  snaper_m_vec_main_,
       Eigen::Matrix<double, -1, 1>  snaper_s_vec_main_empirical_,
@@ -364,7 +385,7 @@ struct   Model_fn_args_struct {
       double tau_m_adam_us_,
       double tau_v_adam_us_,
       double eigen_max_us_,  
-      Eigen::VectorXi  index_us_,
+      Eigen::Matrix<int, -1, 1>  index_us_,
       Eigen::Matrix<double, -1, 1>  sqrt_M_us_vec_,
       Eigen::Matrix<double, -1, 1>  snaper_m_vec_us_, 
       Eigen::Matrix<double, -1, 1>  snaper_s_vec_us_empirical_, 
@@ -561,12 +582,12 @@ ChunkSizeInfo calculate_chunk_sizes(const int N,
         
         const int effective_chunks = std::max(desired_n_chunks, 1);
         
-        info.normal_chunk_size = vec_size * (N / (vec_size * effective_chunks));
+        info.normal_chunk_size = vec_size * ((N / vec_size) / effective_chunks);
         
         if (info.normal_chunk_size == 0) {
-          // N smaller than vec_size * effective_chunks
-          info.normal_chunk_size = (N / vec_size) * vec_size;
-          if (info.normal_chunk_size == 0) {
+          // Keep the existing SIMD packet size, without clipping the requested number of chunks.
+          // A sub-packet request must never collapse to a whole-data chunk.
+          if (N < vec_size) {
             // N < vec_size, everything goes through scalar
             info.n_full_chunks = 0;
             info.last_chunk_size = N;
@@ -575,6 +596,7 @@ ChunkSizeInfo calculate_chunk_sizes(const int N,
             info.chunk_size_orig = N;
             return info;
           }
+          info.normal_chunk_size = vec_size;
         }
         
         info.n_full_chunks = N / info.normal_chunk_size;

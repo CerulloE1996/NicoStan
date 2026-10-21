@@ -1,12 +1,13 @@
-#### =====================================================================================================================================
+#### =============================================================================================================
 ## R_fn_metric_adaptive_shrinkage.R
 ##
-## ---- Diagonal-target correlation shrinkage with streamed adaptation-noise estimates ---------------------------------------------------
+## ---- Diagonal-target correlation shrinkage with streamed adaptation-noise estimates ---------------------------
 ##
 ## Correlation shrinkage follows the diagonal-target rule of Schafer and Strimmer (2005).
-## Iteration-level batches estimate serial dependence without storing the draw stream. The pooled estimate uses complete
-## K-chain iteration blocks; the per-iteration estimate uses the covariance proposals and the actual metric blend weights.
-## Batch means during a changing warm-up kernel and the weighted proposal-noise correction are approximations.
+## Iteration-level batches estimate serial dependence without storing the draw stream. The pooled estimate uses
+## complete K-chain iteration blocks; the per-iteration estimate uses the covariance proposals and the actual
+## metric blend weights. Batch means during a changing warm-up kernel and the weighted proposal-noise correction
+## are approximations.
 ##
 
 
@@ -26,7 +27,8 @@ fn_init_adaptive_metric_shrinkage <-  function( n_main,
                                                  initial_covariance) {
 
         for (value in list(n_main, n_chains, n_window_updates)) {
-              if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value < 1 || value != floor(value)) {
+              if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value < 1 || value !=
+                                                                                                floor(value)) {
                     stop("Adaptive metric dimensions and window updates must be positive whole numbers.")
               }
         }
@@ -121,7 +123,8 @@ fn_update_adaptive_metric_shrinkage <-  function( state,
               if (!is.matrix(main_draws) || !is.numeric(main_draws) ||
                   !identical(dim(main_draws), c(as.integer(state$n_main), as.integer(state$n_chains))) ||
                   any(!is.finite(main_draws)) || !is.null(covariance_proposal) || !is.null(ratio_M_effective)) {
-                    stop("Pooled adaptive shrinkage requires a finite main-parameter by chain matrix and NULL proposal/weight.")
+                    stop("Pooled adaptive shrinkage requires a finite main-parameter by chain matrix and NULL ",
+                         "proposal/weight.")
               }
               ##
               block_mean <-  rowMeans(main_draws)
@@ -155,7 +158,8 @@ fn_update_adaptive_metric_shrinkage <-  function( state,
               state$n_draws <-  state$n_draws + state$n_chains
               proposal_diagonal <-  diag(covariance_proposal)
               feature <-  cbind(rep(0, nrow(pairs)), rep(0, nrow(pairs)),
-                                 proposal_diagonal[pairs[, 1]], proposal_diagonal[pairs[, 2]], covariance_proposal[pairs])
+                                 proposal_diagonal[pairs[, 1]], proposal_diagonal[pairs[, 2]],
+                                covariance_proposal[pairs])
         }
         ##
         moments <-  .fn_metric_shrinkage_update_feature_moments(feature, state$feature_mean, state$feature_M2,
@@ -196,7 +200,8 @@ fn_reset_adaptive_metric_shrinkage <-  function( state,
                                                   n_chains = state$n_chains,
                                                   metric_estimator = state$metric_estimator,
                                                   n_window_updates = n_window_updates,
-                                                  initial_covariance = if (identical(state$metric_estimator, "pooled"))
+                                                  initial_covariance = if (identical(state$metric_estimator,
+                                                                                     "pooled"))
                                                       state$initial_covariance else state$unshrunk_covariance))
 
 }
@@ -224,7 +229,8 @@ fn_reset_adaptive_metric_shrinkage <-  function( state,
 #' Resolve diagonal-target shrinkage from the streamed correlation-noise estimate
 #'
 #' @param state Adaptive shrinkage state.
-#' @param covariance_matrix Covariance to shrink; the pooled ridge proposal or per_iteration unshrunk blended estimate.
+#' @param covariance_matrix Covariance to shrink; the pooled ridge proposal or per_iteration unshrunk blended
+#' estimate.
 #' @return Shrunk covariance, intensity and compact diagnostics. Variances are unchanged.
 #' @export
 fn_resolve_adaptive_metric_shrinkage <-  function( state,
@@ -249,7 +255,8 @@ fn_resolve_adaptive_metric_shrinkage <-  function( state,
         } else if (state$n_batches >= 2 && state$n_events >= 2) {
               raw_covariance <-  state$unshrunk_covariance
               variances <-  diag(raw_covariance)
-              centre <-  if (identical(state$metric_estimator, "pooled")) state$pooled_mean - state$reference_centre else
+              centre <-  if (identical(state$metric_estimator, "pooled")) state$pooled_mean -
+                                                                          state$reference_centre else
                              rep(0, state$n_main)
               if (identical(state$metric_estimator, "pooled")) {
                     variances <-  variances * (state$n_draws - 1) / state$n_draws
@@ -267,11 +274,13 @@ fn_resolve_adaptive_metric_shrinkage <-  function( state,
                                        -0.5 * correlation / variance_first,
                                        -0.5 * correlation / variance_second,
                                        1 / sd_product)
-              valid <-  is.finite(variance_first) & variance_first > 0 & is.finite(variance_second) & variance_second > 0 &
+              valid <-  is.finite(variance_first) & variance_first > 0 & is.finite(variance_second) &
+                        variance_second > 0 &
                   is.finite(correlation) & rowSums(!is.finite(coefficients)) == 0
               ##
               raw_variance <-  .fn_metric_shrinkage_influence_variance(coefficients, state$feature_M2,
-                                                                        state$n_events, state$feature_pair_indices)
+                                                                        state$n_events,
+                                                                       state$feature_pair_indices)
               batch_variance <-  state$batch_length *
                   .fn_metric_shrinkage_influence_variance(coefficients, state$batch_M2,
                                                             state$n_batches, state$feature_pair_indices)
@@ -313,7 +322,8 @@ fn_resolve_adaptive_metric_shrinkage <-  function( state,
                      shrinkage = lambda,
                      diagnostics = list( method = "schafer_strimmer_diagonal_target",
                                          noise_method = if (identical(state$metric_estimator, "pooled"))
-                                             "iteration_cluster_batch_means" else "weighted_covariance_proposal_batch_means_approximation",
+                                             "iteration_cluster_batch_means" else
+                                                        "weighted_covariance_proposal_batch_means_approximation",
                                          reason = reason,
                                          n_events = state$n_events,
                                          n_draws = state$n_draws,
@@ -332,11 +342,6 @@ fn_resolve_adaptive_metric_shrinkage <-  function( state,
                                          adaptation_noise_approximation = TRUE)))
 
 }
-
-
-
-
-
 
 
 

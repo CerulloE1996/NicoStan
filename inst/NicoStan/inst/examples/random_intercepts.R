@@ -16,8 +16,8 @@ run_random_intercepts <-  function( burnin_algorithm = "CHESSR",
         }
         stopifnot(file.exists(model_file))
         set.seed(seed = 2026)
-        n_groups <-  20L
-        n_observations <-  200L
+        n_groups <-  20
+        n_observations <-  200
         group <-  rep(x = seq_len(n_groups), each = n_observations / n_groups)
         x <-  rnorm(n = n_observations)
         group_effect <-  rnorm(n = n_groups, sd = 0.6)
@@ -29,9 +29,11 @@ run_random_intercepts <-  function( burnin_algorithm = "CHESSR",
                                            Stan_data_list = stan_data,
                                            Stan_model_file_path = model_file,
                                            sample_nuisance = TRUE)
-        initial_values <-  lapply(X = seq_len(4L), FUN = function(chain) {
+        initial_values <-  lapply(X = seq_len(4), FUN = function(chain) {
+
                 list(z = rep(x = 0, times = n_groups), alpha = 0.1 * (chain - 2.5), beta = 0, sigma = 0.6)
         })
+
         ##
         model$sample(n_burnin = 125, n_iter = 250,
                       n_chains_burnin = 4, n_chains_sampling = 4, n_superchains = 2,
@@ -49,7 +51,6 @@ run_random_intercepts <-  function( burnin_algorithm = "CHESSR",
         return(model)
 
 }
-
 
 
 

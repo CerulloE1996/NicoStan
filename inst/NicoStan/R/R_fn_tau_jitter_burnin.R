@@ -89,7 +89,8 @@ fn_tau_jitter_burnin_draw <-  function(state, iteration, EHMC_args_as_Rcpp_List)
     tau_us_ii <-  tau_main_ii
     if (state$partitioned_HMC) {
         nuisance_fraction <-  (fn_tau_jitter_radical_inverse(iteration, 3) + state$nuisance_shift) %% 1
-        tau_us_ii <-  rep(2 * max(EHMC_args_as_Rcpp_List$tau_us, EHMC_args_as_Rcpp_List$eps_us) * nuisance_fraction,
+        tau_us_ii <-  rep(2 * max(EHMC_args_as_Rcpp_List$tau_us, EHMC_args_as_Rcpp_List$eps_us) *
+                          nuisance_fraction,
                            length.out = state$n_chains)
     }
 
@@ -102,7 +103,8 @@ fn_tau_jitter_burnin_worker_api <-  function(worker_api_env) {
 
     api_name <-  "fn_persistent_burnin_run_one_iter_tau_jitter"
     if (!exists(api_name, envir = worker_api_env, mode = "function", inherits = FALSE)) {
-        stop("tau_jitter_burnin = 'halton' needs the native burn-in jitter entry point in the package that owns the worker; rebuild that native module.")
+        stop("tau_jitter_burnin = 'halton' needs the native burn-in jitter entry point in the package that owns ",
+             "the worker; rebuild that native module.")
     }
 
     return(get(api_name, envir = worker_api_env, inherits = FALSE))
@@ -120,9 +122,6 @@ fn_tau_jitter_burnin_reset <-  function(EHMC_args_as_Rcpp_List) {
     return(EHMC_args_as_Rcpp_List)
 
 }
-
-
-
 
 
 

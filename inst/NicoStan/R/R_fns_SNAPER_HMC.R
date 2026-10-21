@@ -1,7 +1,7 @@
-#### =====================================================================================================================================
+#### =============================================================================================================
 ## R_fns_SNAPER_HMC.R
 ##
-## ---- SNAPER in mandatory metric coordinates -----------------------------------------------------------------------------------------
+## ---- SNAPER in mandatory metric coordinates -------------------------------------------------------------------
 ##
 #' Metric-standardised SNAPER trajectory gradient
 #' @export
@@ -32,13 +32,16 @@ fn_update_snaper_w_minibatch <-  function( X,
                                            ## metric_factor) {
                                            metric_factor,
                                            ##
-                                           ## ---- interest_only (6 Oct 2026): the leading eigen-direction of the covariance of the INTEREST ROWS of
-                                           ##      the metric coordinates: the other rows of the states are set to 0 and the direction is 0 on them
-                                           ##      (the vector keeps the block's length). NULL = every row, as before (unchanged):
+                                           ## ---- interest_only: the leading eigen-direction of the covariance of
+                                           ##      the INTEREST ROWS of the metric coordinates: the other rows of
+                                           ##      the states are set to 0 and the direction is 0 on them (the
+                                           ##      vector keeps the block's length). NULL = every row, as before
+                                           ##      (unchanged):
                                            interest_rows = NULL) {
 
         X <-  as.matrix(X)
-        if (nrow(X) != length(snaper_m_vec) || nrow(X) != length(snaper_w_vec)) stop("SNAPER direction dimensions do not agree.")
+        if (nrow(X) != length(snaper_m_vec) || nrow(X) != length(snaper_w_vec))
+            stop("SNAPER direction dimensions do not agree.")
         X <-  fn_apply_trajectory_metric(metric_factor, X - snaper_m_vec)
         direction <-  c(snaper_w_vec)
         if (!is.null(interest_rows)) {
@@ -48,7 +51,8 @@ fn_update_snaper_w_minibatch <-  function( X,
                 if (!any(direction != 0)) direction[interest_rows] <-  1 / sqrt(length(interest_rows))
         }
         norm <-  sqrt(sum(direction^2))
-        if (!is.finite(norm) || norm == 0) direction <-  fn_initialise_snaper_direction(nrow(X)) else direction <-  direction / norm
+        if (!is.finite(norm) || norm == 0) direction <-  fn_initialise_snaper_direction(nrow(X)) else
+        direction <-  direction / norm
         candidate <-  c(X %*% crossprod(X, direction))
         magnitude <-  sqrt(sum(candidate^2))
         if (!is.finite(magnitude)) return(direction)
@@ -66,9 +70,10 @@ fn_update_snaper_w_minibatch <-  function( X,
 }
 
 ## ---- Safe first-direction initialisation ------------------------------------
-fn_initialise_snaper_direction <- function(n_parameters) {
+fn_initialise_snaper_direction <-  function(n_parameters) {
 
-        if (length(n_parameters) != 1 || !is.finite(n_parameters) || n_parameters < 1 || n_parameters != floor(n_parameters)) {
+        if (length(n_parameters) != 1 || !is.finite(n_parameters) || n_parameters < 1 || n_parameters !=
+                                                                                         floor(n_parameters)) {
             stop("n_parameters must be one positive integer.")
         }
         return(rep(1 / sqrt(n_parameters), n_parameters))
@@ -77,11 +82,14 @@ fn_initialise_snaper_direction <- function(n_parameters) {
 
 
 ## ---- Exponentially weighted centre update used by Appendix C ----------------
-fn_update_snaper_mean <- function(snaper_mean, theta_mean, ii, kappa = 8.0) {
+fn_update_snaper_mean <-  function( snaper_mean,
+                                    theta_mean,
+                                    ii,
+                                    kappa = 8.0) {
 
         if (length(snaper_mean) != length(theta_mean)) stop("SNAPER centre dimensions must agree.")
-        if (length(ii) != 1L || !is.finite(ii) || ii < 1) stop("SNAPER iteration must be positive and finite.")
-        eta_mean <- 1.0 / (ceiling(ii / kappa) + 1.0)
+        if (length(ii) != 1 || !is.finite(ii) || ii < 1) stop("SNAPER iteration must be positive and finite.")
+        eta_mean <-  1.0 / (ceiling(ii / kappa) + 1.0)
         if (ii < 2) return(c(theta_mean))
         return((1.0 - eta_mean) * c(snaper_mean) + eta_mean * c(theta_mean))
 
@@ -108,9 +116,9 @@ fn_weighted_proposal_mean <-  function( proposals,
 }
 
 
-fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
+fn_normalise_burnin_algorithm <-  function(burnin_algorithm) {
 
-        if (length(burnin_algorithm) != 1L || is.na(burnin_algorithm)) {
+        if (length(burnin_algorithm) != 1 || is.na(burnin_algorithm)) {
             ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log' or 'SNAPER'.")
             ## stop("burnin_algorithm must be one of 'KE', 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', 'CHESSR_time' or 'SNAPER_time'.")
             ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', 'SNAPER', ",
@@ -133,12 +141,13 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                         "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
                         "'ESJD_LQ_ESSR_spec_bins99_evid_expand'."))
         }
-        algorithm_key <- tolower(trimws(as.character(burnin_algorithm)))
+        algorithm_key <-  tolower(trimws(as.character(burnin_algorithm)))
         ##
-        ## ---- CHESS and CHESSR are different criteria: "CHESS"/"ChEES" = ChEES (Hoffman et al., 2021; NOT divided by tau),
-        ##      "CHESSR"/"ChEESR" = the ChEES-rate criterion (Sountsov and Hoffman, 2022; divided by tau):
+        ## ---- CHESS and CHESSR are different criteria: "CHESS"/"ChEES" = ChEES (Hoffman et al., 2021; NOT
+        ##      divided by tau), "CHESSR"/"ChEESR" = the ChEES-rate criterion (Sountsov and Hoffman, 2022; divided
+        ##      by tau):
         ##
-        algorithm <- switch(algorithm_key,
+        algorithm <-  switch(algorithm_key,
                            chees = "ChEES",
                            chess = "ChEES",
                            `chees-r` = "CHESSR",
@@ -165,8 +174,9 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            `snaper-time` = "SNAPER_time",
                            snaper_hmc_time = "SNAPER_time",
                            ##
-                           ## ---- expected squared jumped distance per unit trajectory length (Pasarica and Gelman, 2010; the rate form, as
-                           ##      CHESSR is the rate form of ChEES), and the geometric mean of the ESJD and CHESSR criteria
+                           ## ---- expected squared jumped distance per unit trajectory length (Pasarica and
+                           ##      Gelman, 2010; the rate form, as CHESSR is the rate form of ChEES), and the
+                           ##      geometric mean of the ESJD and CHESSR criteria
                            ##      (R_fn_metric_trajectory_adaptation.R):
                            ##
                            esjd = "ESJD",
@@ -179,16 +189,27 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            esjd_snaper_hmc = "ESJD_SNAPER",
                            `esjd-snaper-hmc` = "ESJD_SNAPER",
                            ##
-                           ## ---- the soft minimum of the linear and quadratic lag-one ESS bounds per unit trajectory length
-                           ##      (R_fn_metric_trajectory_adaptation.R, fn_metric_tau_block_update):
+                           ## ---- the geometric means of the ESJD, CHESSR and SNAPER criteria: equal
+                           ##      weights, and the weights 0.50, 0.25 and 0.25
+                           ##      (R_fn_metric_trajectory_adaptation.R):
+                           ##
+                           esjd_chessr_snaper = "ESJD_CHESSR_SNAPER",
+                           esjd_cheesr_snaper = "ESJD_CHESSR_SNAPER",
+                           esjd_w50_chessr_w25_snaper_w25 = "ESJD_w50_CHESSR_w25_SNAPER_w25",
+                           esjd_w50_cheesr_w25_snaper_w25 = "ESJD_w50_CHESSR_w25_SNAPER_w25",
+                           ##
+                           ## ---- the soft minimum of the linear and quadratic lag-one ESS bounds per unit
+                           ##      trajectory length (R_fn_metric_trajectory_adaptation.R,
+                           ##      fn_metric_tau_block_update):
                            ##
                            lq_essr = "LQ_ESSR",
                            lqessr = "LQ_ESSR",
                            `lq-essr` = "LQ_ESSR",
                            ##
-                           ## ---- the soft minimum of the linear ("L_") or the linear and quadratic ("LQ_") lag-one ESS
-                           ##      bounds per unit trajectory length, maximised over tau from the length response of the
-                           ##      jittered trajectories (R_fn_length_response_tau_criterion.R):
+                           ## ---- the soft minimum of the linear ("L_") or the linear and quadratic ("LQ_")
+                           ##      lag-one ESS bounds per unit trajectory length, maximised over tau from the
+                           ##      length response of the jittered trajectories
+                           ##      (R_fn_length_response_tau_criterion.R):
                            ##
                            l_essr_length_response = "L_ESSR_length_response",
                            `l-essr-length-response` = "L_ESSR_length_response",
@@ -197,18 +218,18 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            ##
                            ## ---- the same with a spectral linear term (the flow's fitted cosine mixture per
                            ##      coordinate, composed with the acceptance laziness), per expected gradient
-                           ##      (R_fn_spectral_ESS_tau_criterion.R; 6 Oct 2026):
+                           ##      (R_fn_spectral_ESS_tau_criterion.R):
                            ##
                            lq_essr_spectral = "LQ_ESSR_spectral",
                            `lq-essr-spectral` = "LQ_ESSR_spectral",
                            ##
                            ## ---- the same with the length bins forgetting at 0.99 per update instead of 0.95
-                           ##      (R_fn_spectral_ESS_tau_criterion.R; 7 Oct 2026):
+                           ##      (R_fn_spectral_ESS_tau_criterion.R):
                            ##
                            lq_essr_spectral_long_bin_memory = "LQ_ESSR_spectral_long_bin_memory",
                            `lq-essr-spectral-long-bin-memory` = "LQ_ESSR_spectral_long_bin_memory",
                            ##
-                           ## ---- (7 Oct 2026; R_fn_spectral_ESS_tau_criterion.R) the same with the
+                           ## ---- (R_fn_spectral_ESS_tau_criterion.R) the same with the
                            ##      upper-end doubling only on evidence; and the equal-weight geometric mean of
                            ##      ESJD and that, with the finite-run ESS of the run's n_iter draws:
                            ##
@@ -221,7 +242,8 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            esjd_w20_lq_essr_spec_bins99_evid_expand = "ESJD_w20_LQ_ESSR_spec_bins99_evid_expand",
                            esjd_w33_lq_essr_spec_bins99_evid_expand = "ESJD_w33_LQ_ESSR_spec_bins99_evid_expand",
                            ##
-                           ## ---- (8 Oct 2026) the published name of "LQ_ESSR_spec_bins99_evid_expand":
+                           ## ---- the published name of "LQ_ESSR_spec_bins99_evid_expand":
+##
                            ##      SpESS-R, the spectral linear/quadratic ESS-rate criterion (the internal name
                            ##      stays valid):
                            ##
@@ -259,12 +281,27 @@ fn_normalise_burnin_algorithm <- function(burnin_algorithm) {
                            ##             "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
                            ##             "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
                            ##             burnin_algorithm)))
+                           ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                           ##             "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                           ##             "'ESJD_SNAPER', 'LQ_ESSR', 'SpESSR' (SpESS-R, also ",
+                           ##             "'LQ_ESSR_spec_bins99_evid_expand'), 'L_ESSR_length_response', ",
+                           ##             "'LQ_ESSR_length_response', 'LQ_ESSR_spectral', ",
+                           ##             "'LQ_ESSR_spectral_long_bin_memory', ",
+                           ##             "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
+                           ##             "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
+                           ##             burnin_algorithm)))
+                           ## (without the five retired criteria, which R_fn_sample_model no longer accepts)
+                           ## stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
+                           ##             "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
+                           ##             "'ESJD_SNAPER', 'SpESSR' (SpESS-R, also ",
+                           ##             "'LQ_ESSR_spec_bins99_evid_expand'), ",
+                           ##             "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
+                           ##             "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
+                           ##             burnin_algorithm)))
                            stop(paste0("burnin_algorithm must be one of 'ChEES', 'CHESSR', 'CHESSR_log', ",
                                        "'SNAPER', 'CHESSR_time', 'SNAPER_time', 'ESJD', 'ESJD_CHESSR', ",
-                                       "'ESJD_SNAPER', 'LQ_ESSR', 'SpESSR' (SpESS-R, also ",
-                                       "'LQ_ESSR_spec_bins99_evid_expand'), 'L_ESSR_length_response', ",
-                                       "'LQ_ESSR_length_response', 'LQ_ESSR_spectral', ",
-                                       "'LQ_ESSR_spectral_long_bin_memory', ",
+                                       "'ESJD_SNAPER', 'ESJD_CHESSR_SNAPER', 'ESJD_w50_CHESSR_w25_SNAPER_w25', ",
+                                       "'SpESSR' (SpESS-R, also 'LQ_ESSR_spec_bins99_evid_expand'), ",
                                        "'ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand' or ",
                                        "'ESJD_LQ_ESSR_spec_bins99_evid_expand'; got: ",
                                        burnin_algorithm)))

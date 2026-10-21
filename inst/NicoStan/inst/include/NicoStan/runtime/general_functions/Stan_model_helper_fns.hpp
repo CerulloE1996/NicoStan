@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <NicoStan/runtime/general_functions/chunk_local_leapfrog_step_of_the_nuisance_block.hpp>
+
  
 
 #include <sstream>
@@ -36,7 +38,6 @@
  
 
  
-using namespace Eigen;
  
  
 #ifdef _WIN32
@@ -144,6 +145,19 @@ struct Stan_model_struct {
    void (*bs_model_destruct)(bs_model*) = nullptr;
    void (*bs_rng_destruct)(bs_rng*) = nullptr;
    int (*bs_release_thread_memory)() = nullptr;
+   //// (optional: a model in NicoStan's nuisance-block form, built against the private runtime with
+   ////  options(NicoStan.reduce_sum_nuisance_block = TRUE): its gradient with the nuisance values read straight
+   ////  from NicoStan's array and their gradient written straight into NicoStan's array; null otherwise)
+   int (*nicostan_bs_log_density_gradient_with_the_nuisance_block)(bs_model*, bool, bool, const double*,
+                                                                  const double*, double*, int, double*,
+                                                                  double*, char**) = nullptr;
+   //// (optional: a model in NicoStan's nuisance-block form built with
+   ////  options(NicoStan.reduce_sum_chunk_local_leapfrog_step = TRUE): the same gradient, which in the gradient
+   ////  call of a leapfrog step also makes the step of the nuisance values inside the chunks
+   ////  (chunk_local_leapfrog_step_of_the_nuisance_block.hpp); null otherwise)
+   int (*nicostan_bs_log_density_gradient_with_the_nuisance_block_and_the_chunk_local_leapfrog_step)(
+         bs_model*, bool, bool, const double*, const double*, double*, int, double*, double*,
+         nicostan_chunk_local_leapfrog_step_t*, char**) = nullptr;
    
 };
  
@@ -168,7 +182,9 @@ bs_model* fn_convert_JSON_data_to_BridgeStan(ModelHandle_struct &model_handle,
          // Use the user-provided JSON file path and construct the bs_model_ptr
          #ifdef _WIN32
              const std::string json_file_normalised = normalize_windows_path(json_file);
-             bs_model* bs_model_ptr = model_handle.bs_model_construct(json_file_normalised.c_str(), seed, &error_msg);
+             bs_model* bs_model_ptr = model_handle.bs_model_construct(json_file_normalised.c_str(),
+                                                                      seed,
+                                                                      &error_msg);
          #else
              bs_model* bs_model_ptr = model_handle.bs_model_construct(json_file.c_str(), seed, &error_msg);
          #endif
@@ -246,15 +262,23 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
            
            // Resolve the bs_model_construct symbol
            typedef bs_model* (*bs_model_construct_func)(const char*, unsigned int, char**);
-           bs_model_construct_func bs_model_construct = (bs_model_construct_func)dlsym(bs_handle, "bs_model_construct"); 
+           bs_model_construct_func bs_model_construct = (bs_model_construct_func)dlsym(bs_handle,
+                                                         "bs_model_construct");
            if (!bs_model_construct) {
              dlclose(bs_handle); 
              throw std::runtime_error("Error loading symbol 'bs_model_construct': " + std::string(dlerror()));
            }  
            
            // Resolve the bs_log_density_gradient symbol 
-           typedef int (*bs_log_density_gradient_func)(bs_model*, bool, bool, const double*, double*, double*, char**);
-           bs_log_density_gradient_func bs_log_density_gradient = (bs_log_density_gradient_func)dlsym(bs_handle, "bs_log_density_gradient");
+           typedef int (*bs_log_density_gradient_func)(bs_model*,
+                        bool,
+                        bool,
+                        const double*,
+                        double*,
+                        double*,
+                        char**);
+           bs_log_density_gradient_func bs_log_density_gradient = (bs_log_density_gradient_func)dlsym(bs_handle,
+                                                                   "bs_log_density_gradient");
            if (!bs_log_density_gradient) { 
              dlclose(bs_handle);
              throw std::runtime_error("Error loading symbol 'bs_log_density_gradient': " + std::string(dlerror()));
@@ -262,7 +286,8 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
            
            // Resolve the bs_param_constrain symbol 
            typedef int (*bs_param_constrain_func)(bs_model*, bool, bool, const double*, double*, bs_rng*, char**);
-           bs_param_constrain_func bs_param_constrain = (bs_param_constrain_func)dlsym(bs_handle, "bs_param_constrain");
+           bs_param_constrain_func bs_param_constrain = (bs_param_constrain_func)dlsym(bs_handle,
+                                                         "bs_param_constrain");
            if (!bs_param_constrain) { 
              dlclose(bs_handle);
              throw std::runtime_error("Error loading symbol 'bs_param_constrain': " + std::string(dlerror()));
@@ -288,7 +313,8 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
            
            // Resolve the bs_model_destruct symbol
            typedef void (*bs_model_destruct_func)(bs_model*);
-           bs_model_destruct_func bs_model_destruct = (bs_model_destruct_func)dlsym(bs_handle, "bs_model_destruct"); 
+           bs_model_destruct_func bs_model_destruct = (bs_model_destruct_func)dlsym(bs_handle,
+                                                       "bs_model_destruct");
            if (!bs_model_destruct) {
              dlclose(bs_handle); 
              throw std::runtime_error("Error loading symbol 'bs_model_destruct': " + std::string(dlerror()));
@@ -301,6 +327,34 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
              dlclose(bs_handle); 
              throw std::runtime_error("Error loading symbol 'bs_rng_destruct': " + std::string(dlerror()));
            }     
+           
+           // Optional extension: a model in NicoStan's nuisance-block form (null for every other model).
+           using gradient_with_the_nuisance_block_func = int (*)(bs_model*, bool, bool, const double*,
+                                                                const double*, double*, int, double*, double*,
+                                                                char**);
+           auto nicostan_bs_log_density_gradient_with_the_nuisance_block =
+                 reinterpret_cast<gradient_with_the_nuisance_block_func>(
+                       dlsym(bs_handle, "nicostan_bs_log_density_gradient_with_the_nuisance_block"));
+           #ifndef _WIN32
+               if (!nicostan_bs_log_density_gradient_with_the_nuisance_block) dlerror();
+           #endif
+           
+           // Optional extension: the gradient call of a leapfrog step with the chunk-local leapfrog step (null
+           // for every model library built without it).
+           using gradient_with_the_chunk_local_leapfrog_step_func = int (*)(bs_model*, bool, bool, const double*,
+                                                                           const double*, double*, int, double*,
+                                                                           double*,
+                                                                           nicostan_chunk_local_leapfrog_step_t*,
+                                                                           char**);
+           auto nicostan_bs_log_density_gradient_with_the_nuisance_block_and_the_chunk_local_leapfrog_step =
+                 reinterpret_cast<gradient_with_the_chunk_local_leapfrog_step_func>(
+                       dlsym(bs_handle, "nicostan_bs_log_density_gradient_with_the_nuisance_block_and_the_"
+                                        "chunk_local_leapfrog_step"));
+           #ifndef _WIN32
+               if (!nicostan_bs_log_density_gradient_with_the_nuisance_block_and_the_chunk_local_leapfrog_step) {
+                     dlerror();
+               }
+           #endif
            
            // Optional extension: old model libraries remain ABI-compatible.
            using release_thread_memory_func = int (*)();
@@ -337,7 +391,9 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
                    bs_rng_construct,
                    bs_model_destruct,
                    bs_rng_destruct,
-                   bs_release_thread_memory};   
+                   bs_release_thread_memory,
+                   nicostan_bs_log_density_gradient_with_the_nuisance_block,
+                   nicostan_bs_log_density_gradient_with_the_nuisance_block_and_the_chunk_local_leapfrog_step};   
            
    
  }
@@ -349,7 +405,9 @@ Stan_model_struct fn_load_Stan_model_and_data( const std::string &model_so_file,
  
  
  
-Eigen::Matrix<double, -1, 1> fn_Stan_compute_log_prob_grad(    const Stan_model_struct &Stan_model_as_cpp_struct,  
+//// (writes the log density and its gradient in place, into lp_and_grad_outs; returns nothing, so that no copy
+////  of the N + 1 values is made per gradient)
+void fn_Stan_compute_log_prob_grad(    const Stan_model_struct &Stan_model_as_cpp_struct,  
                                                                const Eigen::Matrix<double, -1, 1> &params,
                                                                const int n_params_main, 
                                                                const int n_nuisance,
@@ -390,7 +448,6 @@ Eigen::Matrix<double, -1, 1> fn_Stan_compute_log_prob_grad(    const Stan_model_
              } 
              
              lp_and_grad_outs(0) = log_prob_val;
-             return lp_and_grad_outs;
             
  }
  
@@ -469,7 +526,22 @@ void fn_bs_destroy_Stan_model(Stan_model_struct &Stan_model_as_cpp_struct) {
 
 // Call only on the sampling worker after the complete chain has returned.
 // Cleanup remains inside the model DSO; NicoStan owns a different hidden stack.
+//// The memory of this thread only (its autodiff arena), for a chain whose Stan model is shared by the chains and
+//// destroyed by its owner: as fn_bs_destroy_Stan_model_after_sampling(), without destroying the model.
+inline void fn_bs_release_this_threads_memory_of_a_shared_Stan_model(const Stan_model_struct &model) {
+
+    const int release_status = model.bs_release_thread_memory
+        ? model.bs_release_thread_memory() : 0;
+    if (release_status != 0) {
+        throw std::runtime_error(release_status == 1
+            ? "BridgeStan memory release refused: live autodiff state remains after sampling."
+            : "BridgeStan memory release failed after sampling.");
+    }
+
+}
+
 inline void fn_bs_destroy_Stan_model_after_sampling(Stan_model_struct &model) {
+
     const int release_status = model.bs_release_thread_memory
         ? model.bs_release_thread_memory() : 0;
     fn_bs_destroy_Stan_model(model);
@@ -478,6 +550,7 @@ inline void fn_bs_destroy_Stan_model_after_sampling(Stan_model_struct &model) {
             ? "BridgeStan memory release refused: live autodiff state remains after sampling."
             : "BridgeStan memory release failed after sampling.");
     }
+
 }
 
 

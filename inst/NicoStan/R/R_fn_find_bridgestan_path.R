@@ -20,7 +20,7 @@ bridgestan_path <- function() {
     available_dirs <- Sys.glob(search_pattern)
     ##
     if (length(available_dirs) > 0) {
-      version_strings <- sub( pattern = ".*bridgestan-",
+      version_strings <-  sub( pattern = ".*bridgestan-",
                               replacement = "",
                               x = basename(available_dirs))
       ##

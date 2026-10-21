@@ -49,8 +49,10 @@ for (dll in dll_paths) {
           cat("  Loaded:", dll, "\n")
         },
         error = function(e) {
+
           cat("  Failed to load:", dll, "\n  Error:", e$message, "\n")
         }
+
       )
   
 }
@@ -59,7 +61,6 @@ for (dll in dll_paths) {
 
 
  
-
 
 
 

@@ -24,7 +24,8 @@ plot_param_group_batched <- function(draws_array,
                # Modified pattern to match both cases:
                # 1. Exact match of prefix (for parameters like "alpha")
                # 2. Prefix followed by [ (for parameters like "beta[1]")
-              param_names <- dimnames(draws_array)[[3]][grep(paste0("^", param_prefix, "($|\\[)"), dimnames(draws_array)[[3]])]
+              param_names <- dimnames(draws_array)[[3]][grep( paste0("^", param_prefix, "($|\\[)"),
+                                                              dimnames(draws_array)[[3]])]
                
               if (length(param_names) == 0) {
                     stop(paste("No parameters found starting with", param_prefix))
@@ -62,7 +63,12 @@ plot_param_group_batched <- function(draws_array,
                         
                         ### plot 
                         plots[[i]] <- plot_func(draws_array[,,batch_params, drop=FALSE]) +
-                                      ggplot2::ggtitle(paste0(param_prefix, " (batch ", i, " of ", n_batches, ")"))
+                                      ggplot2::ggtitle(paste0( param_prefix,
+                                                               " (batch ",
+                                                               i,
+                                                               " of ",
+                                                               n_batches,
+                                                               ")"))
                       
               }
               

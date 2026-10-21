@@ -125,6 +125,9 @@ MVP_model <- R6Class("MVP_model",
                           is_compiled = NULL,
                           #'@field n_nuisance_override Override for number of nuisance parameters
                           n_nuisance_override = NULL,
+                          #'@field nuisance_params The names of the Stan model's nuisance blocks held by NicoStan
+                          #' inside the chunks of its reduce_sum (reduce_sum_chunked); NULL: none
+                          nuisance_params = NULL,
                           #'@field stanc_args Arguments for Stan compiler (for BridgeStan)
                           stanc_args = NULL,
                           #'@field make_args C++/make arguments used to compile the generated C++ of the Stan model (e.g. list("STAN_THREADS=true")); distinct from stanc_args.
@@ -135,6 +138,23 @@ MVP_model <- R6Class("MVP_model",
                           Stan_cpp_flags = NULL,
                           #'@field Stan_model_file_path Path to Stan model file
                           Stan_model_file_path = NULL,
+                          #'@field Stan_model_math_functions The math functions which the Stan model is
+                          #'compiled with (only for \code{Model_type = "Stan"}), as given to \code{$new()}:
+                          #'"Stan_math" (default), "NicoSIMD_AVX2", "NicoSIMD_AVX512",
+                          #'"NicoSIMD_AVX512_if_supported_else_AVX2", "BayesMVP_AVX2", "BayesMVP_AVX512" or
+                          #'"BayesMVP_AVX512_if_supported_else_AVX2".
+                          Stan_model_math_functions = NULL,
+                          #'@field BayesMVP_AVX_headers_folder The folder of BayesMVP's AVX headers, as given
+                          #'to \code{$new()} (NULL: the installed BayesMVP's include/BayesMVP folder).
+                          BayesMVP_AVX_headers_folder = NULL,
+                          #'@field BayesMVP_AVX_version_of_Stan_model NULL with Stan's own math functions.
+                          #'With BayesMVP's AVX functions, the AVX version of the Stan model compiled when the
+                          #'model was initialised: a list with Stan_model_math_functions_used ("BayesMVP_AVX2"
+                          #'or "BayesMVP_AVX512"), source_Stan_model_file_path, Stan_model_file_path (the AVX
+                          #'version), Stan_cpp_user_header (its user header), make_args,
+                          #'BayesMVP_AVX_headers_folder, BayesMVP_functions_used, SIMD_lanes_expected and
+                          #'SIMD_lanes_reported_by_compiled_model.
+                          BayesMVP_AVX_version_of_Stan_model = NULL,
                           #'@field result Model results object.
                           result = NULL, 
                           #'@field model_fit_object Model fit object.
@@ -175,8 +195,10 @@ MVP_model <- R6Class("MVP_model",
                           #'   
                           #'* \code{vect_type}:
                           #'   The SIMD (single-instruction, multiple-data) vectorisation type to use for math functions (such as log, exp, Phi, etc). The default is the SIMD level compiled into the installed
-                          #'   BayesMVP ("AVX512" or "AVX2"; "Stan", i.e. the Stan C++ math library functions, if neither), and a value the build cannot honour stops with an error. This is the ONLY place
-                          #'   to set it: the \code{vect_type} argument of \code{$sample()} cannot change it. Not used for \code{Model_type = "Stan"}.  
+                          #'   BayesMVP ("AVX512" or "AVX2"; "Stan", i.e. the Stan C++ math library functions, if
+                          #'   neither), and a value the build cannot honour stops with an error. This is the ONLY
+                          #'   place to set it: the \code{vect_type} argument of \code{$sample()} cannot change
+                          #'   it. Not used for \code{Model_type = "Stan"}.
                           #'   
                           #'*  \code{num_chunks}:
                           #'    The number of chunks to use in the log-probability and gradient function. By default, the number selected will depend on the CPU. 
@@ -184,7 +206,9 @@ MVP_model <- R6Class("MVP_model",
                           #'*  \code{Phi_type}:
                           #'    Type of \eqn{\Phi()} function implementation to use, where \eqn{\Phi()} is the standard normal CDF. The default is "Phi" (with \code{inv_Phi_type = "inv_Phi"}); the built-in models also 
                           #'    accept "Phi_approx" (with \code{inv_Phi_type = "inv_Phi_approx"}). Note that \eqn{\Phi()} will use a fast, highly accurate polynomial approximation of \eqn{\Phi()} if 
-                          #'    \code{vect_type} is either AVX-512 or AVX2. Otherwise, it will use the Phi function from the Stan math C++ library. Set it here, not in \code{$sample()}. Not used for \code{Model_type = "Stan"}. 
+                          #'    \code{vect_type} is either AVX-512 or AVX2. Otherwise, it will use the Phi
+                          #'    function from the Stan math C++ library. Set it here, not in \code{$sample()}. Not
+                          #'    used for \code{Model_type = "Stan"}.
                           #'    
                           #' Arguments which are only relevant to the MVP and LC_MVP include:
                           #'      
@@ -278,12 +302,57 @@ MVP_model <- R6Class("MVP_model",
                           #'@param model_args_list List of model arguments. See class documentation for details.
                           #'@param Stan_data_list List of Stan data (optional). See class documentation for details.
                           #'@param sample_nuisance Whether to sample nuisance parameters. See class documentation for details.
+                          #'@param nuisance_params The names of the Stan model's nuisance blocks, as declared
+                          #' in its parameters block (e.g. \code{c("z")}, or \code{c("z", "u")}), held by
+                          #' NicoStan inside the chunks of the model's reduce_sum (reduce_sum_chunked):
+                          #' NicoStan writes the model's reduce_sum_chunked version and compiles it (see
+                          #' \code{initialise_model}). Only relevant if \code{Model_type = "Stan"}; NULL
+                          #' (the default): the model as it is.
                           #'@param Stan_model_file_path The file path to the Stan model, only needed if \code{Model_type = "Stan"}.
                           #'@param Stan_cpp_user_header The file path to a user-supplied C++ .hpp file to be compiled together with the Stan model. This is optional and only needed when custom C++ functions are required in the
                           #' Stan model, and is only relvant if \code{Model_type = "Stan"}.
                           #'@param Stan_cpp_flags User-supplied R list containing comma-separated values of compiler flags (e.g. CXX_FLAGS, etc) to be passed on
                           #' to cmdstanr - the Stan model will then be compiled using these flags. This is optional and only needed when custom C++ functions are required in the Stan model. 
                           #' Only relevant if \code{Model_type = "Stan"}.
+                          #'@param Stan_model_math_functions The math functions which the Stan model is
+                          #' compiled with. Only relevant if \code{Model_type = "Stan"}.
+                          #' * "Stan_math" (the default): Stan's own functions; the Stan model is compiled as
+                          #'   it is.
+                          #' * "BayesMVP_AVX512" or "BayesMVP_AVX2": BayesMVP's AVX-512 / AVX2 functions
+                          #'   (BayesMVP must be installed, unless \code{BayesMVP_AVX_headers_folder} is
+                          #'   given). NicoStan writes the AVX version of the Stan model next to it
+                          #'   (\code{<model>_BayesMVP_AVX512.stan} or \code{<model>_BayesMVP_AVX2.stan}, as
+                          #'   BridgeStan writes the compiled model next to it): every call of a Stan function
+                          #'   which BayesMVP replaces becomes BayesMVP's function of the same name with
+                          #'   "fast_" in front (the elementwise functions exp, log, log1p, log1m, log1p_exp,
+                          #'   log1m_exp, inv_logit, log_inv_logit, Phi, Phi_approx and inv_Phi for a vector
+                          #'   argument; the fused log densities of the normal, Student-t, Weibull, ordered
+                          #'   logistic, Bernoulli-logit and Bernoulli-logit GLM distributions for the argument
+                          #'   types they support), and a call with other argument types keeps Stan's own
+                          #'   function (stanc decides). The AVX version is compiled with BridgeStan with its
+                          #'   own user header (\code{<model>_BayesMVP_AVX512_user_header.hpp}: BayesMVP's
+                          #'   headers, and the user's own header if \code{Stan_cpp_user_header} is given) and
+                          #'   the instruction-set flags (\code{CXXFLAGS_OPTIM}, and
+                          #'   \code{-DBAYESMVP_FORCE_AVX2} for AVX2; these must not be given in
+                          #'   \code{make_args}), the SIMD lanes of the compiled model are checked (8 for
+                          #'   AVX-512, 4 for AVX2), and the AVX version is then used as the Stan model, as any
+                          #'   Stan model; its generated quantities include \code{simd_lanes}. The AVX version
+                          #'   is written again only when the Stan model or the declarations of BayesMVP's
+                          #'   functions change (its first line records the md5 of both). The CPU must support
+                          #'   the instruction set.
+                          #' * "BayesMVP_AVX512_if_supported_else_AVX2": "BayesMVP_AVX512" when the CPU
+                          #'   supports AVX-512, else "BayesMVP_AVX2".
+                          #' * "NicoSIMD_AVX512", "NicoSIMD_AVX2" or "NicoSIMD_AVX512_if_supported_else_AVX2":
+                          #'   the same, with NicoSIMD's functions (the same C++ as BayesMVP's, with "nico_" in
+                          #'   front in place of "fast_"; NicoSIMD must be installed): the AVX version is
+                          #'   \code{<model>_NicoSIMD_AVX512.stan} or \code{<model>_NicoSIMD_AVX2.stan}, with
+                          #'   NicoSIMD's headers in its user header.
+                          #'@param BayesMVP_AVX_headers_folder The folder of BayesMVP's AVX headers
+                          #' (\code{stan_external_functions.hpp} and the fused log densities
+                          #' \code{stan_external_fused_*.hpp}) for a \code{Stan_model_math_functions} with
+                          #' BayesMVP's AVX functions. NULL (the default): the installed BayesMVP's
+                          #' \code{include/BayesMVP} folder. A fused log density whose header is not in the
+                          #' folder is not used.
                           #'@param ... Additional arguments passed to NicoStan::initialise_model.
                           #'@return Returns self$init_object, an object generated from the "NicoStan::initialise_model" function which contains information such as which 
                           #'model type (\code{Model_type}) to use. 
@@ -291,6 +360,7 @@ MVP_model <- R6Class("MVP_model",
                                                 ##
                                                 sample_nuisance = NULL,
                                                 n_nuisance_override = NULL,
+                                                nuisance_params = NULL,
                                                 ##
                                                 model_args_list = NULL,  # For internal/hard-coded models 
                                                 ##
@@ -302,6 +372,9 @@ MVP_model <- R6Class("MVP_model",
                                                 stanc_args = NULL,
                                                 make_args = NULL,
                                                 ##
+                                                Stan_model_math_functions = "Stan_math",
+                                                BayesMVP_AVX_headers_folder = NULL,
+                                                ##
                                                 compile = TRUE,
                                                 force_recompile = FALSE) {
                             
@@ -312,6 +385,17 @@ MVP_model <- R6Class("MVP_model",
                                     } else {
                                       # For internal models, we just store the model type
                                       # The actual model will be initialized when data is provided in sample()
+                                    }
+                                    ##
+                                    ## ---- BayesMVP's AVX functions are only for a Stan model (checked here,
+                                    ##      before any deferred initialisation; initialise_model() writes the
+                                    ##      AVX version):
+                                    if (!identical(Stan_model_math_functions, "Stan_math") &&
+                                        !identical(Model_type, "Stan")) {
+                                      stop(paste0("Stan_model_math_functions = \"",
+                                                  paste(Stan_model_math_functions, collapse = ", "),
+                                                  "\" is only for Model_type = \"Stan\" (the built-in models ",
+                                                  "set their SIMD functions with model_args_list$vect_type)."))
                                     }
                                     ## ------ store important parameters as class members
                                     self$Model_type <- Model_type
@@ -326,6 +410,7 @@ MVP_model <- R6Class("MVP_model",
                                     ## NULL$... lookups and lost when init was deferred):
                                     self$sample_nuisance <- sample_nuisance
                                     self$n_nuisance_override <- n_nuisance_override
+                                    self$nuisance_params <- nuisance_params
                                     ##
                                     self$model_args_list <- model_args_list
                                     ##
@@ -336,6 +421,9 @@ MVP_model <- R6Class("MVP_model",
                                     self$Stan_cpp_flags <- Stan_cpp_flags
                                     self$stanc_args <- stanc_args
                                     self$make_args <- make_args
+                                    ##
+                                    self$Stan_model_math_functions <-  Stan_model_math_functions
+                                    self$BayesMVP_AVX_headers_folder <-  BayesMVP_AVX_headers_folder
                                     ##
                                     self$compile_choice <- compile
                                     self$force_recompile_choice <- force_recompile
@@ -348,6 +436,7 @@ MVP_model <- R6Class("MVP_model",
                                                                                     ##
                                                                                     sample_nuisance = sample_nuisance,
                                                                                     n_nuisance_override = n_nuisance_override,
+                                                                                    nuisance_params = nuisance_params,
                                                                                     ##
                                                                                     model_args_list = model_args_list, # For internal/hard-coded models 
                                                                                     ##
@@ -365,7 +454,12 @@ MVP_model <- R6Class("MVP_model",
                                                                                     Stan_cpp_user_header = Stan_cpp_user_header,
                                                                                     Stan_cpp_flags = Stan_cpp_flags,
                                                                                     stanc_args = stanc_args,
-                                                                                    make_args = make_args)
+                                                                                    make_args = make_args,
+                                                                                    ##
+                                                                                    Stan_model_math_functions =
+                                                                                      Stan_model_math_functions,
+                                                                                    BayesMVP_AVX_headers_folder =
+                                                                                      BayesMVP_AVX_headers_folder)
                                           self$is_compiled <- TRUE
                                          
                                     } else {
@@ -388,11 +482,18 @@ MVP_model <- R6Class("MVP_model",
                                       self$stanc_args <- self$init_object$stanc_args
                                       self$make_args <- self$init_object$make_args
                                       ##
+                                      ## (the AVX version of the Stan model, kept here: the init_object which
+                                      ##  $sample() returns compiles the AVX version as it is given, so it does
+                                      ##  not hold this)
+                                      self$BayesMVP_AVX_version_of_Stan_model <-
+                                            self$init_object$BayesMVP_AVX_version_of_Stan_model
+                                      ##
                                       self$n_nuisance <- self$init_object$n_nuisance
                                       self$n_params_main <- self$init_object$n_params_main
                                       ##
                                     }
                            },
+
                           ## --------  wrap the sample fn -----------------------------------------------------------------------------------------------------------------------------
                           #'@description
                           #'Sample from the model
@@ -402,19 +503,43 @@ MVP_model <- R6Class("MVP_model",
                           #'@param parallel_method The method to use for parallelisation (multithreading) in C++. Default is "RcppParallel". Can be changed to "OpenMP", if available. 
                           #'@param y The dataset. See class documentation for details.
                           #'@param N The sample size. See class documentation for details.
-                          #'@param randomize_tau_burnin Randomise trajectory length during burn-in. Default FALSE; length can still adapt between iterations.
-                          #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from zero to twice the adapted scale (at least one integration step). Default TRUE.
-                          #'@param tau_gradient_estimator Use the forward endpoint gradient (the default) or the two-ended time-reversal-averaged gradient for the trajectory-length criterion.
-                          #'@param tau_cost_exponent Exponent in [0, 1.5] applied to the trajectory-length cost in the trajectory criterion. Default 1.
-                          #'@param esjd_jump_power Power in {2, 3, 4} of the metric jump used by the ESJD criterion. Default 2.
-                          #'@param tau_jitter_burnin Burn-in trajectory-length jitter: "uniform" (default) or "halton".
-                          #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or one positive number: multiplies the adapted tau once at the switch to sampling, only when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling is randomised. "gaussian_matched" is an experimental unit-Gaussian heuristic, not a published method; see docs/adaptation-notes.md.
-                          #'@param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with find_initial_eps at the start of the main burn-in. FALSE carries the final eps (main and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main burn-in and skips that search; no effect when no pre-burnin runs.
-                          #'@param eps_acceptance_mean NULL/"harmonic" (default) adapts the burn-in step size so that the harmonic mean over the burn-in chains of the per-chain acceptance probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC (Hoffman, Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero acceptance (a divergent proposal, which includes |log ratio| > 1000 in either direction, or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic" uses the arithmetic mean, the rule used before this option existed. "geometric" uses exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between the harmonic and the arithmetic mean.
-                          #'@param tau_adaptation_block NULL (default, not set): "main", except for the built-in
-                          #'   latent-class models LC_MVP and LC_MVOP, which monitor the parameters Se, Sp and
-                          #'   prevalence depend on (interest_only = beta, p_raw for LC_MVP; beta, p_raw,
-                          #'   C_unc_vec for LC_MVOP) when interest_only is also NULL and tau is adapted. "main":
+                          #'@param randomize_tau_burnin Randomise trajectory length during burn-in. Default FALSE;
+                          #'length can still adapt between iterations.
+                          #'@param randomize_tau_sampling Randomise post-burn-in trajectory length uniformly from
+                          #'zero to twice the adapted scale (at least one integration step). Default TRUE.
+                          #'@param tau_gradient_estimator Use the forward endpoint gradient (the default) or the
+                          #'two-ended time-reversal-averaged gradient for the trajectory-length criterion.
+                          #'@param tau_cost_exponent Exponent in [0, 1.5] applied to the trajectory-length cost in
+                          #'the trajectory criterion. Default 1.
+                          #'@param esjd_jump_power Power in {2, 3, 4} of the metric jump used by the ESJD
+                          #'criterion. Default 2.
+                          #'@param tau_jitter_burnin Burn-in trajectory-length jitter: "uniform" (default) or
+                          #'"halton".
+                          #'@param tau_sampling_scale "none" (default; unchanged behaviour), "gaussian_matched" or
+                          #'one positive number: multiplies the adapted tau once at the switch to sampling, only
+                          #'when tau was adapted with a fixed length (randomize_tau_burnin = FALSE) and sampling
+                          #'is randomised. "gaussian_matched" is an experimental unit-Gaussian heuristic, not a
+                          #'published method; see docs/adaptation-notes.md.
+                          #'@param eps_reinit_after_pre_burnin NULL/TRUE (default) re-initialises eps with
+                          #'find_initial_eps at the start of the main burn-in. FALSE carries the final eps (main
+                          #'and nuisance) of the test-order pre-burnin (reorder_cols_MVP = TRUE) into the main
+                          #'burn-in and skips that search; no effect when no pre-burnin runs.
+                          #'@param eps_acceptance_mean NULL/"harmonic" (default) adapts the burn-in step size so
+                          #'that the harmonic mean over the burn-in chains of the per-chain acceptance
+                          #'probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC (Hoffman,
+                          #'Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero
+                          #'acceptance (a divergent proposal, which includes |log ratio| > 1000 in either
+                          #'direction, or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic"
+                          #'uses the arithmetic mean, the rule used before this option existed. "geometric" uses
+                          #'exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between
+                          #'the harmonic and the arithmetic mean.
+                          #'@param tau_adaptation_block NULL (default, not set): "interest_only" whenever
+                          #'   interest_only is given, and for the built-in latent-class models LC_MVP and LC_MVOP,
+                          #'   which monitor the parameters Se, Sp and prevalence depend on (interest_only = beta,
+                          #'   p_raw for LC_MVP; beta, p_raw, C_unc_vec for LC_MVOP) when interest_only is also NULL
+                          #'   and tau is adapted; "main" only for a model with no parameter families of interest.
+                          #'   "interest_only": the trajectory-length criterion uses only the main-block rows of
+                          #'   the families named in interest_only (needs interest_only). "main":
                           #'   the trajectory-length criterion uses the main parameters only (every main parameter
                           #'   unless interest_only is given). "joint": main and nuisance parameters concatenated,
                           #'   still adapting the one joint tau. EXPERIMENTAL, for testing only; models without a
@@ -425,6 +550,40 @@ MVP_model <- R6Class("MVP_model",
                           #'   tau_adaptation_block "main" or NULL; not with "joint"). A family that matches no
                           #'   main parameter stops. NULL: every main parameter, or the built-in set for LC_MVP /
                           #'   LC_MVOP (see tau_adaptation_block).
+                          #'@param parameter_families_of_interest_for_min_ESS NULL (default) or a character
+                          #'   vector of parameter families (the names before "[" or "."): the parameters of
+                          #'   interest, over which every min-ESS-based efficiency measure of the summary is
+                          #'   computed (the min ESS rates per second and per gradient, and the times to a
+                          #'   target ESS), whatever the burn-in adaptation block (main, joint or
+                          #'   interest_only), so that fits with different blocks are compared on the same
+                          #'   parameters. The min ESS over every main parameter (the parameters block except
+                          #'   the nuisance parameters) is reported as well. NULL: interest_only when it is
+                          #'   given; otherwise, for LC_MVP / LC_MVOP, the parameters Se, Sp and prevalence
+                          #'   depend on; otherwise every main parameter.
+                          #'@param tau_criteria_monitor_reported_quantities FALSE (default) or TRUE: every
+                          #'   position-based trajectory criterion computes its statistic on the reported
+                          #'   quantities, i.e. the generated quantities that the efficiency endpoint (E_min) is
+                          #'   computed on (Se, Sp and prevalence for LC_MVP / LC_MVOP), instead of on the metric
+                          #'   coordinates of the main parameters: the criterion's endpoints are f(theta) at the
+                          #'   main block's trajectory endpoints, its velocities d/dt f(theta + t v) at t = 0
+                          #'   along the endpoint velocities, its centre and diagonal metric the mean and the
+                          #'   standard deviation of each reported quantity over the trajectory starts of the last
+                          #'   reported_quantities_centre_and_scale_from_last_n_iterations burn-in iterations (all
+                          #'   chains), and SNAPER's direction a unit vector of its own over the reported
+                          #'   quantities. With tau_adaptation_block "main" or NULL and interest_only NULL only
+                          #'   (the reported quantities replace the monitored rows); unused with manual tau. The
+                          #'   rest of the burn-in is unchanged.
+                          #'@param reported_quantities_function NULL (default) or a function f of a numeric
+                          #'   matrix of main parameters (n_params_main rows in the sampler's main-block order,
+                          #'   unconstrained scale, x chains) that returns a numeric matrix of the reported
+                          #'   quantities (one row per quantity, with rownames, x chains). NULL: the built-in
+                          #'   reported quantities of LC_MVP / LC_MVOP (Se, Sp and prevalence); any other model
+                          #'   stops and needs this function. Used only with
+                          #'   tau_criteria_monitor_reported_quantities = TRUE.
+                          #'@param reported_quantities_centre_and_scale_from_last_n_iterations A whole number of
+                          #'   at least 1 (default 10): the burn-in iterations whose trajectory starts (all
+                          #'   chains) give the centre (mean) and the scale (standard deviation) of each reported
+                          #'   quantity, with tau_criteria_monitor_reported_quantities = TRUE.
                           #'@param manual_tau If \code{FALSE}, then the selected burnin_algorithm will be used to adapt \eqn{\tau} during the burnin phase. Otherwise if \code{TRUE}, \eqn{\tau} will be
                           #' fixed to the value given in the \code{tau_if_manual} argument. 
                           #'@param tau_if_manual The HMC path length (\eqn{\tau}) to use for the HMC sampling. This will be used for both the burnin and sampling phases. 
@@ -436,19 +595,24 @@ MVP_model <- R6Class("MVP_model",
                           #'@param partitioned_HMC Whether to sample all parameters at once (note: wont use diffusion HMC) or whether to alternate between sampling the nuisance 
                           #'parameters and the main model parameters. 
                           #'@param diffusion_HMC Whether to use diffusion-pathspace HMC (Beskos et al) to sample nuisance parameters. Default is TRUE. 
-                          #'@param diffusion_HMC_integrator Joint diffusion integrator: "kick_flow_kick" (default) or "flow_kick_flow".
-                          #'@param debug_burnin_timing Collect burn-in timing and per-chain integrator step diagnostics. Default FALSE.
-                          #'@param vect_type Leave NULL (the default). The SIMD vectorisation type is NOT chosen in \code{$sample()}: for the built-in
-                          #'models it is set at model initialisation through \code{model_args_list$vect_type} (see the class documentation; BayesMVP
-                          #'validates it and defaults it to the SIMD level compiled into the installed BayesMVP), and for \code{Model_type = "Stan"} it is
-                          #'not used at all (the .stan file defines its own maths). A non-NULL value stops with an error for Stan models; for built-in
-                          #'models it must equal the initialised \code{model_args_list$vect_type}, otherwise it stops and points to \code{model_args_list}.
-                          #'(Previously this argument was silently ignored.)
-                          #'@param Phi_type Leave NULL (the default). Same rules as \code{vect_type}: set it through \code{model_args_list$Phi_type} at
-                          #'initialisation for the built-in models ("Phi" or "Phi_approx"); not used for Stan models,
-                          #'where a non-NULL value stops.
-                          #'@param inv_Phi_type Leave NULL (the default). Same rules as \code{Phi_type}, via \code{model_args_list$inv_Phi_type} ("inv_Phi" or
-                          #'"inv_Phi_approx" for the built-in models).
+                          #'@param diffusion_HMC_integrator Joint diffusion integrator: "kick_flow_kick" (default)
+                          #'or "flow_kick_flow".
+                          #'@param debug_burnin_timing Collect burn-in timing and per-chain integrator step
+                          #'diagnostics. Default FALSE.
+                          #'@param vect_type Leave NULL (the default). The SIMD vectorisation type is NOT chosen
+                          #'in \code{$sample()}: for the built-in models it is set at model initialisation through
+                          #'\code{model_args_list$vect_type} (see the class documentation; BayesMVP validates it
+                          #'and defaults it to the SIMD level compiled into the installed BayesMVP), and for
+                          #'\code{Model_type = "Stan"} it is not used at all (the .stan file defines its own
+                          #'maths). A non-NULL value stops with an error for Stan models; for built-in models it
+                          #'must equal the initialised \code{model_args_list$vect_type}, otherwise it stops and
+                          #'points to \code{model_args_list}. (Previously this argument was silently ignored.)
+                          #'@param Phi_type Leave NULL (the default). Same rules as \code{vect_type}: set it
+                          #'through \code{model_args_list$Phi_type} at initialisation for the built-in models
+                          #'("Phi" or "Phi_approx"); not used for Stan models, where a non-NULL value stops.
+                          #'@param inv_Phi_type Leave NULL (the default). Same rules as \code{Phi_type}, via
+                          #'\code{model_args_list$inv_Phi_type} ("inv_Phi" or "inv_Phi_approx" for the built-in
+                          #'models).
                           #'@param n_params_main Number of main parameters. See class documentation for details.
                           #'@param n_nuisance Number of nuisance parameters. See class documentation for details.
                           #'@param n_chains_burnin Number of chains used for burnin. See class documentation for details.
@@ -461,52 +625,74 @@ MVP_model <- R6Class("MVP_model",
                           #'of efficiency (since this will decrease the step-size (epsilon) and increase the number of leapfrog steps (L) per iteration).
                           #'@param learning_rate The ADAM learning rate (LR) for learning the appropriate HMC step-size (\eqn{\epsilon}) and HMC path length (\eqn{\tau = L \cdot \epsilon})
                           #'during the burnin period. The default depends on the length of the burnin, and is the pairing selected by pilot study 7:
-                          #'LR = 0.0125, 0.025, 0.05 and 0.075 for \code{n_burnin} = 1000, 500, 250 and 125 respectively. Burnin lengths BETWEEN those
-                          #'values are interpolated linearly in \eqn{\log(n\_burnin)} vs \eqn{\log(LR)} (i.e. a piecewise power law), which over
-                          #'[250, 1000] is exactly \eqn{LR = 12.5 / n\_burnin}; the short [125, 250] segment is deliberately shallower than that.
-                          #'Outside [125, 1000] the nearest segment's slope is continued, capped at LR = 0.125 so that a very short burnin cannot
-                          #'produce an unstable rate.
-                          #'@param n_refresh How often to report burnin progress, as an INTERVAL in iterations: progress is printed every
-                          #'\code{n_refresh} iterations (the same convention as Stan's \code{refresh}). \code{NULL} (the default) uses
-                          #'\code{n_burnin / 20}, i.e. about twenty reports across the burnin. Larger values are quieter.
-                          #'@param learning_rate_initial A HIGH ADAM learning rate held for the first \code{learning_rate_initial_iter} burnin
-                          #'iterations, then dropped to \code{learning_rate}. The learning rate drives BOTH the step-size (\eqn{\epsilon}) and the
-                          #'path-length (\eqn{\tau}) adaptation, so holding it high lets the adaptation move a long way early instead of creeping,
-                          #'while the later, finer adaptation still runs at the normal rate. Default is \code{0.10}; pass \code{NULL} (or \code{NA})
-                          #'to switch the hold off.
-                          #'@param learning_rate_initial_iter How many burnin iterations to hold \code{learning_rate_initial} for. The default is
-                          #'\code{n_burnin / 10}, i.e. 50 iterations at \code{n_burnin} = 500, scaled proportionally to other burnin lengths.
-                          #'@param eps_initial A deliberately LARGE HMC step-size (\eqn{\epsilon}) held for the first \code{eps_initial_iter} burnin
-                          #'iterations, so that the chains cover ground quickly before the usual step-size takes over. During this window the path
-                          #'length is one leapfrog step (MALA), so these are large single steps. After the window, \eqn{\epsilon} is handed back to
-                          #'the value it would otherwise have started from (the automatic heuristic) and adapted as normal, with the ADAM moments
-                          #'reset so the warm-start value is not carried forward. Default is \code{NULL} (OFF); set a positive value to enable it.
-                          #'Capped by \code{max_eps_main} / \code{max_eps_nuisance}.
-                          #'@param eps_initial_iter How many burnin iterations to hold \code{eps_initial} for. The default is \code{n_burnin / 10},
-                          #'i.e. the 50 iterations found to work well at \code{n_burnin} = 500, scaled proportionally to other burnin lengths.
-                          #'@param n_nuisance_to_track How many nuisance (latent-variable) coordinates the sampler keeps a trace of.
-                          #'The trace is only ever read by the post-hoc \code{param_constrain} step, which needs it solely when the model
-                          #'being constrained declares the nuisance block (an external Stan model with a nuisance block, or \code{latent_trait});
-                          #'the other built-in skeletons declare the main parameters only, so for them the trace has no reader and storing it is
-                          #'pure memory traffic (tens of GB per run at \code{n_nuisance} = 60,000). \code{NULL} (the default) decides this
-                          #'automatically from the model's unconstrained dimension; \code{0} never stores it; \code{n_nuisance} always does. Any other value is refused: the trace is all-or-nothing (a partial
-                          #'buffer is grown to the full length on the first write, so e.g. 1 would cost exactly as much as keeping everything).
+                          #'LR = 0.0125, 0.025, 0.05 and 0.075 for \code{n_burnin} = 1000, 500, 250 and 125
+                          #'respectively. Burnin lengths BETWEEN those values are interpolated linearly in
+                          #'\eqn{\log(n\_burnin)} vs \eqn{\log(LR)} (i.e. a piecewise power law), which over [250,
+                          #'1000] is exactly \eqn{LR = 12.5 / n\_burnin}; the short [125, 250] segment is
+                          #'deliberately shallower than that. Outside [125, 1000] the nearest segment's slope is
+                          #'continued, capped at LR = 0.125 so that a very short burnin cannot produce an unstable
+                          #'rate.
+                          #'@param n_refresh How often to report burnin progress, as an INTERVAL in iterations:
+                          #'progress is printed every \code{n_refresh} iterations (the same convention as Stan's
+                          #'\code{refresh}). \code{NULL} (the default) uses \code{n_burnin / 20}, i.e. about
+                          #'twenty reports across the burnin. Larger values are quieter.
+                          #'@param learning_rate_initial A HIGH ADAM learning rate held for the first
+                          #'\code{learning_rate_initial_iter} burnin iterations, then dropped to
+                          #'\code{learning_rate}. The learning rate drives BOTH the step-size (\eqn{\epsilon}) and
+                          #'the path-length (\eqn{\tau}) adaptation, so holding it high lets the adaptation move a
+                          #'long way early instead of creeping, whilst the later, finer adaptation still runs at
+                          #'the normal rate. Default is \code{NULL}: the run's own \code{learning_rate}, i.e. no
+                          #'hold.
+                          #'@param learning_rate_initial_iter How many burnin iterations to hold
+                          #'\code{learning_rate_initial} for. The default is \code{n_burnin / 10}, i.e. 50
+                          #'iterations at \code{n_burnin} = 500, scaled proportionally to other burnin lengths.
+                          #'@param eps_initial A deliberately LARGE HMC step-size (\eqn{\epsilon}) held for the
+                          #'first \code{eps_initial_iter} burnin iterations, so that the chains cover ground
+                          #'quickly before the usual step-size takes over. During this window the path length is
+                          #'one leapfrog step (MALA), so these are large single steps. After the window,
+                          #'\eqn{\epsilon} is handed back to the value it would otherwise have started from (the
+                          #'automatic heuristic) and adapted as normal, with the ADAM moments reset so the
+                          #'warm-start value is not carried forward. Default is \code{NULL} (OFF); set a positive
+                          #'value to enable it. Capped by \code{max_eps_main} / \code{max_eps_nuisance}.
+                          #'@param eps_initial_iter How many burnin iterations to hold \code{eps_initial} for. The
+                          #'default is \code{n_burnin / 10}, i.e. the 50 iterations found to work well at
+                          #'\code{n_burnin} = 500, scaled proportionally to other burnin lengths.
+                          #'@param n_nuisance_to_track How many nuisance (latent-variable) coordinates the sampler
+                          #'keeps a trace of. The trace is only ever read by the post-hoc \code{param_constrain}
+                          #'step, which needs it solely when the model being constrained declares the nuisance
+                          #'block (an external Stan model with a nuisance block, or \code{latent_trait}); the
+                          #'other built-in skeletons declare the main parameters only, so for them the trace has
+                          #'no reader and storing it is pure memory traffic (tens of GB per run at
+                          #'\code{n_nuisance} = 60,000). \code{NULL} (the default) decides this automatically from
+                          #'the model's unconstrained dimension; \code{0} never stores it; \code{n_nuisance}
+                          #'always does. Any other value is refused: the trace is all-or-nothing (a partial buffer
+                          #'is grown to the full length on the first write, so e.g. 1 would cost exactly as much
+                          #'as keeping everything).
                           #'@param clip_iter The number of iterations to perform MALA (i.e., one leapfrog step) on (first clip_iter iterations) for the burnin period.
                           #'The default depends on the length of the burnin period, and is the configuration selected by pilot study 7:
-                          #'\code{clip_iter} = 150, 75, 50 and 30 for \code{n_burnin} = 1000, 500, 250 and 125 respectively (banded, so e.g. any
-                          #'\code{n_burnin} in [250, 500) takes 50; outside [125, 1000] the nearest band's ratio is extrapolated).
-                          #'Update: at exactly \code{n_burnin = 125}, the default is now \code{clip_iter = 20}; the historical values above
-                          #'are retained for reference. Other burnin lengths and explicit overrides are unchanged.
-                          #'@param clip_iter_tau The iteration at which the path-length (tau) adaptation stops being clipped during the burnin period.
-                          #'The default likewise follows pilot study 7, where it is \code{clip_iter + int}: \code{clip_iter_tau} = 350, 175, 125 and 80
-                          #'for \code{n_burnin} = 1000, 500, 250 and 125 respectively. Note this also sets the default \code{gap}, which is
-                          #'\code{clip_iter + clip_iter_tau} when \code{gap} is left NULL.
-                          #'Update: at exactly \code{n_burnin = 125}, \code{clip_iter_tau = 50} gives the requested 40-percent handover.
-                          #'The burn-in routine uses \code{clip_iter_tau} as its effective handover, overriding the incoming \code{gap}.
+                          #'\code{clip_iter} = 150, 75, 50 and 30 for \code{n_burnin} = 1000, 500, 250 and 125
+                          #'respectively (banded, so e.g. any \code{n_burnin} in [250, 500) takes 50; outside
+                          #'[125, 1000] the nearest band's ratio is extrapolated). Update: at exactly
+                          #'\code{n_burnin = 125}, the default is now \code{clip_iter = 20}; the historical values
+                          #'above are retained for reference. Other burnin lengths and explicit overrides are
+                          #'unchanged.
+                          #'@param clip_iter_tau The iteration at which the path-length (tau) adaptation stops
+                          #'being clipped during the burnin period. The default likewise follows pilot study 7,
+                          #'where it is \code{clip_iter + int}: \code{clip_iter_tau} = 350, 175, 125 and 80 for
+                          #'\code{n_burnin} = 1000, 500, 250 and 125 respectively. Note this also sets the default
+                          #'\code{gap}, which is \code{clip_iter + clip_iter_tau} when \code{gap} is left NULL.
+                          #'Update: at exactly \code{n_burnin = 125}, \code{clip_iter_tau = 50} gives the
+                          #'requested 40-percent handover. The burn-in routine uses \code{clip_iter_tau} as its
+                          #'effective handover, overriding the incoming \code{gap}.
+                          #'@param metric_start_iter The first burn-in iteration whose draws feed the main metric
+                          #'(the pooled estimator); a whole number from 1 to n_burnin - 1. NULL (default):
+                          #'round(n_burnin / 10), i.e. 12 at n_burnin = 125. Draws before clip_iter come from
+                          #'one-leapfrog-step iterations; the number of draws the first estimate waits for is
+                          #'\code{pooled_metric_warm_up}.
                           #'@param interval_width_main How often to update the metric (which is either empirical or Hessian-informed, and can be diagonal or dense) for the 
                           #'main parameters during the burnin period. The default used depends on the length of the burnin period. 
                           #'@param interval_width_nuisance How often to update the metric (which is empirical and diagonal) for the nuisance parameters during the burnin period.
-                          #'The default used depends on the length of the burnin period. 
+                          #'The default is 1 (the nuisance metric is updated at every burn-in iteration). 
                           #'@param force_autodiff Whether to use (force) autodiff instead of the built-in manual gradients. This is only relevant for the built-in models, not 
                           #'Stan models. The default is \code{FALSE}. 
                           #'@param force_PartialLog Whether to use (force) use of gradients on the log-scale (for stability). Note that if \code{force_autodiff = TRUE} then this will 
@@ -527,28 +713,47 @@ MVP_model <- R6Class("MVP_model",
                           #'@param ... Additional arguments passed to sampling.
                           #'@return Returns self invisibly, allowing for method chaining of this classes (MVP_model) methods. E.g.: model$sample(...)$summary(...). 
                           #'
-                          #'@param burnin_algorithm Trajectory-length adaptation: KE, ChEES, CHESSR, CHESSR_log or SNAPER.
-                          #'"CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate criterion; CHESSR_log selects the smoothed log-rate variant.
-                          #'"CHESSR_time" / "SNAPER_time" select the time-to-target-ESS variants of CHESSR / SNAPER (joint sampler only).
-                          #'"ESJD" selects the expected squared jumped distance per unit trajectory length (Pasarica and Gelman, 2010), with the CHESSR
-                          #'estimator; "ESJD_CHESSR" selects the geometric mean of the ESJD and CHESSR criteria (equal weights).
-                          #'"ESJD_SNAPER" selects the experimental equal-weight geometric mean of the ESJD and SNAPER per-trajectory rates.
-                          #'"LQ_ESSR" selects the experimental soft minimum, over the monitored coordinates, of the lag-one ESS
-                          #'bounds of the linear and the centred squared statistics, per unit trajectory length (exact for Gaussian
-                          #'normal modes).
-                          #'"L_ESSR_length_response" / "LQ_ESSR_length_response" select the experimental soft
-                          #'minimum of the lag-one ESS bounds of the linear statistics / of the linear and centred
-                          #'squared statistics, per unit trajectory length, maximised over tau directly from the
-                          #'length response of the jittered trajectories (no tau derivative and no ADAM;
-                          #'R_fn_length_response_tau_criterion.R).
-                          #'"LQ_ESSR_spectral" selects the same with a spectral linear term (per monitored
-                          #'coordinate, a non-negative cosine mixture fitted to the flow's decorrelation over
-                          #'the explored trajectory lengths, composed with the acceptance), per expected
-                          #'leapfrog step (R_fn_spectral_ESS_tau_criterion.R).
-                          #'"LQ_ESSR_spectral_long_bin_memory" selects "LQ_ESSR_spectral" with its length bins
-                          #'forgetting at 0.99 per update instead of 0.95.
-                          #'"LQ_ESSR_spec_bins99_evid_expand" selects that with the doubling of tau at the
-                          #'upper end of the candidates only on evidence that the objective still rises there.
+                          #'@param burnin_algorithm Trajectory-length adaptation: KE, ChEES, CHESSR, CHESSR_log or
+                          #'SNAPER. "CHESS"/"ChEES" select ChEES; "CHESSR"/"ChEESR" select the ChEES-rate
+                          #'criterion; CHESSR_log selects the smoothed log-rate variant. "CHESSR_time" /
+                          #'"SNAPER_time" select the time-to-target-ESS variants of CHESSR / SNAPER (joint sampler
+                          #'only). "ESJD" selects the expected squared jumped distance per unit trajectory length
+                          #'(Pasarica and Gelman, 2010), with the CHESSR estimator; "ESJD_CHESSR" selects the
+                          #'geometric mean of the ESJD and CHESSR criteria (equal weights). "ESJD_SNAPER" selects
+                          #'the experimental equal-weight geometric mean of the ESJD and SNAPER per-trajectory
+                          #'rates. "ESJD_CHESSR_SNAPER" selects the equal-weight geometric mean of the ESJD,
+                          #'CHESSR and SNAPER criteria; "ESJD_w50_CHESSR_w25_SNAPER_w25" the same with the weights
+                          #'0.50, 0.25 and 0.25.
+                          ## #'"LQ_ESSR" selects the experimental soft minimum, over the monitored coordinates, of
+                          ## #'the lag-one ESS
+                          ## #'bounds of the linear and the centred squared statistics, per unit trajectory length
+                          ## #'(exact for Gaussian
+                          ## #'normal modes).
+                          ## #'"L_ESSR_length_response" / "LQ_ESSR_length_response" select the experimental soft
+                          ## #'minimum of the lag-one ESS bounds of the linear statistics / of the linear and
+                          ## #'centred
+                          ## #'squared statistics, per unit trajectory length, maximised over tau directly from
+                          ## #'the
+                          ## #'length response of the jittered trajectories (no tau derivative and no ADAM;
+                          ## #'R_fn_length_response_tau_criterion.R).
+                          ## #'"LQ_ESSR_spectral" selects the same with a spectral linear term (per monitored
+                          ## #'coordinate, a non-negative cosine mixture fitted to the flow's decorrelation over
+                          ## #'the explored trajectory lengths, composed with the acceptance), per expected
+                          ## #'leapfrog step (R_fn_spectral_ESS_tau_criterion.R).
+                          ## #'"LQ_ESSR_spectral_long_bin_memory" selects "LQ_ESSR_spectral" with its length bins
+                          ## #'forgetting at 0.99 per update instead of 0.95.
+                          ## #'"LQ_ESSR_spec_bins99_evid_expand" selects that with the doubling of tau at the
+                          ## #'upper end of the candidates only on evidence that the objective still rises there.
+                          #'"LQ_ESSR", "L_ESSR_length_response", "LQ_ESSR_length_response", "LQ_ESSR_spectral"
+                          #'and "LQ_ESSR_spectral_long_bin_memory" are retired: requesting one of them stops.
+                          #'"LQ_ESSR_spec_bins99_evid_expand" (SpESS-R; also "SpESSR") selects the experimental
+                          #'soft minimum, over the monitored coordinates, of a spectral ESS bound of the linear
+                          #'statistic (per monitored coordinate, a non-negative cosine mixture fitted to the
+                          #'flow's decorrelation over the explored trajectory lengths, composed with the
+                          #'acceptance) and the lag-one ESS bound of the centred squared statistic, per expected
+                          #'leapfrog step (R_fn_spectral_ESS_tau_criterion.R), with its length bins forgetting at
+                          #'0.99 per update and the doubling of tau at the upper end of the candidates only on
+                          #'evidence that the objective still rises there.
                           #'"ESJD_LQ_ESSR_spec_bins99_finite_N_evid_expand" selects the equal-weight geometric
                           #'mean of ESJD and that, with the finite-run ESS of the run's n_iter draws.
                           #'"LQ_ESSR_spec_bins99_evid_expand_jump_accept" selects
@@ -560,53 +765,79 @@ MVP_model <- R6Class("MVP_model",
                           #'("ESJD_LQ_ESSR_spec_bins99_evid_expand": 0.5).
                           #'"ESJD_LQ_ESSR_spec_bins99_evid_expand" selects the same geometric mean without the
                           #'finite-run ESS.
-                          #'@param time_criterion_settings For burnin_algorithm = "CHESSR_time" / "SNAPER_time": NULL (default) or a named list of the
-                          #'time-to-target-ESS criterion settings (sampling timing probe, previous saved run(s), user-supplied times, ESS target);
-                          #'see fn_default_time_criterion_settings(). Ignored by the other criteria.
-                          #'sampling_overhead_in_leapfrog_steps (the fixed per-iteration sampling cost, in leapfrog-step equivalents):
-                          #'NULL (default) = user-supplied times > previous saved run(s) > sampling timing probe; a number >= 0 = used as it
-                          #'is, with no probe; "auto" = a value for the sampling configuration (n_chains_sampling chains,
-                          #'n_threads_WCP_sampling threads per chain, the sampling chunk count): the built-in default for the model, that
-                          #'configuration and the machine's number of physical cores when one exists
-                          #'(fn_default_sampling_overhead_in_leapfrog_steps), otherwise the sampling timing probe in its "lite" mode; it is
-                          #'never taken from the burn-in's timings or a saved run (a time_criterion_previous_run_path that is supplied is
-                          #'still used for time_per_leapfrog_step_sampling and ESS_per_iter_sampling_expected only). With the built-in
-                          #'default, as with a number, no probe runs, and burnin_to_sampling_leapfrog_time_ratio uses a user-supplied or
-                          #'previous-run time_per_leapfrog_step_sampling (else 0, with a warning). The source used (built_in_default,
-                          #'probe_lite, probe_full, probe_lite_without_summaries, probe_full_without_summaries or user_supplied) and the two
-                          #'parts of the value are returned in time_criterion$time_criterion_sampling_quantities.
-                          #'sampling_timing_probe_mode: NULL (default; "lite" with "auto", else "full"), "full" or "lite" (the smallest and
-                          #'the largest sampling_timing_probe_L_values only, and the summaries timed once, less their fixed set-up, which is
-                          #'measured once per R session and cached; NicoStan:::fn_clear_sampling_timing_probe_summaries_set_up_cache()
-                          #'empties the cache). With the default sampling_timing_probe_L_values = c(2, 8) and no cached set-up (the first
-                          #'lite probe of a configuration in an R session, and always with run_in_fresh_R_process = TRUE), a lite probe
-                          #'makes exactly the full probe's calls.
-                          #'lag_one_autocorrelation_rho (MALT's exponent: the criterion's penalty times (1 + lag_one_autocorrelation_rho) / 2,
-                          #'i.e. the cost raised to the power (1 + lag_one_autocorrelation_rho) / 2): a number in [0, 1], 1 (default) = the
-                          #'criterion without it; or "adaptive" = estimated during the tau adaptation as the lag-one autocorrelation of the
-                          #'criterion's statistic across the burn-in chains (MALT's running moments, clipped to [0, 1]);
-                          #'lag_one_autocorrelation_rho_moment_averaging_offset is the offset in the running-moment weight
-                          #'n_earlier_moment_updates / (n_earlier_moment_updates + lag_one_autocorrelation_rho_moment_averaging_offset)
+                          #'@param time_criterion_settings For burnin_algorithm = "CHESSR_time" / "SNAPER_time":
+                          #'NULL (default) or a named list of the time-to-target-ESS criterion settings (sampling
+                          #'timing probe, previous saved run(s), user-supplied times, ESS target); see
+                          #'fn_default_time_criterion_settings(). Ignored by the other criteria.
+                          #'sampling_overhead_in_leapfrog_steps (the fixed per-iteration sampling cost, in
+                          #'leapfrog-step equivalents): NULL (default) = user-supplied times > previous saved
+                          #'run(s) > sampling timing probe; a number >= 0 = used as it is, with no probe; "auto" =
+                          #'a value for the sampling configuration (n_chains_sampling chains,
+                          #'n_threads_WCP_sampling threads per chain, the sampling chunk count): the built-in
+                          #'default for the model, that configuration and the machine's number of physical cores
+                          #'when one exists (fn_default_sampling_overhead_in_leapfrog_steps), otherwise the
+                          #'sampling timing probe in its "lite" mode; it is never taken from the burn-in's timings
+                          #'or a saved run (a time_criterion_previous_run_path that is supplied is still used for
+                          #'time_per_leapfrog_step_sampling and ESS_per_iter_sampling_expected only). With the
+                          #'built-in default, as with a number, no probe runs, and
+                          #'burnin_to_sampling_leapfrog_time_ratio uses a user-supplied or previous-run
+                          #'time_per_leapfrog_step_sampling (else 0, with a warning). The source used
+                          #'(built_in_default, probe_lite, probe_full, probe_lite_without_summaries,
+                          #'probe_full_without_summaries or user_supplied) and the two parts of the value are
+                          #'returned in time_criterion$time_criterion_sampling_quantities.
+                          #'sampling_timing_probe_mode: NULL (default; "lite" with "auto", else "full"), "full" or
+                          #'"lite" (the smallest and the largest sampling_timing_probe_L_values only, and the
+                          #'summaries timed once, less their fixed set-up, which is measured once per R session
+                          #'and cached; NicoStan:::fn_clear_sampling_timing_probe_summaries_set_up_cache() empties
+                          #'the cache). With the default sampling_timing_probe_L_values = c(2, 8) and no cached
+                          #'set-up (the first lite probe of a configuration in an R session, and always with
+                          #'run_in_fresh_R_process = TRUE), a lite probe makes exactly the full probe's calls.
+                          #'lag_one_autocorrelation_rho (MALT's exponent: the criterion's penalty times (1 +
+                          #'lag_one_autocorrelation_rho) / 2, i.e. the cost raised to the power (1 +
+                          #'lag_one_autocorrelation_rho) / 2): a number in [0, 1], 1 (default) = the criterion
+                          #'without it; or "adaptive" = estimated during the tau adaptation as the lag-one
+                          #'autocorrelation of the criterion's statistic across the burn-in chains (MALT's running
+                          #'moments, clipped to [0, 1]); lag_one_autocorrelation_rho_moment_averaging_offset is
+                          #'the offset in the running-moment weight n_earlier_moment_updates /
+                          #'(n_earlier_moment_updates + lag_one_autocorrelation_rho_moment_averaging_offset)
                           #'(default 8, MALT's value). The values used are returned in time_criterion$burnin.
-                          #'@param burnin_TBB_pool_equals_n_chains NULL defaults to TRUE for built-in models, which use OpenMP within chains.
-                          #'External Stan models always force FALSE, even when TRUE is supplied, so nested TBB likelihood work can use
-                          #'n_chains_burnin * n_threads_WCP_burnin threads. Built-in models can explicitly select FALSE.
+                          #'@param burnin_TBB_pool_equals_n_chains NULL defaults to TRUE for built-in models,
+                          #'which use OpenMP within chains. External Stan models always force FALSE, even when
+                          #'TRUE is supplied, so nested TBB likelihood work can use n_chains_burnin *
+                          #'n_threads_WCP_burnin threads. Built-in models can explicitly select FALSE.
                           #'@param n_threads_WCP_burnin,num_chunks_burnin The within-chain threads of each
-                          #'burn-in chain and the burn-in chunks. When both are NULL (the default), a Stan model
-                          #'with the N / chunk_size data contract (reduce_sum_static) gets the values of
-                          #'fn_compute_burnin_n_threads_WCP_and_num_chunks() (Paper 1's burn-in rule, for the
-                          #'CPUs of the process and the measured M_bytes/chain); any other model gets 1 thread
-                          #'and its own chunks. A value given is used as given.
-                          #'@param tau_shrink_on_divergence,tau_shrink_factor,tau_shrink_min_divergent_chains Divergence-triggered tau shrink in the
-                          #'burn-in. NULL/FALSE (default) = off. TRUE multiplies tau by tau_shrink_factor (NULL = 0.95) at each adaptation iteration
-                          #'in which at least tau_shrink_min_divergent_chains (NULL = 2) burn-in chains diverge (the rule used in earlier runs).
-                          #'@param metric_pooled_window_resets Pooled metric estimator (metric_estimator = "pooled") only: iterations r at which its
-                          #'Welford accumulators (main covariance and nuisance variances) are reset, at the start of iteration r + 1.
-                          #'NULL/"stan_style" (default) = round(c(0.30, 0.60) * n_adapt), the resets used before this option existed; "none" = one
-                          #'window from the first metric iteration to metric_adaptation_end_iter; or a numeric vector of whole numbers >= 0.
-                          #'@param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1] (NULL = 0, as before this option
-                          #'existed), applied once to each pooled covariance proposal of the dense main metric as (1 - s) * cov + s * diag(diag(cov)).
-                          #'0 keeps all off-diagonals unshrunk.
+                          #'burn-in chain and the burn-in chunks. With n_threads_WCP_sampling and
+                          #'num_chunks_sampling, they are given only for the binary LC-MVP
+                          #'(Model_type = "LC_MVP"), from Paper 1's E1 results for its N and machine (a thread
+                          #'count not given is 1, and a chunk count not given is the model's own). For every
+                          #'other model, all four must be left NULL (the default; giving any of them stops with
+                          #'an error), and Paper 1's functions always choose them: the burn-in threads and chunks
+                          #'with fn_compute_burnin_n_threads_WCP_and_num_chunks() (Paper 1's burn-in rule), for
+                          #'the CPUs of the process and the measured M_bytes/chain (for a Stan model with the
+                          #'N / chunk_size data contract, the rule's configurations are also timed); one thread
+                          #'per sampling chain; and the sampling chunks with fn_compute_initial_N_chunks(), for
+                          #'the sampling chains and the CPUs of the process. A Stan model without the
+                          #'N / chunk_size data contract has no within-chain parallelism (one thread per chain).
+                          #'@param n_threads_WCP_sampling,num_chunks_sampling The within-chain threads of each
+                          #'sampling chain and the sampling chunks: given only for the binary LC-MVP, as for
+                          #'n_threads_WCP_burnin and num_chunks_burnin (see there).
+                          #'@param tau_shrink_on_divergence,tau_shrink_factor,tau_shrink_min_divergent_chains
+                          #'Divergence-triggered tau shrink in the burn-in. NULL/FALSE (default) = off. TRUE
+                          #'multiplies tau by tau_shrink_factor (NULL = 0.95) at each adaptation iteration in
+                          #'which at least tau_shrink_min_divergent_chains (NULL = 2) burn-in chains diverge (the
+                          #'rule used in earlier runs).
+                          #'@param metric_pooled_window_resets Pooled metric estimator (metric_estimator =
+                          #'"pooled") only: iterations r at which its Welford accumulators (main covariance and
+                          #'nuisance variances) are reset, at the start of iteration r + 1. NULL/"stan_style"
+                          #'(default) = round(c(0.30, 0.60) * n_adapt), the resets used before this option
+                          #'existed; "none" = one window from the first metric iteration to
+                          #'metric_adaptation_end_iter; or a numeric vector of whole numbers >= 0.
+                          #'@param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1]
+                          #'(NULL = 0, as before this option existed), applied once to each pooled covariance
+                          #'proposal of the dense main metric as (1 - s) * cov + s * diag(diag(cov)). 0 keeps all
+                          #'off-diagonals unshrunk. The default (and NULL) is "adaptive": the diagonal-target
+                          #'shrinkage of Schafer and Strimmer (2005), with its intensity estimated from the pooled
+                          #'burn-in draws of all the chains (R_fn_metric_adaptive_shrinkage.R).
                           #'@param test_order_rule_for_reorder_cols_MVP The rule that sets the test order after
                           #'the pre-burnin when reorder_cols_MVP = TRUE:
                           #'"most_nearly_deterministic_test_last_then_greedy_correlation_order" (the most nearly
@@ -639,6 +870,58 @@ MVP_model <- R6Class("MVP_model",
                           #'@param eps_adam_reset_at_metric_end,eps_learning_rate_restart_at_metric_end TRUE
                           #'(default) resets the step-size ADAM moments, and restarts its learning-rate decay, at
                           #'the final metric update.
+                          #'@param calibrate_eps_on_sampling_chains_before_sampling TRUE (default): between
+                          #'the burn-in and the sampling, discarded iterations of every sampling chain (from the
+                          #'initial states of the sampling) set the sampling eps so that the mean acceptance
+                          #'probability over the sampling chains is adapt_delta, from the curve 2 Phi(-c eps^2)
+                          #'fitted to the blocks' mean acceptance probabilities
+                          #'(R_fn_calibrate_eps_on_sampling_chains_to_adapt_delta.R); their gradient evaluations
+                          #'and time are counted with the burn-in's. FALSE samples with the eps handed over by the
+                          #'burn-in.
+                          #'@param n_transitions_per_eps_calibration_block Transitions (iterations x sampling
+                          #'chains) of each calibration block, at least (default 300; e.g. 2 iterations of 180
+                          #'chains, 19 of 16 chains).
+                          #'@param n_eps_calibration_blocks Number of calibration blocks (default 4): the eps of
+                          #'each block after the first comes from the curve fitted to the blocks before it.
+                          #'@param repeat_sampling_with_eps_refitted_if_mean_acceptance_outside NULL (default) or
+                          #'c(lower, upper): when the mean sampling acceptance probability (over every sampling
+                          #'chain and iteration) is outside these bounds, the sampling eps is refitted from the
+                          #'two most recent points (the last calibration point and the sampling), with the curve
+                          #'2 Phi(-c eps^k) through both, and the sampling is repeated from the same initial
+                          #'states with the same seed; each earlier sampling counts as burn-in (time and gradient
+                          #'evaluations). Needs calibrate_eps_on_sampling_chains_before_sampling = TRUE.
+                          #'@param n_eps_refits_and_repeated_samplings Most refits and repeated samplings
+                          #'(default 2); a sampling still outside the bounds is kept, with a warning.
+                          #'@param set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains TRUE: the
+                          #'sampling eps is set so that the ordinary mean acceptance probability is adapt_delta,
+                          #'from the curve 2 Phi(-c eps^2) fitted to the acceptance probabilities which the
+                          #'burn-in chains recorded at each iteration of the last part of the burn-in, at each
+                          #'iteration's eps
+                          #'(R_fn_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains.R). The burn-in is
+                          #'unchanged and no iteration is added. FALSE (default) leaves the sampling eps to the
+                          #'burn-in or to calibrate_eps_on_sampling_chains_before_sampling (only one of the two
+                          #'may be TRUE).
+                          #'@param fraction_of_burnin_iterations_at_end_used_for_sampling_eps The last fraction of
+                          #'the burn-in iterations whose acceptance probabilities set the sampling eps (default
+                          #'0.5, the second half of the burn-in).
+                          #'@param choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm TRUE (default): for
+                          #'every model other than the binary LC-MVP, each of n_threads_WCP_burnin,
+                          #'num_chunks_burnin, n_threads_WCP_sampling and num_chunks_sampling given here is used
+                          #'as given, and those not given are chosen with the standalone functions NicoStan's
+                          #'fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model() and
+                          #'fn_compute_sampling_num_chunks_for_Stan_model() (Stan models), or BayesMVP's
+                          #'fn_compute_burnin_n_threads_WCP_and_num_chunks_for_BayesMVP_model() and
+                          #'fn_compute_sampling_num_chunks_for_BayesMVP_model() (BayesMVP's models): Paper 1's
+                          #'equations, then Paper 1's timed check (1 thread per sampling chain when not given).
+                          #'FALSE: nothing is chosen automatically, and all four must be given.
+                          #'@param budget_of_the_layout_choice_in_lp_grad_calls For a Stan model given none of the
+                          #'four (nor n_chains_sampling): both layouts are chosen within one budget of this many of
+                          #'the model's own lp_grad calls (default 2000, about 2% of a typical fit without
+                          #'chunking), with
+                          #'fn_compute_burnin_and_sampling_layouts_of_Stan_model_within_a_budget_of_lp_grad_calls();
+                          #'NULL: each phase chosen as before, without a budget.
+                          #'@param fewest_seconds_of_the_budget_of_the_layout_choice The least budget of that choice,
+                          #'in seconds (default 0.5).
                           #'@param rate_criterion_cost_offset_steps Trajectory cost of the rate criteria, tau +
                           #'eps x c: 0 (default; the cost tau alone), "auto" (the path-aware c) or a number c >=
                           #'0.
@@ -650,9 +933,9 @@ MVP_model <- R6Class("MVP_model",
                           #'@param pooled_metric_weight_k_draws k of the "n_over_n_plus_k" warm-up (default 5).
                           #'@param pooled_metric_signal_to_noise_centred TRUE centres the "signal_to_noise"
                           #'warm-up (default FALSE).
-                          #'@param metric_update_rescales_eps_and_tau TRUE (default): each metric update rescales
-                          #'eps and tau, so that the leapfrog steps per trajectory do not change with the scale of
-                          #'the metric.
+                          ## @param metric_update_rescales_eps_and_tau TRUE (default): each metric update
+                          ## rescales eps and tau, so that the leapfrog steps per trajectory do not change with
+                          ## the scale of the metric; FALSE: no rescale.
                           #'@param learning_rate_initial_n_tau_updates_held_from_tau_handover NULL (default) = no
                           #'hold; a whole number k holds the tau learning rate at learning_rate_initial for the
                           #'first k tau updates after the handover.
@@ -666,11 +949,18 @@ MVP_model <- R6Class("MVP_model",
                           #'@param burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step TRUE sets tau
                           #'to eps at every burn-in iteration, i.e. one leapfrog step per trajectory (a debugging
                           #'check; default FALSE).
+                          #'@param Hessian_metric_offdiagonal_shrinkage For metric_type_main = "Hessian" with
+                          #'metric_shape_main = "dense": the shrinkage of the inverse metric's off-diagonal
+                          #'elements towards its diagonal, as metric_pooled_offdiagonal_shrinkage does for the
+                          #'empirical dense metric. "adaptive" (default) = Schafer-Strimmer: the noise of the
+                          #'correlations of the averaged Hessians' inverses across the metric updates over their
+                          #'signal; a number in [0, 1] = the off-diagonals x (1 - that number), 0 = none.
                           #'@param autodiff_fallback Built-in models with multi_attempts: TRUE falls back to
                           #'autodiff at the same position when the standard and partial-log gradients fail. NULL
                           #'(default) = TRUE for the latent_trait model, FALSE for the others.
-                          #'@param run_in_fresh_R_process TRUE (default) runs burn-in/sampling in a fresh R process and returns
-                          #'the usual draws/diagnostics; native worker memory is released when it exits. FALSE uses this session.
+                          #'@param run_in_fresh_R_process TRUE (default) runs burn-in/sampling in a fresh R
+                          #'process and returns the usual draws/diagnostics; native worker memory is released when
+                          #'it exits. FALSE uses this session.
                           sample = function(  force_recompile = FALSE,
                                               ##
                                               n_chains_burnin = self$n_chains_burnin,
@@ -708,6 +998,7 @@ MVP_model <- R6Class("MVP_model",
                                               ##
                                               clip_iter = NULL,
                                               clip_iter_tau = NULL,
+                                              metric_start_iter = NULL,
                                               ##
                                               n_refresh = NULL,
                                               use_proposed = NULL,
@@ -724,7 +1015,8 @@ MVP_model <- R6Class("MVP_model",
                                               force_PartialLog_for_metric = FALSE,
                                               force_multi_attempts_for_metric = FALSE,
                                               ##
-                                              ## NULL = not supplied (these are set via model_args_list at initialisation; see @param):
+                                              ## NULL = not supplied (these are set via model_args_list at
+                                              ## initialisation; see @param):
                                               vect_type = NULL,
                                               Phi_type = NULL,
                                               inv_Phi_type = NULL,
@@ -741,7 +1033,10 @@ MVP_model <- R6Class("MVP_model",
                                               ##
                                               metric_estimator = "pooled",
                                               metric_pooled_window_resets = NULL,
-                                              metric_pooled_offdiagonal_shrinkage = 0,
+                                              # metric_pooled_offdiagonal_shrinkage = 0,
+                                              ## (the off-diagonal shrinkage of the dense main metric is
+                                              ##  "adaptive" by default)
+                                              metric_pooled_offdiagonal_shrinkage = "adaptive",
                                               ##
                                               M_decay_type = NULL,
                                               M_decay_power = NULL,
@@ -753,7 +1048,10 @@ MVP_model <- R6Class("MVP_model",
                                               max_eps_main = NULL,
                                               max_eps_nuisance = NULL,
                                               ##
-                                              learning_rate_initial = 0.10,
+                                              # learning_rate_initial = 0.10,
+                                              ## (NULL = the run's own learning_rate, no hold: the default is the
+                                              ##  run's own LR)
+                                              learning_rate_initial = NULL,
                                               learning_rate_initial_iter = NULL,
                                               ##
                                               eps_initial = NULL,
@@ -761,7 +1059,7 @@ MVP_model <- R6Class("MVP_model",
                                               ##
                                               max_L = NULL,
                                               ##
-                                              n_nuisance_to_track = NULL,
+                                              nuisance_to_track = NULL,
                                               ##
                                               use_disk = NULL,
                                               ##
@@ -769,8 +1067,12 @@ MVP_model <- R6Class("MVP_model",
                                               ## NULL (with num_chunks_burnin NULL): chosen by
                                               ## fn_compute_burnin_n_threads_WCP_and_num_chunks() for a Stan model
                                               ## with the N / chunk_size data contract; otherwise 1:
+                                              ## (the four below: given only for the binary LC-MVP, from
+                                              ##  Paper 1's E1 results; for every other model they must stay
+                                              ##  NULL, as Paper 1's functions always choose them)
                                               n_threads_WCP_burnin = NULL,
-                                              n_threads_WCP_sampling = 1,
+                                              # n_threads_WCP_sampling = 1,
+                                              n_threads_WCP_sampling = NULL,
                                               num_chunks_burnin = NULL,
                                               num_chunks_sampling = NULL,
                                               ##
@@ -780,7 +1082,8 @@ MVP_model <- R6Class("MVP_model",
                                               diffusion_HMC_integrator = "kick_flow_kick",
                                               debug_burnin_timing = FALSE,
                                               ##
-                                              ## Explicit access to the options already supported by R_fn_sample_model.
+                                              ## Explicit access to the options already supported by
+                                              ## R_fn_sample_model.
                                               debug = FALSE,
                                               stream = NULL,
                                               nuisance_jitter_scale = 0.25,
@@ -802,7 +1105,9 @@ MVP_model <- R6Class("MVP_model",
                                               pre_burnin_L = NULL,
                                               share_tau_ii_across_chains_in_burnin = NULL,
                                               # randomize_tau_burnin = FALSE,
-                                              randomize_tau_burnin = TRUE,           ## tau adapted under the sampling jitter U(0, 2 tau), as in ChEES and SNAPER
+                                              ## tau adapted under the sampling jitter U(0, 2 tau), as in ChEES
+                                              ## and SNAPER
+                                              randomize_tau_burnin = TRUE,
                                               randomize_tau_sampling = TRUE,
                                               tau_gradient_estimator = "forward",
                                               tau_cost_exponent = 1,
@@ -812,12 +1117,27 @@ MVP_model <- R6Class("MVP_model",
                                               ## "p_raw"); NULL = every row of the adapted block, or the built-in
                                               ## LC_MVP / LC_MVOP set (see tau_adaptation_block):
                                               interest_only = NULL,
+                                              ## the parameters of interest (parameter families) over which
+                                              ## every min-ESS-based efficiency measure is computed, whatever
+                                              ## the burn-in adaptation block; NULL = interest_only, else the
+                                              ## built-in LC_MVP / LC_MVOP set, else every main parameter:
+                                              parameter_families_of_interest_for_min_ESS = NULL,
+                                              ## TRUE = every position-based trajectory criterion computes its
+                                              ## statistic on the reported quantities f(theta_main) (the
+                                              ## generated quantities of the efficiency endpoint, e.g. Se, Sp
+                                              ## and prevalence), f = reported_quantities_function (NULL = the
+                                              ## built-in one of LC_MVP / LC_MVOP), each centred and scaled over
+                                              ## the trajectory starts of the last n burn-in iterations; FALSE
+                                              ## (default) = the main parameters, unchanged:
+                                              tau_criteria_monitor_reported_quantities = FALSE,
+                                              reported_quantities_function = NULL,
+                                              reported_quantities_centre_and_scale_from_last_n_iterations = 10,
                                               tau_jitter_burnin = "uniform",
                                               tau_sampling_scale = "none",
                                               tau_jitter_sampling_type = "uniform",
                                               bulk_local_tuner = NULL,
                                               ## NULL = not set: "main", or the built-in interest_only set for
-                                              ## LC_MVP / LC_MVOP (R_fn_sample_model; 6 Oct 2026):
+                                              ## LC_MVP / LC_MVOP (R_fn_sample_model):
                                               ## tau_adaptation_block = "main",
                                               tau_adaptation_block = NULL,
                                               ## SpESS-R ("LQ_ESSR_spectral" criteria) only: 0 (default) =
@@ -830,6 +1150,112 @@ MVP_model <- R6Class("MVP_model",
                                               ## values); FALSE (default) = every stored value is multiplied
                                               ## at each update:
                                               SpESS_R_bins_decay_lazily = FALSE,
+                                              ## SpESS-R only: the power q of the soft minimum over the monitored
+                                              ## rows' ESS fractions, (sum_j s_j^(-q))^(-1/q); 8 (default) is
+                                              ## close to the smallest row, smaller values weigh every row more
+                                              ## evenly (1 = the reciprocal of the sum of the reciprocals):
+                                              SpESS_R_soft_minimum_power = 8,
+                                              ## SpESS-R only: TRUE = its first performed tau update moves tau all
+                                              ## the way to the length that maximises its criterion, not the
+                                              ## usual fraction of the way; FALSE (default) = as every update:
+                                              SpESS_R_first_update_jumps_to_the_maximiser = FALSE,
+                                              ## SpESS-R only: a doubling of tau (its evidence rule) is made only
+                                              ## when the evidence has held on this many performed tau updates
+                                              ## in a row, each doubling needing its own run; until then tau
+                                              ## moves the usual fraction towards the maximiser; 1 (default) =
+                                              ## every update with the evidence doubles:
+                                              SpESS_R_doubling_needs_evidence_on_updates_in_a_row = 1,
+                                              ## SpESS-R only, with a dense main metric: TRUE = its statistics use
+                                              ## each main parameter over its SD under the inverse metric (each
+                                              ## row stays one parameter as the metric adapts; the sampler's dense
+                                              ## metric is unchanged); FALSE (default) = the metric's whitened
+                                              ## coordinates, whose rows change at every metric update:
+                                              SpESS_R_statistics_in_parameter_coordinates = FALSE,
+                                              ## SpESS-R only: 0 (default) = sampling uses the tau after its last
+                                              ## update; a number in (0, 1] = sampling uses the geometric mean of
+                                              ## the tau after its performed updates over that last fraction of
+                                              ## them (e.g. 0.25 = the last quarter); the burn-in is unchanged:
+                                              SpESS_R_sampling_tau_from_last_fraction_of_updates = 0,
+                                              ## SpESS-R only: NULL (default) = off; a number in (0, 1] = sampling
+                                              ## uses the geometric mean of the lengths that maximised its
+                                              ## criterion at its performed updates, over that last fraction of
+                                              ## them (e.g. 0.25 = the last quarter), at most max_tau_main, in
+                                              ## place of the tau after its last update (each update moves tau
+                                              ## only part of the way to that length); the burn-in is unchanged.
+                                              ## At most one of this and the option above is set:
+                                              SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates =
+                                                    NULL,
+                                              ## SpESS-R only: the factor by which its bins of jumps by
+                                              ## trajectory length are multiplied at each tau update, i.e. how
+                                              ## fast it forgets older trajectories; NULL (default) = its own
+                                              ## value, 0.99:
+                                              SpESS_R_bin_forgetting_factor = NULL,
+                                              ## SpESS-R only: the variances that its squared jumps of z_j and
+                                              ## z_j^2 are divided by. 0 (default) = the moving averages (decay
+                                              ## 0.9 per tau update) of every update's start moments z_j^2 and
+                                              ## z_j^4 (as built); a whole number n > 0 = the plain means of the
+                                              ## start moments of the valid chains of the last n tau updates only,
+                                              ## so that the start of the burn-in is no longer kept in them:
+                                              SpESS_R_normalising_variances_from_last_n_updates = 0,
+                                              ## SpESS-R only: the factors by which its linear (spectral) and
+                                              ## its quadratic (lag-one bound of the centred squares) ESS
+                                              ## fractions are multiplied before its soft minimum. 1 (default)
+                                              ## = as built; above 1 weighs that part lower (its ESS fractions
+                                              ## look larger, so it sets the soft minimum less often); Inf
+                                              ## leaves that part out:
+                                              SpESS_R_linear_ESS_fraction_multiplier = 1,
+                                              SpESS_R_quadratic_ESS_fraction_multiplier = 1,
+                                              ## SpESS-R only: TRUE = its quadratic part (the ESS of the centred
+                                              ## squares z_j^2) from the normal-mode spectral fit of the squares'
+                                              ## jumps (the linear part's cosine mixture with each frequency's
+                                              ## lag-one E[cos^2(w T)], never antithetic) instead of the lag-one
+                                              ## bound (1 - b) / (1 + b); runs SpESS-R's update in R. FALSE
+                                              ## (default) = as built:
+                                              SpESS_R_quadratic_part_normal_mode_spectral_fit = FALSE,
+                                              ## SpESS-R only, with the option above TRUE (otherwise the fit stops
+                                              ## before it starts): TRUE = its quadratic part from the LINEAR
+                                              ## part's spectral mixture of z_j (weights p_k at frequencies w_k)
+                                              ## with the pair modes, the cross terms between its frequencies. The
+                                              ## squares' lag-one factor of the pair (k, l) of frequencies is
+                                              ##   rho_kl = (1 - a) + a (E[cos((w_k - w_l) T)] +
+                                              ##                         E[cos((w_k + w_l) T)]) / 2
+                                              ## under the jitter of T (a = the mean acceptance), and the ESS
+                                              ## fraction of z_j^2 is 1 / sum_{k,l} p_k p_l (1 + rho_kl) /
+                                              ## (1 - rho_kl) (exact for normal modes, as the linear part; k = l
+                                              ## gives the option above's factor of each frequency), in place of
+                                              ## the separate normal-mode fit of the squares' jumps, which treats
+                                              ## each frequency's square on its own. FALSE (default) = the option
+                                              ## above as built:
+                                              SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes =
+                                                    FALSE,
+                                              ## SpESS-R only, with its update in R (the option above TRUE; with
+                                              ## it FALSE the fit stops at the first tau update): NULL (default)
+                                              ## = off, each tau update targets the candidate length that
+                                              ## maximises its criterion; a number f above 0 and below 0.5 = each
+                                              ## tau update targets the shortest candidate length whose criterion
+                                              ## is at least (1 - f) times the largest over the candidates (a
+                                              ## criterion that is flat near its maximum has a noisy maximiser).
+                                              ## That length then takes every role of the maximiser: the tau move,
+                                              ## the doubling at the upper end of the candidates, and the length
+                                              ## recorded as the maximiser (which the option on sampling from the
+                                              ## maximisers averages); the maximiser itself is also recorded:
+                                              SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective =
+                                                    NULL,
+                                              ## SpESS-R only, with tau_criteria_monitor_reported_quantities =
+                                              ## TRUE (its update in R): NULL (default) = off, as built; a
+                                              ## whole number n of burn-in iterations, 10 or more = at every tau
+                                              ## update each reported quantity's integrated autocorrelation time
+                                              ## is measured over the last n burn-in iterations (its values at
+                                              ## the trajectory starts of every chain, centred on their mean over
+                                              ## the chains and the iterations, so that slow differences between
+                                              ## the chains count; Geyer's initial positive sequence), and its
+                                              ## excess over the linear part's own at the current tau is added
+                                              ## to the linear part as motion slower than the explored
+                                              ## trajectory lengths resolve, whose integrated autocorrelation
+                                              ## time scales as (tau / tau')^2 at a candidate tau':
+                                        ## (indented less: the argument name is long)
+                                        SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations =
+                                              NULL,
                                               burnin_TBB_pool_equals_n_chains = NULL,
                                               store_log_lik_trace = NULL,
                                               use_disk_path = "/tmp/hmc_traces",
@@ -838,6 +1264,7 @@ MVP_model <- R6Class("MVP_model",
                                               n_chunks_multiplier_for_PartialLog_log_scale_evaluation = 3,
                                               ##
                                               ## ---- burn-in adaptation settings:
+##
                                               tau_initial_moments_window_fraction = 0.5,
                                               tau_initial_moments_window_min_iter = 1,
                                               tau_adam_beta1 = NULL,
@@ -850,12 +1277,30 @@ MVP_model <- R6Class("MVP_model",
                                               tau_learning_rate_restart_at_metric_end = FALSE,
                                               eps_adam_reset_at_metric_end = TRUE,
                                               eps_learning_rate_restart_at_metric_end = TRUE,
+                                              calibrate_eps_on_sampling_chains_before_sampling = TRUE,
+                                              n_transitions_per_eps_calibration_block = 300,
+                                              n_eps_calibration_blocks = 4,
+                                              repeat_sampling_with_eps_refitted_if_mean_acceptance_outside = NULL,
+                                              n_eps_refits_and_repeated_samplings = 2,
+                                              set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains =
+                                                    FALSE,
+                                              fraction_of_burnin_iterations_at_end_used_for_sampling_eps = 0.5,
+                                              ## choose_threads_and_chunks_not_given_with_Paper_1_functions =
+                                              ##       TRUE,
+                                              ## time_rule_num_chunks_candidates_for_sampling = TRUE,
+                                              choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm =
+                                                    TRUE,
+                                              budget_of_the_layout_choice_in_lp_grad_calls = 2000,
+                                              fewest_seconds_of_the_budget_of_the_layout_choice = 0.5,
                                               rate_criterion_cost_offset_steps = 0,
                                               pooled_metric_warm_up = 8,
                                               pooled_metric_soft_full_weight_draws = NULL,
                                               pooled_metric_weight_k_draws = 5,
                                               pooled_metric_signal_to_noise_centred = FALSE,
+                                              ## (back on, as in the earlier library)
                                               metric_update_rescales_eps_and_tau = TRUE,
+                                              ## (FALSE: the setting is not used)
+                                              # metric_update_rescales_eps_and_tau = FALSE,
                                               learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                               resident_burnin = TRUE,
                                               resident_burnin_joint_block = TRUE,
@@ -863,32 +1308,44 @@ MVP_model <- R6Class("MVP_model",
                                               record_burnin_metric_nuisance_variance_quantiles_history = TRUE,
                                               burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
                                                     FALSE,
+                                              Hessian_metric_offdiagonal_shrinkage = "adaptive",
                                               autodiff_fallback = NULL,
                                               ##
                                               run_in_fresh_R_process = TRUE
                                               ##
                                              ) {
-                            metric_pooled_offdiagonal_shrinkage <- if (is.null(metric_pooled_offdiagonal_shrinkage)) 0 else
-                                                                  metric_pooled_offdiagonal_shrinkage
+
+                            # metric_pooled_offdiagonal_shrinkage <-  if (is.null(metric_pooled_offdiagonal_shrinkage)) 0 else
+                            #                                       metric_pooled_offdiagonal_shrinkage
+                            metric_pooled_offdiagonal_shrinkage <-  if (is.null(metric_pooled_offdiagonal_shrinkage)) {
+                                                                          "adaptive"
+                                                                    } else {
+                                                                          metric_pooled_offdiagonal_shrinkage
+                                                                    }
                             ##
-                            ## ---- vect_type / Phi_type / inv_Phi_type are not used for Stan models: stop BEFORE any (deferred)
-                            ##      compilation if one was supplied (R_fn_sample_model repeats this for direct callers, and checks
-                            ##      the built-in models against model_args_list after initialisation):
+                            ## ---- vect_type / Phi_type / inv_Phi_type are not used for Stan models: stop BEFORE
+                            ##      any (deferred) compilation if one was supplied (R_fn_sample_model repeats this
+                            ##      for direct callers, and checks the built-in models against model_args_list
+                            ##      after initialisation):
                             ##
-                            fn_stop_if_sample_math_settings_supplied_for_Stan_model( Model_type   = self$Model_type,
+                            fn_stop_if_sample_math_settings_supplied_for_Stan_model( Model_type   =
+                                                                                         self$Model_type,
                                                                                      vect_type    = vect_type,
                                                                                      Phi_type     = Phi_type,
                                                                                      inv_Phi_type = inv_Phi_type)
                             ##
-                            ## Resolve here for R6 callers; R_fn_sample_model also enforces this for direct callers.
+                            ## Resolve here for R6 callers; R_fn_sample_model also enforces this for direct
+                            ## callers.
                             if (identical(x = self$Model_type, y = "Stan")) {
                                 if (isTRUE(x = burnin_TBB_pool_equals_n_chains)) {
-                                    message("burnin_TBB_pool_equals_n_chains = TRUE is overridden to FALSE for Stan models to allow TBB within-chain parallelism.")
+                                    message("burnin_TBB_pool_equals_n_chains = TRUE is overridden to FALSE for ",
+                                            "Stan models to allow TBB within-chain parallelism.")
                                 }
                                 burnin_TBB_pool_equals_n_chains <-  FALSE
                             } else {
-                                burnin_TBB_pool_equals_n_chains <-  if (is.null(x = burnin_TBB_pool_equals_n_chains)) TRUE else
-                                                                      isTRUE(x = burnin_TBB_pool_equals_n_chains)
+                                burnin_TBB_pool_equals_n_chains <-
+                                    if (is.null(x = burnin_TBB_pool_equals_n_chains)) TRUE else
+                                      isTRUE(x = burnin_TBB_pool_equals_n_chains)
                             }
                             ##
                             ## ---- DEFERRED initialisation: if $new() was called without data,
@@ -896,10 +1353,15 @@ MVP_model <- R6Class("MVP_model",
                             ## be supplied to this $sample() call):
                             if (is.null(self$init_object)) {
                               ##
+                              ## (the math functions given to $new(); Stan's own when none were given)
+                              Stan_model_math_functions <-  self$Stan_model_math_functions
+                              if (is.null(Stan_model_math_functions)) Stan_model_math_functions <-  "Stan_math"
+                              ##
                               self$init_object <-   initialise_model(   Model_type = self$Model_type,
                                                                         ##
                                                                         sample_nuisance = self$sample_nuisance,
                                                                         n_nuisance_override = self$n_nuisance_override,
+                                                                        nuisance_params = self$nuisance_params,
                                                                         ##
                                                                         model_args_list = model_args_list,
                                                                         ##
@@ -914,7 +1376,12 @@ MVP_model <- R6Class("MVP_model",
                                                                         Stan_cpp_user_header = self$Stan_cpp_user_header,
                                                                         Stan_cpp_flags = self$Stan_cpp_flags,
                                                                         stanc_args = self$stanc_args,
-                                                                        make_args = self$make_args)
+                                                                        make_args = self$make_args,
+                                                                        ##
+                                                                        Stan_model_math_functions =
+                                                                          Stan_model_math_functions,
+                                                                        BayesMVP_AVX_headers_folder =
+                                                                          self$BayesMVP_AVX_headers_folder)
                               ##
                               self$is_compiled <- TRUE
                               ##
@@ -927,6 +1394,9 @@ MVP_model <- R6Class("MVP_model",
                               self$Stan_cpp_flags <- self$init_object$Stan_cpp_flags
                               self$stanc_args <- self$init_object$stanc_args
                               self$make_args <- self$init_object$make_args
+                              ##
+                              self$BayesMVP_AVX_version_of_Stan_model <-
+                                    self$init_object$BayesMVP_AVX_version_of_Stan_model
                               ##
                               self$n_nuisance <- self$init_object$n_nuisance
                               self$n_params_main <- self$init_object$n_params_main
@@ -1002,7 +1472,9 @@ MVP_model <- R6Class("MVP_model",
                             self$result <-       R_fn_sample_model(   
                                                             init_object = self$init_object,
                                                             run_in_fresh_R_process = run_in_fresh_R_process,
+##
                         ## ---- burn-in adaptation settings:
+##
                         tau_initial_moments_window_fraction = tau_initial_moments_window_fraction,
                         tau_initial_moments_window_min_iter = tau_initial_moments_window_min_iter,
                         tau_adam_beta1 = tau_adam_beta1,
@@ -1015,6 +1487,27 @@ MVP_model <- R6Class("MVP_model",
                         tau_learning_rate_restart_at_metric_end = tau_learning_rate_restart_at_metric_end,
                         eps_adam_reset_at_metric_end = eps_adam_reset_at_metric_end,
                         eps_learning_rate_restart_at_metric_end = eps_learning_rate_restart_at_metric_end,
+                        calibrate_eps_on_sampling_chains_before_sampling =
+                              calibrate_eps_on_sampling_chains_before_sampling,
+                        n_transitions_per_eps_calibration_block = n_transitions_per_eps_calibration_block,
+                        n_eps_calibration_blocks = n_eps_calibration_blocks,
+                        repeat_sampling_with_eps_refitted_if_mean_acceptance_outside =
+                              repeat_sampling_with_eps_refitted_if_mean_acceptance_outside,
+                        n_eps_refits_and_repeated_samplings = n_eps_refits_and_repeated_samplings,
+                        set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains =
+                              set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains,
+                        fraction_of_burnin_iterations_at_end_used_for_sampling_eps =
+                              fraction_of_burnin_iterations_at_end_used_for_sampling_eps,
+                        ## choose_threads_and_chunks_not_given_with_Paper_1_functions =
+                        ##       choose_threads_and_chunks_not_given_with_Paper_1_functions,
+                        ## time_rule_num_chunks_candidates_for_sampling =
+                        ##       time_rule_num_chunks_candidates_for_sampling,
+                        choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm =
+                              choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm,
+                        budget_of_the_layout_choice_in_lp_grad_calls =
+                              budget_of_the_layout_choice_in_lp_grad_calls,
+                        fewest_seconds_of_the_budget_of_the_layout_choice =
+                              fewest_seconds_of_the_budget_of_the_layout_choice,
                         rate_criterion_cost_offset_steps = rate_criterion_cost_offset_steps,
                         pooled_metric_warm_up = pooled_metric_warm_up,
                         pooled_metric_soft_full_weight_draws = pooled_metric_soft_full_weight_draws,
@@ -1030,6 +1523,7 @@ MVP_model <- R6Class("MVP_model",
                               record_burnin_metric_nuisance_variance_quantiles_history,
                         burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
                               burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step,
+                        Hessian_metric_offdiagonal_shrinkage = Hessian_metric_offdiagonal_shrinkage,
                         autodiff_fallback = autodiff_fallback,
                                                             ##
                                                             # Model_type = self$Model_type, ## cannot be changed in "$sample()"
@@ -1073,26 +1567,40 @@ MVP_model <- R6Class("MVP_model",
                                                             tau_if_manual_in_L_units = tau_if_manual_in_L_units,
                                                             tau_weight_by_p_jump = tau_weight_by_p_jump,
                                                             tau_ramp = tau_ramp,
-                                                            eps_reinit_at_ChEES_handover = eps_reinit_at_ChEES_handover,
+                                                            eps_reinit_at_ChEES_handover =
+                                                                eps_reinit_at_ChEES_handover,
                                                             eps_acceptance_mean = eps_acceptance_mean,
-                                                            eps_reinit_after_pre_burnin = eps_reinit_after_pre_burnin,
+                                                            eps_reinit_after_pre_burnin =
+                                                                eps_reinit_after_pre_burnin,
                                                             tau_shrink_on_divergence = tau_shrink_on_divergence,
                                                             tau_shrink_factor = tau_shrink_factor,
-                                                            tau_shrink_min_divergent_chains = tau_shrink_min_divergent_chains,
+                                                            tau_shrink_min_divergent_chains =
+                                                                tau_shrink_min_divergent_chains,
                                                             time_criterion_settings = time_criterion_settings,
                                                             theta_hat_us_rule = theta_hat_us_rule,
                                                             theta_hat_us_freeze_iter = theta_hat_us_freeze_iter,
                                                             burnin_schedule = burnin_schedule,
-                                                            metric_adaptation_end_iter = metric_adaptation_end_iter,
+                                                            metric_adaptation_end_iter =
+                                                                metric_adaptation_end_iter,
                                                             pre_burnin_n_iter = pre_burnin_n_iter,
                                                             pre_burnin_L = pre_burnin_L,
-                                                            share_tau_ii_across_chains_in_burnin = share_tau_ii_across_chains_in_burnin,
+                                                            share_tau_ii_across_chains_in_burnin =
+                                                                share_tau_ii_across_chains_in_burnin,
                                                             randomize_tau_burnin = randomize_tau_burnin,
                                                             randomize_tau_sampling = randomize_tau_sampling,
                                                             tau_gradient_estimator = tau_gradient_estimator,
                                                             tau_cost_exponent = tau_cost_exponent,
                                                             esjd_jump_power = esjd_jump_power,
                                                             interest_only = interest_only,
+                                                            parameter_families_of_interest_for_min_ESS =
+                                                                  parameter_families_of_interest_for_min_ESS,
+                                                            tau_criteria_monitor_reported_quantities =
+                                                                  tau_criteria_monitor_reported_quantities,
+                                                            reported_quantities_function =
+                                                                  reported_quantities_function,
+                                                ## (indented less: the argument name is long)
+                                                reported_quantities_centre_and_scale_from_last_n_iterations =
+                                                      reported_quantities_centre_and_scale_from_last_n_iterations,
                                                             tau_jitter_burnin = tau_jitter_burnin,
                                                             tau_sampling_scale = tau_sampling_scale,
                                                             tau_jitter_sampling_type = tau_jitter_sampling_type,
@@ -1101,7 +1609,40 @@ MVP_model <- R6Class("MVP_model",
                                                             SpESS_R_max_rows_fitted_per_update =
                                                                   SpESS_R_max_rows_fitted_per_update,
                                                             SpESS_R_bins_decay_lazily = SpESS_R_bins_decay_lazily,
-                                                            burnin_TBB_pool_equals_n_chains = burnin_TBB_pool_equals_n_chains,
+                                                            SpESS_R_soft_minimum_power =
+                                                                  SpESS_R_soft_minimum_power,
+                                                            SpESS_R_first_update_jumps_to_the_maximiser =
+                                                                  SpESS_R_first_update_jumps_to_the_maximiser,
+                                                            SpESS_R_doubling_needs_evidence_on_updates_in_a_row =
+                                                              SpESS_R_doubling_needs_evidence_on_updates_in_a_row,
+                                                            SpESS_R_statistics_in_parameter_coordinates =
+                                                                  SpESS_R_statistics_in_parameter_coordinates,
+                                                            SpESS_R_sampling_tau_from_last_fraction_of_updates =
+                                                              SpESS_R_sampling_tau_from_last_fraction_of_updates,
+                                          ## (indented less: the argument name is long)
+                                          SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates =
+                                                SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates,
+                                                            SpESS_R_bin_forgetting_factor =
+                                                                  SpESS_R_bin_forgetting_factor,
+                                                            SpESS_R_normalising_variances_from_last_n_updates =
+                                                              SpESS_R_normalising_variances_from_last_n_updates,
+                                                            SpESS_R_linear_ESS_fraction_multiplier =
+                                                              SpESS_R_linear_ESS_fraction_multiplier,
+                                                            SpESS_R_quadratic_ESS_fraction_multiplier =
+                                                              SpESS_R_quadratic_ESS_fraction_multiplier,
+                                                            SpESS_R_quadratic_part_normal_mode_spectral_fit =
+                                                              SpESS_R_quadratic_part_normal_mode_spectral_fit,
+                                          ## (indented less: the argument name is long)
+                                          SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes =
+                                                SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes,
+                                          ## (indented less: the argument name is long)
+                                          SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective =
+                                                SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective,
+                                    ## (indented less: the argument name is long)
+                                    SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations =
+                                          SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations,
+                                                            burnin_TBB_pool_equals_n_chains =
+                                                                burnin_TBB_pool_equals_n_chains,
                                                             store_log_lik_trace = store_log_lik_trace,
                                                             use_disk_path = use_disk_path,
                                                             test_perm_override = test_perm_override,
@@ -1114,6 +1655,7 @@ MVP_model <- R6Class("MVP_model",
                                                             ##
                                                             clip_iter = clip_iter,
                                                             clip_iter_tau = clip_iter_tau,
+                                                            metric_start_iter = metric_start_iter,
                                                             ##
                                                             n_refresh = n_refresh,
                                                             use_proposed = use_proposed,
@@ -1145,8 +1687,10 @@ MVP_model <- R6Class("MVP_model",
                                                             interval_width_nuisance = interval_width_nuisance,
                                                             ##
                                                             metric_estimator = metric_estimator,
-                                                            metric_pooled_window_resets = metric_pooled_window_resets,
-                                                            metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
+                                                            metric_pooled_window_resets =
+                                                                metric_pooled_window_resets,
+                                                            metric_pooled_offdiagonal_shrinkage =
+                                                                metric_pooled_offdiagonal_shrinkage,
                                                             ##
                                                             M_decay_type = M_decay_type,
                                                             M_decay_power = M_decay_power,
@@ -1159,14 +1703,15 @@ MVP_model <- R6Class("MVP_model",
                                                             max_eps_nuisance = max_eps_nuisance,
                                                             ##
                                                             learning_rate_initial = learning_rate_initial,
-                                                            learning_rate_initial_iter = learning_rate_initial_iter,
+                                                            learning_rate_initial_iter =
+                                                                learning_rate_initial_iter,
                                                             ##
                                                             eps_initial = eps_initial,
                                                             eps_initial_iter = eps_initial_iter,
                                                             ##
                                                             max_L = max_L,
                                                             ##
-                                                            n_nuisance_to_track = n_nuisance_to_track,
+                                                            nuisance_to_track = nuisance_to_track,
                                                             ##
                                                             use_disk = use_disk,
                                                             ##
@@ -1212,15 +1757,18 @@ MVP_model <- R6Class("MVP_model",
                           #'any log_lik defined in the "generated quantities" block - see "save_log_lik_trace". 
                           #'@param save_log_lik_trace Whether to save the log-likelihood (log_lik) trace. Default is FALSE. For Stan models, this will only work 
                           #'if there is a "log_lik" parameter defined in the "transformed parameters" model block. For built-in models, 
-                          #'@param save_nuisance_trace Whether to save the nuisance trace. Default is FALSE. 
+                          #'@param save_nuisance_trace Whether to return the nuisance draws (kept in memory, never
+                          #' written to disk). Default NULL: TRUE when the user named one or more nuisance blocks
+                          #' (\code{nuisance_params}), FALSE otherwise. 
                           #'@param compute_nested_rhat Whether to compute the nested rhat diagnostic (nR-hat) (Margossian et al, 2023). This is useful when
                           #'running many (usually short) chains. Also see "n_superchains" argument. 
                           #'@param n_superchains The number of superchains to use for the computation of nR-hat. 
                           #'Only relevant if \code{compute_nested_rhat = TRUE}.
                           #'@param save_trace_tibbles Whether to save the trace as tibble dataframes as well as 3D arrays. 
                           #'Default is FALSE. 
-                          #'@param n_threads Threads used to compute the summary. Default NULL: the number of sampling chains,
-                          #'never more than the CPUs this R process may run on (taskset / CPU affinity respected).
+                          #'@param n_threads Threads used to compute the summary. Default NULL: the number of
+                          #'sampling chains, never more than the CPUs this R process may run on (taskset / CPU
+                          #'affinity respected).
                           #'@param ... Any other arguments to be passed to NicoStan::create_summary_and_traces.
                           #'@return Returns a new MVP_plot_and_diagnose object (from the "MVP_plot_and_diagnose" R6 class) for creating MCMC diagnostics and plots.
                           summary = function(       compute_main_params = TRUE,
@@ -1228,7 +1776,8 @@ MVP_model <- R6Class("MVP_model",
                                                     compute_generated_quantities = TRUE,
                                                     ##
                                                     save_log_lik_trace = TRUE,
-                                                    save_nuisance_trace = FALSE,
+                                                    # save_nuisance_trace = FALSE,
+                                                    save_nuisance_trace = NULL,
                                                     ##
                                                     compute_nested_rhat = NULL,
                                                     n_superchains = NULL,
@@ -1250,6 +1799,14 @@ MVP_model <- R6Class("MVP_model",
                                 }
                                 if (is.null(self$result)) {
                                   stop("Model has not been sampled yet - call $sample() before $summary().")
+                                }
+                                ##
+                                ## ---- the nuisance draws are returned whenever the user named one or more nuisance
+##
+                                ## ---- blocks:
+##
+                                if (is.null(save_nuisance_trace)) {
+                                  save_nuisance_trace <- (length(self$nuisance_params) > 0)
                                 }
                                 ##
                                 ## ---- use the SAME storage mode that sampling used (self$use_disk
@@ -1292,7 +1849,6 @@ MVP_model <- R6Class("MVP_model",
                           
             )
 )
-
 
 
 

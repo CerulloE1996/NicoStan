@@ -234,7 +234,7 @@ R_fn_compute_gradients_for_tau_using_ChEES_combined <- function( debug = FALSE,
 
 
 ##
-## ---- Squared kinetic-energy change, on the block whose trajectory length is being adapted ----------------------------------------
+## ---- Squared kinetic-energy change, on the block whose trajectory length is being adapted ---------------------
 ##
 ## C = 0.5 * (K_proposed - K_initial)^2, K(v) = 0.5 * v' M v because these are VELOCITIES, not momenta.
 ## Along exact Hamiltonian dynamics, dK/dt = v' grad(log pi), including diffusion dynamics.
@@ -245,15 +245,19 @@ R_fn_compute_gradients_for_tau_using_ChEES_combined <- function( debug = FALSE,
 ## acceptance are not included. It is an energy-decorrelation criterion, not a direct ESS/sec objective.
 ##
         ##
-## ---- KE criterion on the JOINT (main + nuisance) block: the kinetic energies and their rates add over the two blocks, the
-##      gradient is tau * (dK_main + dK_us) * (rate_main + rate_us). EXPERIMENTAL (to test
+## ---- KE criterion on the JOINT (main + nuisance) block: the kinetic energies and their rates add over the two
+##      blocks, the gradient is tau * (dK_main + dK_us) * (rate_main + rate_us). EXPERIMENTAL (to test
 ##      tau_adaptation_block = "joint"); tau_adaptation_block = "main" never calls this.
 ##
                                                            ##
-                                                           ## ---- the nuisance kinetic-energy change, 0.5 * sum(velocity_proposed_us^2 * mass_us_vec) -
-                                                           ##      0.5 * sum(velocity_initial_us^2 * mass_us_vec), when it is computed elsewhere (the resident burn-in
-                                                           ##      interface computes it from the velocities inside the worker); NULL = computed here from
-                                                           ##      velocity_initial_us, velocity_proposed_us and mass_us_vec.
+                                                           ## ---- the nuisance kinetic-energy change, 0.5 *
+                                                           ##      sum(velocity_proposed_us^2 * mass_us_vec) - 0.5
+                                                           ##      * sum(velocity_initial_us^2 * mass_us_vec),
+                                                           ##      when it is computed elsewhere (the resident
+                                                           ##      burn-in interface computes it from the
+                                                           ##      velocities inside the worker); NULL = computed
+                                                           ##      here from velocity_initial_us,
+                                                           ##      velocity_proposed_us and mass_us_vec.
                                                            ##
            ## end of: if (!is.null(kinetic_energy_change_us))
 
@@ -326,8 +330,9 @@ R_fn_compute_gradients_for_tau_using_ChEES_position <- function( debug = FALSE,
                                                                  ##
                                                                  metric_shape_main,
                                                                  ##
-                                                                 ## M itself (NOT M_inv): a vector when metric_shape_main == "diag",
-                                                                 ## a matrix when it is "dense".
+                                                                 ## M itself (NOT M_inv): a vector when
+                                                                 ## metric_shape_main == "diag", a matrix when it
+                                                                 ## is "dense".
                                                                  M_main_for_ChEES,
                                                                  ##
                                                                  ii,
@@ -338,35 +343,36 @@ R_fn_compute_gradients_for_tau_using_ChEES_position <- function( debug = FALSE,
         ## Centre on the running posterior mean of the main block (SNAPER's
         ## Welford mean). Positions and velocities always use the supplied mass
         ## metric, including dense matrices. There is no coordinate toggle.
-        snaper_m_vec_prop <- if (is.null(snaper_m_vec_prop)) c(snaper_m_vec_main) else c(snaper_m_vec_prop)
-        if (length(snaper_m_vec_prop) != length(snaper_m_vec_main)) stop("ChEES endpoint centres must match the state dimension.")
-        x_0_centred    <- c(theta_main_0)    - c(snaper_m_vec_main)
-        x_prop_centred <- c(theta_main_prop) - snaper_m_vec_prop
-        v_prop         <- c(velocity_main_prop)
+        snaper_m_vec_prop <-  if (is.null(snaper_m_vec_prop)) c(snaper_m_vec_main) else c(snaper_m_vec_prop)
+        if (length(snaper_m_vec_prop) != length(snaper_m_vec_main))
+            stop("ChEES endpoint centres must match the state dimension.")
+        x_0_centred    <-  c(theta_main_0)    - c(snaper_m_vec_main)
+        x_prop_centred <-  c(theta_main_prop) - snaper_m_vec_prop
+        v_prop         <-  c(velocity_main_prop)
         ##
         if (metric_shape_main == "diag") {
               ##
-              M_vec <- c(M_main_for_ChEES)
+              M_vec <-  c(M_main_for_ChEES)
               ##
-              d_sq_0    <- sum((x_0_centred^2)    * M_vec)
-              d_sq_prop <- sum((x_prop_centred^2) * M_vec)
+              d_sq_0    <-  sum((x_0_centred^2)    * M_vec)
+              d_sq_prop <-  sum((x_prop_centred^2) * M_vec)
               ##
-              dot_prop  <- sum(x_prop_centred * v_prop * M_vec)
+              dot_prop  <-  sum(x_prop_centred * v_prop * M_vec)
               ##
         } else {
               ##
-              M_mat <- M_main_for_ChEES
+              M_mat <-  M_main_for_ChEES
               ##
-              d_sq_0    <- sum(x_0_centred    * c(M_mat %*% x_0_centred))
-              d_sq_prop <- sum(x_prop_centred * c(M_mat %*% x_prop_centred))
+              d_sq_0    <-  sum(x_0_centred    * c(M_mat %*% x_0_centred))
+              d_sq_prop <-  sum(x_prop_centred * c(M_mat %*% x_prop_centred))
               ##
-              dot_prop  <- sum(x_prop_centred * c(M_mat %*% v_prop))
+              dot_prop  <-  sum(x_prop_centred * c(M_mat %*% v_prop))
               ##
         }
         ##
         ## ChEES gradient w.r.t. log(tau); the tau_ii factor is the jitter chain rule, NOT a
         ## normalisation, so it MULTIPLIES here where the kinetic-energy objective divides:
-        delta_d_sq <- d_sq_prop - d_sq_0
+        delta_d_sq <-  d_sq_prop - d_sq_0
         ##
         g_ChEES <- tau_ii * delta_d_sq * dot_prop
         ##
@@ -412,7 +418,7 @@ R_fn_compute_gradients_for_tau_using_ChEES_position <- function( debug = FALSE,
 ## This is a ratio of expectations, not an expectation of per-jitter trajectory rates.
 ## The acceptance probabilities, centres and metric are held fixed in this derivative.
 ##
-fn_normalise_ChEES_per_tau <- function( gradients,
+fn_normalise_ChEES_per_tau <-  function( gradients,
                                         criteria,
                                         tau_values,
                                         criterion_ema = NA_real_,
@@ -420,32 +426,34 @@ fn_normalise_ChEES_per_tau <- function( gradients,
                                         criterion_ema_decay = 0.9
 ) {
   
-      if (length(x = gradients) != length(x = criteria)) stop("ChEES gradients and criteria must be aligned by chain.")
+      if (length(x = gradients) != length(x = criteria))
+          stop("ChEES gradients and criteria must be aligned by chain.")
       if (length(x = tau_values) != length(x = gradients)) stop("ChEES tau values must be aligned by chain.")
       if (length(x = criterion_ema_decay) != 1 || !is.finite(x = criterion_ema_decay) ||
           criterion_ema_decay < 0 || criterion_ema_decay >= 1) stop("criterion_ema_decay must be in [0, 1).")
-      if (is.null(x = weights)) weights <- rep(x = 1.0, times = length(x = gradients))
+      if (is.null(x = weights)) weights <-  rep(x = 1.0, times = length(x = gradients))
       if (length(x = weights) != length(x = gradients)) stop("ChEES weights must be aligned by chain.")
       ##
-      valid <- is.finite(x = gradients) & is.finite(x = criteria) & criteria >= 0 &
+      valid <-  is.finite(x = gradients) & is.finite(x = criteria) & criteria >= 0 &
                is.finite(x = tau_values) & tau_values > 0 &
                is.finite(x = weights) & weights >= 0
-      unchanged <- list(gradient = NA_real_, criterion_ema = criterion_ema, informative = FALSE)
+      unchanged <-  list(gradient = NA_real_, criterion_ema = criterion_ema, informative = FALSE)
       if (!any(valid)) return(unchanged)
       ## Estimate E[alpha * criterion], not the criterion conditional on acceptance.
       ## In particular, zero-acceptance/divergent chains contribute zero but
       ## remain in the mean denominator. Normalising by sum(alpha) would change
       ## the objective as acceptance changes.
-      weights_used <- weights[valid] / length(x = gradients)
-      criterion_mean <- sum(weights_used * criteria[valid])
+      weights_used <-  weights[valid] / length(x = gradients)
+      criterion_mean <-  sum(weights_used * criteria[valid])
       ## tau_i is proportional to tau_bar, so the supplied pathwise derivative
       ## already includes the derivative of the realised jittered trajectory.
-      gradient_mean <- sum(weights_used * gradients[valid])
-      if (!is.finite(x = criterion_mean) || criterion_mean <= 0 || !is.finite(x = gradient_mean)) return(unchanged)
+      gradient_mean <-  sum(weights_used * gradients[valid])
+      if (!is.finite(x = criterion_mean) || criterion_mean <= 0 || !is.finite(x = gradient_mean))
+          return(unchanged)
       ##
-      criterion_updated <- if (is.finite(x = criterion_ema) && criterion_ema > 0)
+      criterion_updated <-  if (is.finite(x = criterion_ema) && criterion_ema > 0)
           criterion_ema_decay * criterion_ema + (1.0 - criterion_ema_decay) * criterion_mean else criterion_mean
-      gradient <- gradient_mean / criterion_updated - 1.0
+      gradient <-  gradient_mean / criterion_updated - 1.0
       ##
       if (!is.finite(x = gradient)) return(unchanged)
       ##
@@ -454,8 +462,6 @@ fn_normalise_ChEES_per_tau <- function( gradients,
                   informative = TRUE))
     
 }
-
-
 
 
 

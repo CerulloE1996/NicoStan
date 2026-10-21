@@ -9,11 +9,11 @@
 #' @param warn if TRUE, also raise an R warning() with the same headline so the
 #'        message survives into warnings() / worker error handling
 #' @export
-big_warning_banner <- function(title,
+big_warning_banner <-  function(title,
                                body = character(0),
                                warn = TRUE) {
 
-        rule <- paste(rep("!", 100), collapse = "")
+        rule <-  paste(rep("!", 100), collapse = "")
         ##
         message("\n", rule)
         message("!!!!  ", toupper(title))
@@ -134,9 +134,9 @@ copy_json_with_worker_id <- function(original_path,
         base_path <- sub("\\.json$", "", original_path)
         new_path <- paste0(base_path, "_", ii, ".json")
         
-        # Copy the file to the new path - ATOMICALLY (temporary file + rename; see fn_write_file_atomically), since
-        # data_<md5>_<stream>.json sits in the shared stan_data folder and a concurrent fit with the same data and
-        # stream could otherwise read it half-copied:
+        # Copy the file to the new path - ATOMICALLY (temporary file + rename; see fn_write_file_atomically),
+        # since data_<md5>_<stream>.json sits in the shared stan_data folder and a concurrent fit with the same
+        # data and stream could otherwise read it half-copied:
         if (file.exists(original_path)) {
           fn_copy_file_atomically( source_file_path = original_path,
                                    target_file_path = new_path)
@@ -286,7 +286,9 @@ detect_nuisance_block_info_from_stan_model <- function(bs_model,
         ##
         fn_param_base <- function(bridgestan_names) {
           
-              sub( pattern = "\\..*$",
+              ## (the base name ends at the first "." or ":": Stan names a tuple's coordinates "z:1.1",
+              ##  "z:2.1.1", ...)
+              sub( pattern = "[.:].*$",
                    replacement = "",
                    x = bridgestan_names)
               
@@ -316,26 +318,29 @@ detect_nuisance_block_info_from_stan_model <- function(bs_model,
                     ## Accept both named CmdStanR-style lists and BridgeStan's raw
                     ## character/list flags. Preserve include paths when inspecting metadata.
                     include_paths <- if (is.list(stanc_args)) stanc_args$include_paths else NULL
-                    raw_stanc_args <- as.character(unlist(stanc_args, use.names = FALSE))
-                    include_flags <- raw_stanc_args[startsWith(raw_stanc_args, "--include-paths=")]
-                    if (length(include_flags) > 0L) {
+                    raw_stanc_args <-  as.character(unlist(stanc_args, use.names = FALSE))
+                    include_flags <-  raw_stanc_args[startsWith(raw_stanc_args, "--include-paths=")]
+                    if (length(include_flags) > 0) {
                       include_paths <- c(include_paths, sub("^--include-paths=", "", include_flags))
                     }
-                    include_positions <- which(raw_stanc_args == "--include-paths")
-                    if (length(include_positions) > 0L) {
-                      if (any(include_positions == length(raw_stanc_args))) stop("--include-paths requires a directory.")
-                      include_paths <- c(include_paths, raw_stanc_args[include_positions + 1L])
+                    include_positions <-  which(raw_stanc_args == "--include-paths")
+                    if (length(include_positions) > 0) {
+                      if (any(include_positions == length(raw_stanc_args)))
+                          stop("--include-paths requires a directory.")
+                      include_paths <- c(include_paths, raw_stanc_args[include_positions + 1])
                     }
                     ##
-                    if (length(include_paths) > 0L) {
+                    if (length(include_paths) > 0) {
                       stanc_cmd_args <- c(stanc_cmd_args,
-                                          shQuote(paste0("--include-paths=", paste(unique(include_paths), collapse = ","))))
+                                          shQuote(paste0("--include-paths=",
+                                                         paste(unique(include_paths), collapse = ","))))
                     }
                     ##
+                    ## (stdout only: stanc writes its warnings to stderr, which would break the JSON of --info)
                     stanc_out <- tryCatch( expr = system2( command = stanc_bin,
                                                            args = stanc_cmd_args,
                                                            stdout = TRUE,
-                                                           stderr = TRUE),
+                                                           stderr = FALSE),
                                            error = function(e) NULL)
                     ##
                     stanc_json_text <- paste( stanc_out,
@@ -402,9 +407,13 @@ get_n_params_main_from_n_nuisance_using_Stan_bs_model <- function(  n_nuisance,
   
         if (is.null(stanc_args)) { 
           outs <- init_bs_model_external(  Stan_data_list = Stan_data_list,
+                                           compile = FALSE,
+                                           force_recompile = FALSE,
                                            Stan_model_file_path = Stan_model_file_path)
         } else { 
           outs <- init_bs_model_external(  Stan_data_list = Stan_data_list,
+                                          compile = FALSE,
+                                          force_recompile = FALSE,
                                           Stan_model_file_path = Stan_model_file_path,
                                           stanc_args = stanc_args)
         }
@@ -519,6 +528,8 @@ check_stan_data <- function(stan_model,
 #' Get model dimensions (n_params, n_params_main, n_nuisance)
 #' @export
 get_model_info <- function(  Model_type, 
+                             compile,
+                             force_recompile,
                              ##
                              stream,
                              ##
@@ -531,6 +542,7 @@ get_model_info <- function(  Model_type,
                              ##
                              sample_nuisance = NULL,
                              n_nuisance_override = NULL,
+                             names_of_the_nuisance_blocks_of_a_regular_library = NULL,
                              ##
                              model_args_list
 ) {
@@ -546,6 +558,8 @@ get_model_info <- function(  Model_type,
         if (Model_type == "Stan") {
                   
                outs_bs_model <- init_bs_model_external(   stream = stream,
+                                                          compile = compile,
+                                                          force_recompile = force_recompile,
                                                           Stan_data_list = Stan_data_list,
                                                           Stan_model_file_path = Stan_model_file_path,
                                                           stanc_args = stanc_args,
@@ -561,6 +575,31 @@ get_model_info <- function(  Model_type,
                 
                 nuisance_info <- NULL
                 
+                ## (a library in NicoStan's nuisance-block form: its nuisance block is NicoStan's, not one of
+                ##  BridgeStan's parameters, so every BridgeStan parameter is a main one and the size of the
+                ##  nuisance block is given by n_nuisance_override)
+                ## (the export is a runtime capability shared by ordinary models; the writer's generated
+                ##  quantity identifies a model whose nuisance block NicoStan holds, even when its size is 0)
+                nuisance_block_owned_by_NicoStan <-  R_fn_model_library_is_in_NicoStan_nuisance_block_form(
+                                                           outs_bs_model$model_so_file) &&
+                      ("nicostan_size_of_the_nuisance_block_held_by_NicoStan" %in%
+                       bs_model$param_names(include_tp = FALSE, include_gq = TRUE))
+                if (nuisance_block_owned_by_NicoStan) {
+                      # if (is.null(n_nuisance_override)) {
+                      #       stop(paste0("get_model_info (Stan): the library is in NicoStan's nuisance-block ",
+                      #                   "form; give the size of its nuisance block with n_nuisance_override."))
+                      # }
+                      ## (no size given: read from the compiled model, whose generated quantities report it -
+                      ##  nicostan_size_of_the_nuisance_block_held_by_NicoStan, written by NicoStan's writer)
+                      if (is.null(n_nuisance_override)) {
+                            n_nuisance_override <-
+                                  fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_compiled_model(
+                                        model_so_file   = outs_bs_model$model_so_file,
+                                        Stan_data_list  = Stan_data_list)
+                      }
+                      n_params <- n_params + n_nuisance_override
+                }
+                
                 # Detect or use provided n_nuisance
                 if (!is.null(n_nuisance_override)) {
                   n_nuisance <- n_nuisance_override
@@ -569,18 +608,58 @@ get_model_info <- function(  Model_type,
                   ## the nuisance block has no dimension-changing constraints):
                   n_nuisance_names_constrained <- n_nuisance
                 } else {
-                  nuisance_info <- detect_nuisance_block_info_from_stan_model( bs_model = bs_model,
-                                                                               Stan_model_file_path = Stan_model_file_path,
-                                                                               stanc_args = stanc_args)
+                  ## (switched off: the nuisance blocks are always given by the user; NicoStan never takes the
+                  ##  first declared parameter as the nuisance block any more - it took GP
+                  ##  regression's lengthscale and the alpha of Weibull and robust Student-t, main parameters)
+                  # nuisance_info <- detect_nuisance_block_info_from_stan_model( bs_model = bs_model,
+                  #                                                              Stan_model_file_path = Stan_model_file_path,
+                  #                                                              stanc_args = stanc_args)
                   if (!isTRUE(sample_nuisance)) {
                     ## ---- Models WITHOUT a nuisance block: every declared parameter is
                     ## main. (distinct from sample_nuisance = TRUE with a zero-length
                     ## first declaration, which detect_... resolves to 0 by itself)
                     n_nuisance <- 0L
-                    n_nuisance_names_constrained <- 0L
+                    n_nuisance_names_constrained <- 0
+                  } else if (!is.null(names_of_the_nuisance_blocks_of_a_regular_library)) {
+                    ## ---- The nuisance blocks named by the user (character(0): none), in a regular library: they
+                    ##      must be its first unconstrained coordinates (only NicoStan's nuisance-block form,
+                    ##      nuisance_params of initialise_model(), can take them in any order); a named block with
+                    ##      no values at this N must still be declared in the parameters block
+                    unconstrained_names <- bs_model$param_unc_names()
+                    Stan_model_text <- paste(readLines(Stan_model_file_path), collapse = "\n")
+                    parameters_block_text <- regmatches(Stan_model_text,
+                                                        regexpr("(?s)\\nparameters\\s*\\{.*?\\n\\}",
+                                                                Stan_model_text, perl = TRUE))
+                    is_nuisance_coordinate <- rep(FALSE, length(unconstrained_names))
+                    for (name_of_block in names_of_the_nuisance_blocks_of_a_regular_library) {
+                          is_coordinate_of_block <- (unconstrained_names == name_of_block) |
+                                                    startsWith(unconstrained_names, paste0(name_of_block, "."))
+                          is_declared <- grepl(paste0("\\b", name_of_block, "\\s*;"), parameters_block_text,
+                                               perl = TRUE)
+                          if (!any(is_coordinate_of_block) && !isTRUE(is_declared)) {
+                                stop(paste0("get_model_info (Stan): the nuisance block ", name_of_block,
+                                            " is not a parameter of ", Stan_model_file_path, "."))
+                          }
+                          is_nuisance_coordinate <- is_nuisance_coordinate | is_coordinate_of_block
+                    }
+                    n_nuisance <- sum(is_nuisance_coordinate)
+                    if (!identical(which(is_nuisance_coordinate), seq_len(n_nuisance))) {
+                          stop(paste0("get_model_info (Stan): the nuisance blocks ",
+                                      paste(names_of_the_nuisance_blocks_of_a_regular_library, collapse = ", "),
+                                      " are not the first unconstrained coordinates of ", Stan_model_file_path,
+                                      "; a regular library cannot reorder them (give them as nuisance_params, ",
+                                      "NicoStan's nuisance-block form, which can)."))
+                    }
+                    n_nuisance_names_constrained <- n_nuisance
+                    names_of_blocks <- names_of_the_nuisance_blocks_of_a_regular_library
+                    nuisance_info <- list(nuisance_base_name = if (length(names_of_blocks) == 1)
+                                                                     names_of_blocks else NA_character_)
                   } else {
-                    n_nuisance <- nuisance_info$n_nuisance
-                    n_nuisance_names_constrained <- nuisance_info$n_nuisance_names_constrained
+                    stop(paste0("get_model_info (Stan): sample_nuisance = TRUE but the nuisance blocks are not ",
+                                "named. NicoStan never chooses them itself: give nuisance_params = c(...) (any ",
+                                "order), or names_of_the_nuisance_blocks_of_a_regular_library = c(...) for a ",
+                                "regular library (character(0) for a model with none), or ",
+                                "sample_nuisance = FALSE."))
                   }
                 }
                 
@@ -596,6 +675,8 @@ get_model_info <- function(  Model_type,
         } else {
           
                 outs_bs_model <- init_bs_model_internal(   stream = stream,
+                                                           compile = compile,
+                                                           force_recompile = force_recompile,
                                                            Stan_data_list = Stan_data_list,
                                                            Stan_model_name = Stan_model_name)
                 # ##
@@ -695,7 +776,7 @@ get_model_info <- function(  Model_type,
                       }
                       ##
                       n_cat_per_ord_test <- as.integer(n_cat_per_ord_test)
-                      n_thr_per_ord_test <- n_cat_per_ord_test - 1L
+                      n_thr_per_ord_test <- n_cat_per_ord_test - 1
                       ##
                       if (Model_type == "LC_MVOP") {
                         n_params_main <- n_pops + n_covariates_total + n_class*n_corrs + n_class*sum(n_thr_per_ord_test)
@@ -719,6 +800,8 @@ get_model_info <- function(  Model_type,
           n_nuisance = n_nuisance,
           ##
           n_nuisance_names_constrained = if (Model_type == "Stan") n_nuisance_names_constrained else n_nuisance,
+          nuisance_block_owned_by_NicoStan = if (Model_type == "Stan") nuisance_block_owned_by_NicoStan else
+                                             FALSE,
           nuisance_base_name = if (Model_type == "Stan") (if (is.null(nuisance_info)) NA_character_ else nuisance_info$nuisance_base_name) else NA_character_,
           ##
           N = N,
@@ -849,9 +932,12 @@ compute_equivalent_ESS <- function(N,
                    trimws(formatC(x = ESS_observed, format = "f", digits = 0)), "\n"))
         cat(paste0("New:      N = ", formatC(x = N_new, format = "d"), " studies\n"))
         cat("\nEquivalent ESS for same MC error:\n")
-        cat(paste0("  Conservative (SD ∝ 1/N^0.33): ESS ≈ ", trimws(formatC(x = equivalent_ESS[1], format = "f", digits = 0)), "\n"))
-        cat(paste0("  Typical      (SD ∝ 1/N^0.50): ESS ≈ ", trimws(formatC(x = equivalent_ESS[2], format = "f", digits = 0)), "\n"))
-        cat(paste0("  Optimistic   (SD ∝ 1/N^1.00): ESS ≈ ", trimws(formatC(x = equivalent_ESS[3], format = "f", digits = 0)), "\n"))
+        cat(paste0("  Conservative (SD ∝ 1/N^0.33): ESS ≈ ",
+                   trimws(formatC(x = equivalent_ESS[1], format = "f", digits = 0)), "\n"))
+        cat(paste0("  Typical      (SD ∝ 1/N^0.50): ESS ≈ ",
+                   trimws(formatC(x = equivalent_ESS[2], format = "f", digits = 0)), "\n"))
+        cat(paste0("  Optimistic   (SD ∝ 1/N^1.00): ESS ≈ ",
+                   trimws(formatC(x = equivalent_ESS[3], format = "f", digits = 0)), "\n"))
         cat(paste0("\nRange: ", trimws(formatC(x = min(equivalent_ESS), format = "f", digits = 0)), " - ",
                    trimws(formatC(x = max(equivalent_ESS), format = "f", digits = 0)), "\n"))
         
@@ -876,6 +962,7 @@ validate_and_extrapolate_ESS <- function(N1,
                                          ESS2,
                                          N_target
 ) {
+
         # Estimate scaling power
         p <- log(ESS2/ESS1) / (2*log(N1/N2))
         
@@ -887,7 +974,8 @@ validate_and_extrapolate_ESS <- function(N1,
                    trimws(formatC(x = ESS_target, format = "f", digits = 0)), "\n"))
         
         # Add safety margin
-        cat(paste0("With 20% safety margin: ", trimws(formatC(x = ESS_target * 0.8, format = "f", digits = 0)), "\n"))
+        cat(paste0("With 20% safety margin: ", trimws(formatC(x = ESS_target * 0.8, format = "f", digits = 0)),
+                   "\n"))
         
         return(list(p = p,
                     ESS_target = ESS_target))
@@ -985,7 +1073,6 @@ permute_3d_draws_array <- function(array,
         return(new_array)
   
 }
-
 
 
 

@@ -14,16 +14,23 @@
 fn_sample_model_in_fresh_R_process <-  function(arguments,
                                                provider_package = .nicostan_provider_package) {
 
-        stop_unserialisable <-  function(path, kind) {
+        stop_unserialisable <-  function( path,
+                                          kind) {
+
                 stop(paste0("Fresh-process sampler cannot transport ", kind, " at ", path,
-                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process."),
+                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R ",
+                            "process."),
                      call. = FALSE)
         }
 
+
         ##
-        validate_transport <-  function(x, path = "value") {
+        validate_transport <-  function( x,
+                                         path = "value") {
+
                 if (is.environment(x)) stop_unserialisable(path = path, kind = "an environment")
-                if (typeof(x) %in% c("externalptr", "weakref")) stop_unserialisable(path = path, kind = "an external pointer")
+                if (typeof(x) %in% c("externalptr", "weakref"))
+                    stop_unserialisable(path = path, kind = "an external pointer")
                 if (inherits(x, "connection")) stop_unserialisable(path = path, kind = "a connection")
                 if (is.function(x)) stop_unserialisable(path = path, kind = "a function closure")
                 if (is.null(x)) return(invisible(TRUE))
@@ -46,13 +53,15 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                 if (is.list(x)) {
                         x_names <-  names(x)
                         for (ii in seq_along(x)) {
-                                item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]])) paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
+                                item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]]))
+                                                  paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
                                 validate_transport(x = x[[ii]], path = paste0(path, item_name))
                         }
                 } else if (is.pairlist(x)) {
                         x_names <-  names(x)
                         for (ii in seq_along(x)) {
-                                item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]])) paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
+                                item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]]))
+                                                  paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
                                 validate_transport(x = x[[ii]], path = paste0(path, item_name))
                         }
                 } else if (is.language(x) && !is.symbol(x)) {
@@ -67,15 +76,19 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                 invisible(TRUE)
         }
 
+
         ##
         capture_rng <-  function() {
+
                 has_seed <-  exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
                 list(kind = RNGkind(),
                      has_seed = has_seed,
                      state = if (has_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL)
         }
 
+
         restore_rng <-  function(snapshot) {
+
                 if (!is.list(snapshot) || is.null(snapshot$kind)) {
                         stop("Invalid RNG snapshot returned by the fresh-process sampler.", call. = FALSE)
                 }
@@ -88,11 +101,12 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                 invisible(NULL)
         }
 
+
         ##
         if (!is.list(arguments) || is.null(names(arguments)) || any(!nzchar(names(arguments)))) {
                 stop("arguments must be a named list of R_fn_sample_model() arguments.", call. = FALSE)
         }
-        if (!is.character(provider_package) || length(provider_package) != 1L ||
+        if (!is.character(provider_package) || length(provider_package) != 1 ||
             is.na(provider_package) || !nzchar(provider_package)) {
                 stop("provider_package must be one non-empty package name.", call. = FALSE)
         }
@@ -106,15 +120,28 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
         ##
         ## R_fn_sample_model() reads exactly these fields before its first internal reinitialisation.
         ## Keeping this whitelist avoids sending a BridgeStan R6 object or stale native state.
+        ## (with, for a Stan model whose nuisance blocks are held by NicoStan, the size of its nuisance block and
+        ##  the writer's record of the blocks, which the rebuild in the child keeps)
         init_metadata_names <-  c("Model_type",
+                                 "compile",
+                                 "force_recompile",
+                                 "model_so_file",
+                                 "n_params_main",
+                                 "n_nuisance",
+                                 "Model_args_as_Rcpp_List",
                                  "Stan_model_file_path",
                                  "Stan_cpp_user_header",
                                  "Stan_cpp_flags",
                                  "stanc_args",
-                                 "make_args")
-        arguments$init_object <-  setNames( object = lapply(X = init_metadata_names, FUN = function(field_name) {
+                                 "make_args",
+                                 "n_nuisance_override",
+                                 "nuisance_blocks_held_by_NicoStan")
+        arguments$init_object <-  stats::setNames( object = lapply(X = init_metadata_names,
+                                                                   FUN = function(field_name) {
+
                                                                 arguments$init_object[[field_name]]
                                                         }),
+
                                             nm = init_metadata_names)
 
         ##
@@ -131,10 +158,11 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
 
         ##
         ## Keep the pre-call stream if no child result arrives, otherwise the child's post-fit stream.
-        ## This also covers an error while reconstructing the returned BridgeStan object.
+        ## This also covers an error whilst reconstructing the returned BridgeStan object.
         child_rng_applied <-  FALSE
         on.exit({
-                try(expr = restore_rng(snapshot = if (isTRUE(child_rng_applied)) child_rng else parent_rng), silent = TRUE)
+                try(expr = restore_rng(snapshot = if (isTRUE(child_rng_applied)) child_rng else parent_rng),
+                    silent = TRUE)
         }, add = TRUE)
 
         ##
@@ -147,12 +175,17 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                            rng_snapshot,
                            model_options) {
 
-                validate_worker_transport <-  function(x, path = "value") {
+                validate_worker_transport <-  function( x,
+                                                        path = "value") {
+
                         fail <-  function(kind) {
+
                                 stop(paste0("Fresh-process sampler cannot transport ", kind, " at ", path,
-                                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process."),
+                                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit ",
+                                            "in the current R process."),
                                      call. = FALSE)
                         }
+
                         if (is.environment(x)) fail(kind = "an environment")
                         if (typeof(x) %in% c("externalptr", "weakref")) fail(kind = "an external pointer")
                         if (inherits(x, "connection")) fail(kind = "a connection")
@@ -162,7 +195,8 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                                 x_attributes <-  attributes(x)
                                 for (attribute_name in names(x_attributes)) {
                                         validate_worker_transport(x = x_attributes[[attribute_name]],
-                                                                  path = paste0(path, " attribute ", attribute_name))
+                                                                  path = paste0(path, " attribute ",
+                                                                                attribute_name))
                                 }
                                 return(invisible(TRUE))
                         }
@@ -177,13 +211,15 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                         if (is.list(x)) {
                                 x_names <-  names(x)
                                 for (ii in seq_along(x)) {
-                                        item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]])) paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
+                                        item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]]))
+                                                          paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
                                         validate_worker_transport(x = x[[ii]], path = paste0(path, item_name))
                                 }
                         } else if (is.pairlist(x)) {
                                 x_names <-  names(x)
                                 for (ii in seq_along(x)) {
-                                        item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]])) paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
+                                        item_name <-  if (!is.null(x_names) && nzchar(x_names[[ii]]))
+                                                          paste0("$", x_names[[ii]]) else paste0("[[", ii, "]]")
                                         validate_worker_transport(x = x[[ii]], path = paste0(path, item_name))
                                 }
                         } else if (is.language(x) && !is.symbol(x)) {
@@ -198,21 +234,28 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                         invisible(TRUE)
                 }
 
+
                 ##
                 capture_worker_rng <-  function() {
+
                         has_seed <-  exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
                         list(kind = RNGkind(),
                              has_seed = has_seed,
-                             state = if (has_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL)
+                             state = if (has_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else
+                                     NULL)
                 }
+
 
                 ##
                 condition_record <-  function(condition) {
+
                         condition_call <-  conditionCall(condition)
                         list(message = conditionMessage(condition),
                              class = class(condition),
-                             call = if (is.null(condition_call)) NULL else paste(deparse(condition_call), collapse = ""))
+                             call = if (is.null(condition_call)) NULL else
+                                    paste(deparse(condition_call), collapse = ""))
                 }
+
 
                 setwd(dir = working_dir)
                 .libPaths(new = libpath)
@@ -227,11 +270,13 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                         }
                         if (length(model_options)) do.call(what = options, args = model_options)
 
-                        provider_entrypoint <-  getExportedValue(ns = provider_package, name = "R_fn_sample_model")
+                        provider_entrypoint <-  getExportedValue(ns = provider_package,
+                                                                 name = "R_fn_sample_model")
                         if (!is.function(provider_entrypoint) ||
                             !"run_in_fresh_R_process" %in% names(formals(provider_entrypoint))) {
                                 stop(paste0("The loaded provider '", provider_package,
-                                            "' does not expose the updated R_fn_sample_model(run_in_fresh_R_process = ...) entry point."),
+                                            "' does not expose the updated ",
+                                            "R_fn_sample_model(run_in_fresh_R_process = ...) entry point."),
                                      call. = FALSE)
                         }
                         ## Explicit recursion guard for direct helper calls as well as normal dispatch.
@@ -246,8 +291,10 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                         validate_worker_transport(x = output, path = "R_fn_sample_model result")
                         list(ok = TRUE, output = output)
                 }, error = function(condition) {
+
                         list(ok = FALSE, error = condition_record(condition))
                 })
+
 
                 ##
                 postfit_rng <-  capture_worker_rng()
@@ -260,6 +307,7 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                 validate_worker_transport(x = fit_result, path = "fresh-process result")
                 fit_result
         }
+
         ##
         environment(worker) <-  baseenv()
 
@@ -287,38 +335,50 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                             supervise = TRUE,
                             error = "error")
         }, error = function(condition) {
+
                 stop(paste0("Fresh-process sampler child could not be started: ",
                             conditionMessage(condition),
-                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process."),
+                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R ",
+                            "process."),
                      call. = FALSE)
         })
+
         tryCatch({
                 child_process$wait()
         }, interrupt = function(condition) {
+
                 if (isTRUE(x = child_process$is_alive())) try(expr = child_process$kill_tree(), silent = TRUE)
-                stop("Fresh-process sampler was interrupted while the child process was running. Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process.",
+                stop("Fresh-process sampler was interrupted while the child process was running. Set ",
+                     "run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process.",
                      call. = FALSE)
         })
+
         child_exit_status <-  child_process$get_exit_status()
-        if (length(x = child_exit_status) != 1L || is.na(x = child_exit_status) || child_exit_status != 0L) {
+        if (length(x = child_exit_status) != 1 || is.na(x = child_exit_status) || child_exit_status != 0) {
                 stop(paste0("Fresh-process sampler child did not exit cleanly (exit status ",
-                            if (length(x = child_exit_status) == 1L && !is.na(x = child_exit_status)) child_exit_status else "unavailable",
-                            "). Its returned fit and RNG state were rejected. Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process."),
+                            if (length(x = child_exit_status) == 1 && !is.na(x = child_exit_status))
+                                child_exit_status else "unavailable",
+                            "). Its returned fit and RNG state were rejected. Set run_in_fresh_R_process = ",
+                            "FALSE to diagnose or run this fit in the current R process."),
                      call. = FALSE)
         }
         child_result <-  tryCatch({
                 child_process$get_result()
         }, error = function(condition) {
+
                 stop(paste0("Fresh-process sampler child terminated before returning a result: ",
                             conditionMessage(condition),
-                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process."),
+                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R ",
+                            "process."),
                      call. = FALSE)
         })
+
 
         ##
         if (!is.list(child_result) || is.null(child_result$rng_kind) ||
             is.null(child_result$rng_has_seed) || !"rng_state" %in% names(child_result)) {
-                stop("Fresh-process sampler returned an incomplete child result. Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process.",
+                stop("Fresh-process sampler returned an incomplete child result. Set run_in_fresh_R_process = ",
+                     "FALSE to diagnose or run this fit in the current R process.",
                      call. = FALSE)
         }
         child_rng <-  list(kind = child_result$rng_kind,
@@ -331,9 +391,17 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
         ##
         if (!isTRUE(child_result$ok)) {
                 child_error <-  child_result$error
-                child_message <-  if (is.list(child_error) && !is.null(child_error$message)) child_error$message else "the child reported an unspecified error"
-                child_class <-  if (is.list(child_error) && !is.null(child_error$class)) paste(child_error$class, collapse = "/") else "error"
-                stop(paste0("Fresh-process sampler failed in the child [", child_class, "]: ", child_message),
+                child_message <-  if (is.list(child_error) && !is.null(child_error$message))
+                                      child_error$message else "the child reported an unspecified error"
+                child_class <-  if (is.list(child_error) && !is.null(child_error$class))
+                                    paste(child_error$class, collapse = "/") else "error"
+                ## (the call in which the child's error occurred, when the child recorded it)
+                child_call <-  ""
+                if (is.list(child_error) && !is.null(child_error$call)) {
+                        child_call <-  paste0(" (in ", substr(child_error$call, 1, 300), ")")
+                }
+                stop(paste0("Fresh-process sampler failed in the child [", child_class, "]: ", child_message,
+                            child_call),
                      call. = FALSE)
         }
 
@@ -341,11 +409,14 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
         output <-  child_result$output
         validate_transport(x = output, path = "fresh-process output")
         if (!is.list(output) || is.null(output$init_object) || !is.list(output$init_object)) {
-                stop("Fresh-process sampler returned no serialisable init_object. Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process.",
+                stop("Fresh-process sampler returned no serialisable init_object. Set run_in_fresh_R_process = ",
+                     "FALSE to diagnose or run this fit in the current R process.",
                      call. = FALSE)
         }
         if (is.null(output$init_object$model_so_file) || is.null(output$init_object$json_file_path)) {
-                stop("Fresh-process sampler cannot rebuild the returned BridgeStan model because model_so_file or json_file_path is missing. Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process.",
+                stop("Fresh-process sampler cannot rebuild the returned BridgeStan model because model_so_file ",
+                     "or json_file_path is missing. Set run_in_fresh_R_process = FALSE to diagnose or run this ",
+                     "fit in the current R process.",
                      call. = FALSE)
         }
 
@@ -356,11 +427,15 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                                               data = output$init_object$json_file_path,
                                               seed = 123)
         }, error = function(condition) {
-                stop(paste0("Fresh-process sampler completed, but the parent could not rebuild init_object$bs_model: ",
+
+                stop(paste0("Fresh-process sampler completed, but the parent could not rebuild ",
+                            "init_object$bs_model: ",
                             conditionMessage(condition),
-                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R process."),
+                            ". Set run_in_fresh_R_process = FALSE to diagnose or run this fit in the current R ",
+                            "process."),
                      call. = FALSE)
         })
+
         ## Keep the post-fit state exact even if BridgeStan construction changes R's RNG in future.
         restore_rng(snapshot = child_rng)
         output$execution_process <-  list(isolated = TRUE,

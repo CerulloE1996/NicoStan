@@ -18,7 +18,8 @@
 ##   Neither depends on Omega_unconstrained_vec (the within-class correlations), the only other main family: the
 ##   marginal of one test of a multivariate probit has unit latent variance whatever the correlations.
 ##
-## ---- Renamed 6 Oct 2026 (no alias); the previous name:
+## ---- Renamed (no alias); the previous name:
+##
 ## parameters_that_Se_Sp_and_prevalence_depend_on_for_built_in_latent_class_models <-  function(Model_type) {
 parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs <-  function(Model_type) {
 
@@ -27,9 +28,6 @@ parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs <-  function(Model_type) {
         return(NULL)
 
 }
-
-
-
 
 
 

@@ -93,6 +93,13 @@ override CXX_STD = -std=gnu++17 # Use C++17
 ##
 override CPU_BASE_FLAGS = -O3  -march=native  -mtune=native
 ##
+## On a 64-bit ARM CPU (e.g. Apple Silicon, Snapdragon, AWS Graviton; NEON, no AVX), -mcpu=native instead
+## (-march=native is not accepted on ARM by every compiler):
+override MACHINE_OF_THIS_CPU=$(shell "$(R_HOME)/bin/Rscript" -e "cat(Sys.info()[['machine']])")
+ifneq ($(filter aarch64 arm64,$(MACHINE_OF_THIS_CPU)),)
+  override CPU_BASE_FLAGS = -O3  -mcpu=native
+endif
+##
 ##
 ## BASE_FLAGS +=  -mllvm   ### --openmp-opt-shared-limit=96  ### -inlinehint-threshold=20000000 # for clang++
 ##

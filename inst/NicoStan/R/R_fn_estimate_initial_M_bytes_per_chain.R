@@ -64,7 +64,8 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                                                              propto,
                                                              jacobian,
                                                              free_heap_release_package_name,
-                                                             free_heap_release_function_name) {
+                                                             free_heap_release_function_name,
+                                                             n_nuisance_owned_by_NicoStan = 0) {
 
         ##
         ## ---- one field of /proc/self/status or /proc/self/smaps_rollup (reported in kB = 1024 bytes), in bytes:
@@ -79,7 +80,9 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                     stop(paste0("field ", field_name, " not found in ", proc_file_path))
               }
               ##
-              field_value_text <-  trimws(x = sub(pattern = paste0("^", field_name, ":"), replacement = "", x = field_line[1]))
+              field_value_text <-  trimws(x = sub( pattern = paste0("^", field_name, ":"),
+                                                   replacement = "",
+                                                   x = field_line[1]))
               field_value_kB <-  as.numeric(strsplit(x = field_value_text, split = "[[:space:]]+")[[1]][1])
               ##
               return(field_value_kB * 1024)
@@ -93,11 +96,17 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
               status_lines <-  readLines(con = "/proc/self/status", warn = FALSE)
               ##
               fn_field_bytes <-  function(field_name) {
+
                     field_line <-  status_lines[startsWith(x = status_lines, prefix = paste0(field_name, ":"))]
-                    if (length(x = field_line) != 1) stop(paste0("field ", field_name, " not found in /proc/self/status"))
-                    field_value_text <-  trimws(x = sub(pattern = paste0("^", field_name, ":"), replacement = "", x = field_line))
+                    if (length(x = field_line) != 1) stop(paste0( "field ",
+                                                                  field_name,
+                                                                  " not found in /proc/self/status"))
+                    field_value_text <-  trimws(x = sub( pattern = paste0("^", field_name, ":"),
+                                                         replacement = "",
+                                                         x = field_line))
                     return(1024 * as.numeric(strsplit(x = field_value_text, split = "[[:space:]]+")[[1]][1]))
               }
+
               ##
               return(c( VmHWM = fn_field_bytes(field_name = "VmHWM"),
                         VmRSS = fn_field_bytes(field_name = "VmRSS")))
@@ -109,11 +118,14 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
         smaps_rollup_available <-  file.exists("/proc/self/smaps_rollup")
         ##
         fn_read_exact_resident_memory_bytes <-  function() {
+
               if (smaps_rollup_available) {
-                    return(fn_read_proc_file_field_bytes(proc_file_path = "/proc/self/smaps_rollup", field_name = "Rss"))
+                    return(fn_read_proc_file_field_bytes( proc_file_path = "/proc/self/smaps_rollup",
+                                                          field_name = "Rss"))
               }
               return(fn_read_proc_file_field_bytes(proc_file_path = "/proc/self/status", field_name = "VmRSS"))
         }
+
         ##
         ## ---- pin this process to the CPU it is running on (the kernel's per-CPU counter batches then add at most one batch of
         ##      error to each reading); /proc/self/stat field 39 is the CPU last run on (0-based), mcaffinity() is 1-based:
@@ -136,7 +148,8 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
               ##
               pinned_CPU_affinity <-  tryCatch( expr  = parallel::mcaffinity(affinity = pinned_CPU_index),
                                                 error = function(condition) NULL)
-              if (!identical(x = as.numeric(pinned_CPU_affinity), y = as.numeric(pinned_CPU_index))) pinned_CPU_index <-  NA_real_
+              if (!identical( x = as.numeric(pinned_CPU_affinity),
+                              y = as.numeric(pinned_CPU_index))) pinned_CPU_index <-  NA_real_
 
         } else if (length(x = CPU_affinity_before_pinning) == 1) {
 
@@ -156,12 +169,14 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                                                                    envir    = loadNamespace(package = free_heap_release_package_name),
                                                                    inherits = FALSE),
                                                        error = function(condition) {
+
                                                              load_error_message <-  substr(x = conditionMessage(condition), start = 1, stop = 300)
                                                              free_heap_release_note <<-  paste0("free heap memory not released (",
                                                                                                 free_heap_release_package_name,
                                                                                                 " could not be loaded: ", load_error_message, ")")
                                                              NULL
                                                        })
+
 
         }
         ##
@@ -171,16 +186,31 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                                                         data = json_file_path,
                                                         seed = initial_values_seed)
         ##
+        ## ---- a library in NicoStan's nuisance-block form (n_nuisance_owned_by_NicoStan > 0): its nuisance
+        ##      values are not BridgeStan parameters; the gradient is measured with them at 0 (the values used
+        ##      outside NicoStan's gradient call), the same memory per unit as in NicoStan's gradient call
+        ##
+        if (n_nuisance_owned_by_NicoStan > 0) {
+              ## (called through do.call(): the routine is in the model library, not in NicoStan's own, and a
+              ##  .C() call written out would be registered with NicoStan's own routines when it is built)
+              do.call(".C", list( "nicostan_set_the_nuisance_values_used_outside_NicoStan_R",
+                                  as.double(rep(0, n_nuisance_owned_by_NicoStan)),
+                                  as.integer(n_nuisance_owned_by_NicoStan),
+                                  PACKAGE = tools::file_path_sans_ext(basename(model_so_file))))
+        }
+        ##
         n_unconstrained_parameters <-  bridgestan_model$param_unc_num()
         ##
         ## ---- evaluation point, and the log density WITHOUT the gradient (propto = FALSE: doubles, no autodiff tape):
         ##
         fn_log_density_without_gradient <-  function(theta_unconstrained) {
+
               tryCatch( expr  = bridgestan_model$log_density( theta_unc = theta_unconstrained,
                                                               propto    = FALSE,
                                                               jacobian  = jacobian),
                         error = function(condition) NA_real_)
         }
+
         ##
         init_list_names_not_in_model <-  character(0)
         init_list_parameters_completed_from_zero <-  character(0)
@@ -223,7 +253,9 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                     init_list_values <-  init_list[[init_list_name]]
                     ##
                     if (is.list(x = init_list_values) || (!is.numeric(init_list_values) && !is.logical(init_list_values))) {
-                          stop(paste0("init_list$", init_list_name, " must be a number, vector, matrix or array (not a list)"))
+                          stop(paste0( "init_list$",
+                                       init_list_name,
+                                       " must be a number, vector, matrix or array (not a list)"))
                     }
                     ##
                     init_list_values <-  as.numeric(init_list_values)
@@ -237,18 +269,24 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
 
               }
               ##
-              init_list_parameters_completed_from_zero <-  setdiff(x = unique(x = parameter_base_names), y = names(x = init_list))
+              init_list_parameters_completed_from_zero <-  setdiff( x = unique(x = parameter_base_names),
+                                                                    y = names(x = init_list))
               ##
               theta_unconstrained <-  tryCatch( expr  = bridgestan_model$param_unconstrain(theta = theta_constrained),
                                                 error = function(condition) {
+
                                                       stop(paste0("init_list could not be unconstrained by the model: ",
-                                                                  substr(x = conditionMessage(condition), start = 1, stop = 500)))
+                                                                  substr( x = conditionMessage(condition),
+                                                                          start = 1,
+                                                                          stop = 500)))
                                                 })
+
               ##
               evaluation_point_description <-  if (length(x = init_list_parameters_completed_from_zero) == 0) {
                     "supplied init_list"
               } else {
-                    paste0("supplied init_list (", paste(init_list_parameters_completed_from_zero, collapse = ", "),
+                    paste0("supplied init_list (", paste( init_list_parameters_completed_from_zero,
+                                                          collapse = ", "),
                            " completed with the model's values at zero on the unconstrained scale)")
               }
               log_density_without_gradient <-  fn_log_density_without_gradient(theta_unconstrained = theta_unconstrained)
@@ -272,27 +310,37 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
 
               }
               ##
+              ##  NicoStan's own fixed small values, the starting values of its layout timings, and otherwise
+              ##  the stop below, which asks for the model's fixed starting values)
+#             if (!is.finite(x = log_density_without_gradient)) {
+
+#                   for (attempt_index in seq_len(length.out = max_attempts_for_finite_log_density)) {
+
+#                         set.seed(seed = initial_values_seed + attempt_index - 1)
+#                         ##
+#                         theta_unconstrained <-  stats::runif( n   = n_unconstrained_parameters,
+#                                                               min = initial_values_range_unconstrained[1],
+#                                                               max = initial_values_range_unconstrained[2])
+#                         ##
+#                         log_density_without_gradient <-  fn_log_density_without_gradient(theta_unconstrained = theta_unconstrained)
+#                         ##
+#                         if (is.finite(x = log_density_without_gradient)) break
+
+#                   }
+#                   ##
+#                   evaluation_point_description <-  paste0(evaluation_point_description,
+#                                                           "uniform(", initial_values_range_unconstrained[1], ", ",
+#                                                           initial_values_range_unconstrained[2], ") on the unconstrained scale, seed(s) ",
+#                                                           initial_values_seed, " to ", initial_values_seed + attempt_index - 1)
+
+#             }
               if (!is.finite(x = log_density_without_gradient)) {
-
-                    for (attempt_index in seq_len(length.out = max_attempts_for_finite_log_density)) {
-
-                          set.seed(seed = initial_values_seed + attempt_index - 1)
-                          ##
-                          theta_unconstrained <-  stats::runif( n   = n_unconstrained_parameters,
-                                                                min = initial_values_range_unconstrained[1],
-                                                                max = initial_values_range_unconstrained[2])
-                          ##
-                          log_density_without_gradient <-  fn_log_density_without_gradient(theta_unconstrained = theta_unconstrained)
-                          ##
-                          if (is.finite(x = log_density_without_gradient)) break
-
-                    }
-                    ##
-                    evaluation_point_description <-  paste0(evaluation_point_description,
-                                                            "uniform(", initial_values_range_unconstrained[1], ", ",
-                                                            initial_values_range_unconstrained[2], ") on the unconstrained scale, seed(s) ",
-                                                            initial_values_seed, " to ", initial_values_seed + attempt_index - 1)
-
+                    theta_unconstrained <-  0.005 * (((seq_len(n_unconstrained_parameters) * 7) %% 5) - 2)
+                    log_density_without_gradient <-  fn_log_density_without_gradient(
+                                                           theta_unconstrained = theta_unconstrained)
+                    evaluation_point_description <-  paste0(
+                          evaluation_point_description,
+                          "NicoStan's fixed small values on the unconstrained scale")
               }
 
         }
@@ -314,8 +362,10 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                                                      error = function(condition) NA_real_)
               ##
               free_heap_release_note <-  if (identical(x = free_heap_release_result, y = -1)) {
+
                     "free heap memory not released (malloc_trim is not available: not glibc)"
               } else if (is.na(x = free_heap_release_result)) {
+
                     "free heap memory not released (the release function failed)"
               } else {
                     "free heap memory released with malloc_trim(0)"
@@ -327,7 +377,8 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
         ##      peak fell, or it is now within a few batches of the kernel's per-CPU resident-memory counters (max(32, 2 x online
         ##      CPUs) pages each) of VmRSS:
         ##
-        page_size_bytes <-  tryCatch( expr  = fn_read_proc_file_field_bytes(proc_file_path = "/proc/self/smaps", field_name = "KernelPageSize"),
+        page_size_bytes <-  tryCatch( expr  = fn_read_proc_file_field_bytes( proc_file_path = "/proc/self/smaps",
+                                                                             field_name = "KernelPageSize"),
                                       error = function(condition) 4096)
         N_online_CPUs <-  parallel::detectCores(logical = TRUE)
         if (!is.finite(x = N_online_CPUs)) N_online_CPUs <-  1
@@ -338,6 +389,7 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
         VmHWM_before_reset_bytes <-  fn_read_VmHWM_and_VmRSS_bytes()[["VmHWM"]]
         ##
         peak_reset_write_succeeded <-  tryCatch( expr    = { cat("5", file = "/proc/self/clear_refs"); TRUE },
+
                                                  warning = function(condition) FALSE,
                                                  error   = function(condition) FALSE)
         ##
@@ -371,11 +423,13 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
         resident_memory_source <-  if (smaps_rollup_available) "Rss of /proc/self/smaps_rollup" else "VmRSS of /proc/self/status"
         ##
         if (peak_reset_succeeded) {
+
               gradient_memory_bytes <-  resident_memory_growth_bytes + transient_peak_bytes
               measurement_method_code <-  "peak"
               measurement_method <-  paste0("resident growth (", resident_memory_source, ") + transient peak (VmHWM - VmRSS after the gradient), ",
                                             "peak reset with /proc/self/clear_refs")
         } else {
+
               gradient_memory_bytes <-  resident_memory_growth_bytes
               measurement_method_code <-  "resident_growth_only"
               measurement_method <-  paste0("resident growth only (", resident_memory_source, "); the peak could not be reset, ",
@@ -413,6 +467,307 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
 
 
 
+#### ---- child-process measurement for a built-in model (manual gradients) ----------------------------------
+
+#' Measure the memory touched by one log density and manual gradient of a built-in NicoStan model in the
+#' current (fresh) R process
+#'
+#' Runs in a fresh child R process (its enclosing environment is baseenv(), so every non-base function is
+#' called with its namespace). Pins the process to one CPU, evaluates the log density and gradient of the
+#' built-in model once with Rcpp_wrapper_fn_lp_grad() of the package that provides the built-in models' C++
+#' code (gradient_package_name, i.e. BayesMVP: NicoStan's own compiled code evaluates Stan models only). This
+#' loads the code and data pages; the model's workspace is allocated inside the call and freed when it
+#' returns, so none of it stays resident. It then releases the free heap memory, resets the peak resident
+#' memory, evaluates the log density and gradient once more and returns the resident growth plus the transient
+#' part of the peak.
+#'
+#' @keywords internal
+#' @noRd
+fn_measure_one_gradient_memory_of_built_in_model_in_this_process <-  function( Model_type,
+                                                                               theta_main_vec,
+                                                                               theta_us_vec,
+                                                                               y,
+                                                                               Model_args_as_Rcpp_List,
+                                                                               gradient_package_name,
+                                                                               free_heap_release_package_name,
+                                                                               free_heap_release_function_name) {
+
+        ##
+        ## ---- one field of /proc/self/status or /proc/self/smaps_rollup (reported in kB = 1024 bytes), in
+        ##      bytes:
+        ##
+        fn_read_proc_file_field_bytes <-  function( proc_file_path,
+                                                    field_name) {
+
+              proc_file_lines <-  readLines(con = proc_file_path, warn = FALSE)
+              field_line <-  proc_file_lines[startsWith(x = proc_file_lines, prefix = paste0(field_name, ":"))]
+              ##
+              if (length(x = field_line) < 1) {
+                    stop(paste0("field ", field_name, " not found in ", proc_file_path))
+              }
+              ##
+              field_value_text <-  trimws(x = sub(pattern = paste0("^", field_name, ":"), replacement = "",
+                                                  x = field_line[1]))
+              field_value_kB <-  as.numeric(strsplit(x = field_value_text, split = "[[:space:]]+")[[1]][1])
+              ##
+              return(field_value_kB * 1024)
+
+        }
+        ##
+        ## ---- VmHWM and VmRSS from ONE read of /proc/self/status (so that both come from the same state of the
+        ##      counters):
+        ##
+        fn_read_VmHWM_and_VmRSS_bytes <-  function() {
+
+              status_lines <-  readLines(con = "/proc/self/status", warn = FALSE)
+              ##
+              fn_field_bytes <-  function(field_name) {
+
+                    field_line <-  status_lines[startsWith(x = status_lines, prefix = paste0(field_name, ":"))]
+                    if (length(x = field_line) != 1) {
+                          stop(paste0("field ", field_name, " not found in /proc/self/status"))
+                    }
+                    field_value_text <-  trimws(x = sub(pattern = paste0("^", field_name, ":"), replacement = "",
+                                                        x = field_line))
+                    return(1024 * as.numeric(strsplit(x = field_value_text, split = "[[:space:]]+")[[1]][1]))
+              }
+
+              ##
+              return(c( VmHWM = fn_field_bytes(field_name = "VmHWM"),
+                        VmRSS = fn_field_bytes(field_name = "VmRSS")))
+
+        }
+        ##
+        ## ---- exact resident memory (page-table walk of /proc/self/smaps_rollup; VmRSS if smaps_rollup is not
+        ##      available):
+        ##
+        smaps_rollup_available <-  file.exists("/proc/self/smaps_rollup")
+        ##
+        fn_read_exact_resident_memory_bytes <-  function() {
+
+              if (smaps_rollup_available) {
+                    return(fn_read_proc_file_field_bytes( proc_file_path = "/proc/self/smaps_rollup",
+                                                          field_name     = "Rss"))
+              }
+              return(fn_read_proc_file_field_bytes( proc_file_path = "/proc/self/status",
+                                                    field_name     = "VmRSS"))
+        }
+
+        ##
+        ## ---- pin this process to the CPU it is running on (the kernel's per-CPU counter batches then add at
+        ##      most one batch of error to each reading); /proc/self/stat field 39 is the CPU last run on
+        ##      (0-based), mcaffinity() is 1-based:
+        ##
+        CPU_affinity_before_pinning <-  tryCatch( expr  = parallel::mcaffinity(),
+                                                  error = function(condition) NULL)
+        pinned_CPU_index <-  NA_real_
+        ##
+        if (length(x = CPU_affinity_before_pinning) > 1) {
+
+              process_stat_line <-  readLines(con = "/proc/self/stat", warn = FALSE)[1]
+              process_stat_line_after_name <-  sub(pattern = "^.*\\) ", replacement = "", x = process_stat_line)
+              process_stat_fields <-  strsplit(x = process_stat_line_after_name, split = " ", fixed = TRUE)[[1]]
+              current_CPU_index <-  suppressWarnings(as.numeric(process_stat_fields[37])) + 1
+              ##
+              pinned_CPU_index <-  if (isTRUE(current_CPU_index %in% CPU_affinity_before_pinning)) {
+                    current_CPU_index
+              } else {
+                    CPU_affinity_before_pinning[1]
+              }
+              ##
+              pinned_CPU_affinity <-  tryCatch( expr  = parallel::mcaffinity(affinity = pinned_CPU_index),
+                                                error = function(condition) NULL)
+              if (!identical(x = as.numeric(pinned_CPU_affinity), y = as.numeric(pinned_CPU_index))) {
+
+                    pinned_CPU_index <-  NA_real_
+              }
+
+
+        } else if (length(x = CPU_affinity_before_pinning) == 1) {
+
+              pinned_CPU_index <-  CPU_affinity_before_pinning
+
+        }
+        ##
+        ## ---- the package that provides the free heap release (NicoStan) is loaded first, as in a real run:
+        ##
+        free_heap_release_function <-  NULL
+        free_heap_release_note <-  paste0("free heap memory not released (NicoStan's ",
+                                          "Rcpp_fn_release_free_heap_memory() is not available)")
+        ##
+        if (!is.null(x = free_heap_release_package_name)) {
+
+              free_heap_release_function <-  tryCatch(
+                    expr  = get(x        = free_heap_release_function_name,
+                                envir    = loadNamespace(package = free_heap_release_package_name),
+                                inherits = FALSE),
+                    error = function(condition) {
+
+                          load_error_message <-  substr(x = conditionMessage(condition), start = 1, stop = 300)
+                          free_heap_release_note <<-  paste0("free heap memory not released (",
+                                                             free_heap_release_package_name,
+                                                             " could not be loaded: ", load_error_message, ")")
+                          NULL
+                    })
+
+
+        }
+        ##
+        ## ---- the built-in log density and manual gradient (the standard evaluation, not the log-scale one):
+        ##
+        lp_grad_function <-  get(x        = "Rcpp_wrapper_fn_lp_grad",
+                                 envir    = loadNamespace(package = gradient_package_name),
+                                 inherits = FALSE)
+        ##
+        fn_log_density_and_gradient <-  function() {
+
+              lp_grad_function( Model_type               = Model_type,
+                                force_autodiff           = FALSE,
+                                force_PartialLog         = FALSE,
+                                multi_attempts           = FALSE,
+                                theta_main_vec           = theta_main_vec,
+                                theta_us_vec             = theta_us_vec,
+                                y                        = y,
+                                grad_option              = "all",
+                                Model_args_as_Rcpp_List  = Model_args_as_Rcpp_List)
+        }
+
+        ##
+        ## ---- the first evaluation (loads the code and data pages; its workspace is freed when it returns):
+        ##
+        first_log_density_and_gradient <-  fn_log_density_and_gradient()
+        log_density_first_evaluation <-  first_log_density_and_gradient[1]
+        first_evaluation_all_finite <-  all(is.finite(x = first_log_density_and_gradient))
+        rm(first_log_density_and_gradient)
+        ##
+        if (!is.finite(x = log_density_first_evaluation)) {
+              stop(paste0("the log density of the built-in model is not finite at the evaluation point ",
+                          "(zero on the unconstrained scale)"))
+        }
+        ##
+        ## ---- settle R's own allocations and return the free heap memory to the kernel:
+        ##
+        invisible(x = gc(verbose = FALSE, full = TRUE))
+        ##
+        free_heap_release_result <-  NA_real_
+        ##
+        if (!is.null(x = free_heap_release_function)) {
+
+              free_heap_release_result <-  tryCatch( expr  = as.numeric(free_heap_release_function()),
+                                                     error = function(condition) NA_real_)
+              ##
+              free_heap_release_note <-  if (identical(x = free_heap_release_result, y = -1)) {
+
+                    "free heap memory not released (malloc_trim is not available: not glibc)"
+              } else if (is.na(x = free_heap_release_result)) {
+
+                    "free heap memory not released (the release function failed)"
+              } else {
+                    "free heap memory released with malloc_trim(0)"
+              }
+
+        }
+        ##
+        ## ---- reset the peak resident memory to the current value. The reset worked if the write raised no error
+        ##      and either the peak fell, or it is now within a few batches of the kernel's per-CPU
+        ##      resident-memory counters (max(32, 2 x online CPUs) pages each) of VmRSS:
+        ##
+        page_size_bytes <-  tryCatch(
+              expr  = fn_read_proc_file_field_bytes( proc_file_path = "/proc/self/smaps",
+                                                     field_name     = "KernelPageSize"),
+              error = function(condition) 4096)
+        N_online_CPUs <-  parallel::detectCores(logical = TRUE)
+        if (!is.finite(x = N_online_CPUs)) N_online_CPUs <-  1
+        ##
+        resident_memory_counter_batch_bytes <-  max(32, 2 * N_online_CPUs) * page_size_bytes
+        peak_reset_tolerance_bytes <-  max(1024^2, 4 * resident_memory_counter_batch_bytes)
+        ##
+        VmHWM_before_reset_bytes <-  fn_read_VmHWM_and_VmRSS_bytes()[["VmHWM"]]
+        ##
+        peak_reset_write_succeeded <-  tryCatch( expr    = { cat("5", file = "/proc/self/clear_refs"); TRUE },
+
+                                                 warning = function(condition) FALSE,
+                                                 error   = function(condition) FALSE)
+        ##
+        VmHWM_and_VmRSS_before_gradient <-  fn_read_VmHWM_and_VmRSS_bytes()
+        VmHWM_before_gradient_bytes <-  VmHWM_and_VmRSS_before_gradient[["VmHWM"]]
+        VmRSS_before_gradient_bytes <-  VmHWM_and_VmRSS_before_gradient[["VmRSS"]]
+        ##
+        peak_fell <-  VmHWM_before_gradient_bytes < VmHWM_before_reset_bytes
+        peak_within_tolerance_of_VmRSS <-  (VmHWM_before_gradient_bytes - VmRSS_before_gradient_bytes) <=
+                                           peak_reset_tolerance_bytes
+        peak_reset_succeeded <-  peak_reset_write_succeeded && (peak_fell || peak_within_tolerance_of_VmRSS)
+        ##
+        resident_memory_before_gradient_bytes <-  fn_read_exact_resident_memory_bytes()
+        ##
+        ## ---- the measured log density and gradient:
+        ##
+        log_density_and_gradient <-  fn_log_density_and_gradient()
+        ##
+        VmHWM_and_VmRSS_after_gradient <-  fn_read_VmHWM_and_VmRSS_bytes()
+        VmHWM_after_gradient_bytes <-  VmHWM_and_VmRSS_after_gradient[["VmHWM"]]
+        VmRSS_after_gradient_bytes <-  VmHWM_and_VmRSS_after_gradient[["VmRSS"]]
+        ##
+        resident_memory_after_gradient_bytes <-  fn_read_exact_resident_memory_bytes()
+        ##
+        ## ---- resident growth (exact) plus the transient part (memory touched and freed again before the
+        ##      gradient returned):
+        ##
+        resident_memory_growth_bytes <-  resident_memory_after_gradient_bytes -
+                                         resident_memory_before_gradient_bytes
+        transient_peak_bytes <-  max(0, VmHWM_after_gradient_bytes - VmRSS_after_gradient_bytes)
+        ##
+        resident_memory_source <-  if (smaps_rollup_available) {
+
+              "Rss of /proc/self/smaps_rollup"
+        } else {
+
+              "VmRSS of /proc/self/status"
+        }
+        ##
+        if (peak_reset_succeeded) {
+              gradient_memory_bytes <-  resident_memory_growth_bytes + transient_peak_bytes
+              measurement_method_code <-  "peak"
+              measurement_method <-  paste0("resident growth (", resident_memory_source, ") + transient peak ",
+                                            "(VmHWM - VmRSS after the gradient), peak reset with ",
+                                            "/proc/self/clear_refs")
+        } else {
+              gradient_memory_bytes <-  resident_memory_growth_bytes
+              measurement_method_code <-  "resident_growth_only"
+              measurement_method <-  paste0("resident growth only (", resident_memory_source, "); the peak ",
+                                            "could not be reset, so temporaries freed before the gradient ",
+                                            "returns are missed")
+        }
+        ##
+        return(list( gradient_memory_bytes                      = gradient_memory_bytes,
+                     measurement_method_code                    = measurement_method_code,
+                     measurement_method                         = measurement_method,
+                     resident_memory_growth_bytes               = resident_memory_growth_bytes,
+                     transient_peak_bytes                       = transient_peak_bytes,
+                     resident_memory_before_gradient_bytes      = resident_memory_before_gradient_bytes,
+                     resident_memory_after_gradient_bytes       = resident_memory_after_gradient_bytes,
+                     VmHWM_before_reset_bytes                   = VmHWM_before_reset_bytes,
+                     VmHWM_before_gradient_bytes                = VmHWM_before_gradient_bytes,
+                     VmRSS_before_gradient_bytes                = VmRSS_before_gradient_bytes,
+                     VmHWM_after_gradient_bytes                 = VmHWM_after_gradient_bytes,
+                     VmRSS_after_gradient_bytes                 = VmRSS_after_gradient_bytes,
+                     peak_reset_write_succeeded                 = peak_reset_write_succeeded,
+                     peak_reset_tolerance_bytes                 = peak_reset_tolerance_bytes,
+                     resident_memory_counter_batch_bytes        = resident_memory_counter_batch_bytes,
+                     free_heap_release_result                   = free_heap_release_result,
+                     free_heap_release_note                     = free_heap_release_note,
+                     pinned_CPU_index                           = pinned_CPU_index,
+                     log_density_first_evaluation               = log_density_first_evaluation,
+                     first_evaluation_all_finite                = first_evaluation_all_finite,
+                     log_density_with_gradient                  = log_density_and_gradient[1],
+                     all_outputs_finite                         = all(is.finite(log_density_and_gradient)),
+                     child_process_id                           = Sys.getpid()))
+
+}
+
+
+
+
 #### ---- free heap release: where the child process finds it ----------------------------------------------------------------------------
 
 #' Locate NicoStan's free heap release function for the child process
@@ -425,7 +780,9 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
 fn_locate_free_heap_release_function <-  function() {
 
         NicoStan_provides_release <-  requireNamespace(package = "NicoStan", quietly = TRUE) &&
-                                      exists(x = "Rcpp_fn_release_free_heap_memory", envir = asNamespace(ns = "NicoStan"), inherits = FALSE)
+                                      exists( x = "Rcpp_fn_release_free_heap_memory",
+                                              envir = asNamespace(ns = "NicoStan"),
+                                              inherits = FALSE)
         ##
         if (!NicoStan_provides_release) {
               return(NULL)
@@ -557,7 +914,8 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
                                                     n_repeats                            = 3,
                                                     N_observations                       = NULL,
                                                     propto                               = TRUE,
-                                                    jacobian                             = TRUE
+                                                    jacobian                             = TRUE,
+                                                    n_nuisance_owned_by_NicoStan         = 0
 ) {
 
         ##
@@ -607,8 +965,10 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
         }
         ##
         fn_is_single_whole_number <-  function(value, minimum_value) {
+
               return(is.numeric(value) && length(x = value) == 1 && is.finite(x = value) && value >= minimum_value && value == round(x = value))
         }
+
         ##
         if (!fn_is_single_whole_number(value = n_repeats, minimum_value = 1)) {
               stop("fn_estimate_initial_M_bytes_per_chain: n_repeats must be a single positive whole number.")
@@ -668,6 +1028,46 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
         model_so_file <-  normalizePath(path = model_so_file, mustWork = TRUE)
         json_file_path <-  normalizePath(path = json_file_path, mustWork = TRUE)
         ##
+        ## ---- the measurement kept from an earlier call on the same compiled library (unchanged: the same
+        ##      size and modification time) with data of the same size in bytes, the same nuisance block and the
+        ##      same propto and jacobian, so that each model and N is measured once: each measurement is a fresh
+        ##      the sampling picker spent choosing for the robust Student-t's AVX-512 library at N = 50,000
+        ##      (kept in a file beside the library, one entry per such case):
+        ##
+        file_of_the_kept_measurements <-  paste0(tools::file_path_sans_ext(model_so_file),
+                                                 "_M_bytes_per_chain_kept.rds")
+        earlier_file_of_the_kept_measurements <-  file_of_the_kept_measurements
+        if (nchar(paste0(basename(file_of_the_kept_measurements),
+                         ".being_written_by_", Sys.getpid()), type = "bytes") > 255) {
+              folder_of_the_kept_measurements <-  tools::file_path_sans_ext(model_so_file)
+              file_of_the_kept_measurements <-  file.path(folder_of_the_kept_measurements,
+                                                          "M_bytes_per_chain_kept.rds")
+        }
+        name_of_this_case <-  paste0("library_", file.size(model_so_file), "_bytes_modified_",
+                                     format(as.numeric(file.mtime(model_so_file)), digits = 17), "_data_",
+                                     file.size(json_file_path), "_bytes_nuisance_", n_nuisance_owned_by_NicoStan,
+                                     "_propto_", propto, "_jacobian_", jacobian)
+        kept_measurements <-  list()
+        for (file_to_read in unique(c(earlier_file_of_the_kept_measurements,
+                                     file_of_the_kept_measurements))) {
+              if (file.exists(file_to_read)) {
+                    earlier_measurements <-  tryCatch(readRDS(file_to_read),
+                                                       error = function(condition) list())
+                    kept_measurements[names(earlier_measurements)] <-  earlier_measurements
+              }
+        }
+        if (!is.null(kept_measurements[[name_of_this_case]])) {
+
+              message(colourise(paste0("M_bytes/chain = ",
+                                       formatC(x = kept_measurements[[name_of_this_case]]$M_bytes_per_chain,
+                                               format = "f", digits = 0, big.mark = ","),
+                                       " bytes, kept from the earlier measurement of ",
+                                       basename(path = model_so_file), " on data of the same size (",
+                                       file_of_the_kept_measurements, ")"), "cyan"))
+              return(kept_measurements[[name_of_this_case]])
+        }
+
+        ##
         ## ---- the child's function has baseenv() as its enclosing environment, so it carries nothing from this session:
         ##
         fn_child_measurement <-  fn_measure_one_gradient_memory_in_this_process
@@ -698,13 +1098,16 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
                                                              propto                               = propto,
                                                              jacobian                             = jacobian,
                                                              free_heap_release_package_name       = free_heap_release_location$package_name,
-                                                             free_heap_release_function_name      = free_heap_release_location$function_name),
+                                                             free_heap_release_function_name      = free_heap_release_location$function_name,
+                                                             n_nuisance_owned_by_NicoStan         =
+                                                                   n_nuisance_owned_by_NicoStan),
                                       libpath        = .libPaths(),
                                       env            = child_process_environment,
                                       system_profile = FALSE,
                                       user_profile   = FALSE,
                                       error          = "error"),
                     error = function(condition) {
+
                           ## (callr wraps the child's error; its own message is the parent condition's):
                           child_error_message <-  conditionMessage(condition)
                           if (!is.null(x = condition$parent)) child_error_message <-  conditionMessage(condition$parent)
@@ -717,9 +1120,13 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
                           stop(paste0("fn_estimate_initial_M_bytes_per_chain: repeat ", repeat_index, " failed in the child process: ",
                                       child_error_message), call. = FALSE)
                     })
+
               ##
               message(colourise(paste0("  repeat ", repeat_index, " of ", n_repeats, ": ",
-                                       formatC(x = repeat_results[[repeat_index]]$gradient_memory_bytes, format = "f", digits = 0, big.mark = ","),
+                                       formatC( x = repeat_results[[repeat_index]]$gradient_memory_bytes,
+                                                format = "f",
+                                                digits = 0,
+                                                big.mark = ","),
                                        " bytes (", repeat_results[[repeat_index]]$measurement_method_code, ")"), "cyan"))
 
         }
@@ -728,8 +1135,10 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
         ##      peak, the median is over the repeats that did):
         ##
         fn_extract_from_repeats <-  function(field_name) {
+
               sapply(X = repeat_results, FUN = function(repeat_result) repeat_result[[field_name]])
         }
+
         ##
         M_bytes_per_chain_each_repeat <-  fn_extract_from_repeats(field_name = "gradient_memory_bytes")
         measurement_method_code_each_repeat <-  fn_extract_from_repeats(field_name = "measurement_method_code")
@@ -771,22 +1180,32 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
                              paste(init_list_names_not_in_model, collapse = ", ")))
         }
         ##
-        M_range_description <-  paste0("range ", formatC(x = min(M_bytes_per_chain_each_repeat) / 1e6, format = "f", digits = 2), " to ",
-                                       formatC(x = max(M_bytes_per_chain_each_repeat) / 1e6, format = "f", digits = 2), " MB")
+        M_range_description <-  paste0("range ", formatC( x = min(M_bytes_per_chain_each_repeat) / 1e6,
+                                                          format = "f",
+                                                          digits = 2), " to ",
+                                       formatC( x = max(M_bytes_per_chain_each_repeat) / 1e6,
+                                                format = "f",
+                                                digits = 2), " MB")
         ##
         bytes_per_observation_description <-  if (is.null(x = N_observations)) "" else {
               paste0("; ", formatC(x = bytes_per_observation, format = "f", digits = 0, big.mark = ","),
                      " bytes per observation (N_observations = ", N_observations, ")")
         }
         ##
-        message(colourise(paste0("initial M_bytes/chain = ", formatC(x = M_bytes_per_chain, format = "f", digits = 0, big.mark = ","),
-                                 " bytes (", formatC(x = M_bytes_per_chain / 1e6, format = "f", digits = 2), " MB; median of ",
+        message(colourise(paste0("initial M_bytes/chain = ", formatC( x = M_bytes_per_chain,
+                                                                      format = "f",
+                                                                      digits = 0,
+                                                                      big.mark = ","),
+                                 " bytes (", formatC( x = M_bytes_per_chain / 1e6,
+                                                      format = "f",
+                                                      digits = 2), " MB; median of ",
                                  length(x = repeats_used_for_median), " fresh-process repeat(s), ", M_range_description, ")",
                                  bytes_per_observation_description), "cyan"))
         ##
         message(colourise(paste0("  ", free_heap_release_note, if (nzchar(x = median_note)) paste0("; ", median_note) else ""), "cyan"))
         ##
-        return(list( M_bytes_per_chain                                 = M_bytes_per_chain,
+        # return(list( M_bytes_per_chain                                 = M_bytes_per_chain,
+        measurement <-  list( M_bytes_per_chain                                 = M_bytes_per_chain,
                      M_bytes_per_chain_each_repeat                     = M_bytes_per_chain_each_repeat,
                      repeats_used_for_median                           = repeats_used_for_median,
                      bytes_per_observation                             = bytes_per_observation,
@@ -815,10 +1234,343 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
                      model_so_file                                     = model_so_file,
                      json_file_path                                    = json_file_path,
                      propto                                            = propto,
-                     jacobian                                          = jacobian))
+                     jacobian                                          = jacobian)
+        ##
+        ## ---- kept for the next call on this library and data size (the file written whole, then renamed):
+        ##
+        kept_measurements[[name_of_this_case]] <-  measurement
+        file_being_written <-  paste0(file_of_the_kept_measurements, ".being_written_by_", Sys.getpid())
+        kept <-  tryCatch({
+              dir.create(dirname(file_of_the_kept_measurements), recursive = TRUE, showWarnings = FALSE)
+              saveRDS(kept_measurements, file_being_written)
+              file.rename(file_being_written, file_of_the_kept_measurements)
+        }, error = function(condition) FALSE)
+        if (!isTRUE(kept)) {
+
+              message(colourise(paste0("M_bytes/chain: the measurement could not be kept in ",
+                                       file_of_the_kept_measurements), "cyan"))
+        }
+
+        return(measurement)
 
 }
 
+
+
+
+#### ---- exported function for a built-in model (manual gradients) ------------------------------------------
+
+#' Estimate the initial M_bytes/chain of a built-in NicoStan model: memory used by one full-data
+#' log-density-and-gradient evaluation of one chain (manual gradients)
+#'
+#' Measures, for a built-in NicoStan model (Model_type "MVP", "MVOP", "LC_MVP" or "LC_MVOP", whose manual
+#' gradients are computed over the N observations in num_chunks chunks), the memory (in bytes) that ONE
+#' evaluation of the log density and its gradient on the full data uses in one chain, with the model evaluated
+#' as one chunk. This is the M_bytes/chain from which [fn_compute_burnin_n_threads_WCP_and_num_chunks()] and
+#' [fn_compute_initial_N_chunks()] choose the threads and chunks of a built-in model.
+#'
+#' For each repeat, a fresh child R process, pinned to one CPU, evaluates the log density and gradient once with
+#' BayesMVP's Rcpp_wrapper_fn_lp_grad() (BayesMVP provides the built-in models' C++ code; NicoStan's own compiled
+#' code evaluates Stan models only), with the chunk count of Model_args_as_Rcpp_List set to 1, runs gc()
+#' and returns the free heap memory to the kernel (malloc_trim(0)), resets its peak resident memory (by writing
+#' "5" to /proc/self/clear_refs), reads its resident memory, evaluates the log density and gradient once more,
+#' and reads the resident memory again and the peak (VmHWM) and VmRSS. The model's workspace is allocated inside
+#' each evaluation and freed when it returns, so the first evaluation leaves only the code and data pages
+#' resident; the result of the repeat is the growth of the resident memory plus the transient part
+#' max(0, VmHWM - VmRSS) of the second evaluation. The value returned is the median over the repeats.
+#'
+#' Limits of the measurement, in addition to those of [fn_estimate_initial_M_bytes_per_chain()] (a lower value
+#' for pages reused without being returned to the kernel; the peak known to within about one batch of the
+#' kernel's resident-memory counters; Linux only):
+#' \itemize{
+#'   \item It includes the copies that Rcpp_wrapper_fn_lp_grad() makes of its inputs (the main and nuisance
+#'     parameters and y) and its output vector, which the sampler does not make for each gradient; these are a
+#'     small part of the total.
+#'   \item The evaluation point is zero on the unconstrained scale, for the main and the nuisance parameters.
+#'     The memory of the manual gradient depends on the point only through the log-scale (PartialLog)
+#'     evaluation, which is not used here.
+#'   \item It uses the C++ code of the installed NicoStan.
+#' }
+#'
+#' @param Model_type The built-in model: "MVP", "MVOP", "LC_MVP" or "LC_MVOP".
+#' @param init_object The model's initialisation object (it holds Model_args_as_Rcpp_List, n_params_main,
+#'   n_nuisance and model_args_list$y).
+#' @param y The data: an integer matrix with one row per observation and one column per test (default: the
+#'   data of init_object).
+#' @param n_repeats Number of fresh-process repeats (default 3); the median is returned.
+#' @return A list with M_bytes_per_chain (median over the repeats used), M_bytes_per_chain_each_repeat,
+#'   repeats_used_for_median, bytes_per_observation, N_observations, n_tests, n_repeats, measurement_method,
+#'   measurement_method_each_repeat, median_note, free_heap_release_note, evaluation_point_description,
+#'   n_main_parameters, n_nuisance_parameters, log_density_with_gradient, the readings of every repeat,
+#'   child_process_id_each_repeat, pinned_CPU_index_each_repeat, Model_type and vect_type.
+#' @export
+fn_estimate_initial_M_bytes_per_chain_of_built_in_model <-  function( Model_type,
+                                                                      init_object,
+                                                                      y          = NULL,
+                                                                      n_repeats  = 3
+) {
+
+        ##
+        ## ---- Linux only, built-in models only:
+        ##
+        if (!identical(x = Sys.info()[["sysname"]], y = "Linux") || !file.exists("/proc/self/status")) {
+              stop(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: the measurement reads ",
+                          "/proc/self/status and writes /proc/self/clear_refs, so it runs on Linux only (this ",
+                          "system: ", Sys.info()[["sysname"]], ")."))
+        }
+        ##
+        built_in_model_types <-  c("MVP", "MVOP", "LC_MVP", "LC_MVOP")
+        if (!is.character(Model_type) || (length(x = Model_type) != 1) ||
+            !(Model_type %in% built_in_model_types)) {
+              stop(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: Model_type must be one of ",
+                          paste(built_in_model_types, collapse = ", "), " (for a Stan model, use ",
+                          "fn_estimate_initial_M_bytes_per_chain()); got: ",
+                          paste(as.character(Model_type), collapse = ", ")))
+        }
+        ##
+        if (is.null(x = init_object$Model_args_as_Rcpp_List) || is.null(x = init_object$n_params_main) ||
+            is.null(x = init_object$n_nuisance)) {
+              stop(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: init_object must hold ",
+                          "Model_args_as_Rcpp_List, n_params_main and n_nuisance (the model's initialisation ",
+                          "object)."))
+        }
+        ##
+        if (is.null(x = y)) y <-  init_object$model_args_list$y
+        if (!is.matrix(x = y) || (nrow(x = y) < 1) || (ncol(x = y) < 1)) {
+              stop(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: y must be the data matrix ",
+                          "(one row per observation, one column per test)."))
+        }
+        ##
+        if (!is.numeric(n_repeats) || (length(x = n_repeats) != 1) || !is.finite(x = n_repeats) ||
+            (n_repeats < 1) || (n_repeats != round(x = n_repeats))) {
+              stop(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: n_repeats must be a single ",
+                          "positive whole number."))
+        }
+        ##
+        ## ---- the model evaluated as one chunk (the full data at once), at zero on the unconstrained scale:
+        ##
+        Model_args_as_Rcpp_List_one_chunk <-  init_object$Model_args_as_Rcpp_List
+        Model_args_as_Rcpp_List_one_chunk$Model_args_ints[4] <-  1
+        Model_args_as_Rcpp_List_one_chunk$model_so_file <-  "none"
+        Model_args_as_Rcpp_List_one_chunk$json_file_path <-  "none"
+        ##
+        theta_main_vec <-  rep(x = 0, times = init_object$n_params_main)
+        theta_us_vec <-  rep(x = 0, times = init_object$n_nuisance)
+        storage.mode(y) <-  "integer"
+        ##
+        N_observations <-  nrow(x = y)
+        n_tests <-  ncol(x = y)
+        vect_type <-  as.character(Model_args_as_Rcpp_List_one_chunk$Model_args_strings[1])
+        ##
+        ## ---- the child's function has baseenv() as its enclosing environment, so it carries nothing from this
+        ##      session:
+        ##
+        fn_child_measurement <-  fn_measure_one_gradient_memory_of_built_in_model_in_this_process
+        environment(fn = fn_child_measurement) <-  baseenv()
+        ##
+        free_heap_release_location <-  fn_locate_free_heap_release_function()
+        ##
+        message(colourise(paste0("M_bytes/chain: ", n_repeats, " fresh-process repeat(s) of one log density and ",
+                                 "manual gradient of the built-in ", Model_type, " model (N = ", N_observations,
+                                 ", ", n_tests, " tests, one chunk)"), "cyan"))
+        ##
+        repeat_results <-  vector(mode = "list", length = n_repeats)
+        ##
+        for (repeat_index in seq_len(length.out = n_repeats)) {
+
+              repeat_results[[repeat_index]] <-  tryCatch(
+                    expr  = callr::r( func           = fn_child_measurement,
+                                      args           = list( Model_type                       = Model_type,
+                                                             theta_main_vec                   = theta_main_vec,
+                                                             theta_us_vec                     = theta_us_vec,
+                                                             y                                = y,
+                                                             Model_args_as_Rcpp_List          =
+                                                                   Model_args_as_Rcpp_List_one_chunk,
+                                                             gradient_package_name            = "BayesMVP",
+                                                             free_heap_release_package_name   =
+                                                                   free_heap_release_location$package_name,
+                                                             free_heap_release_function_name  =
+                                                                   free_heap_release_location$function_name),
+                                      libpath        = .libPaths(),
+                                      env            = callr::rcmd_safe_env(),
+                                      system_profile = FALSE,
+                                      user_profile   = FALSE,
+                                      error          = "error"),
+                    error = function(condition) {
+
+                          ## (callr wraps the child's error; its own message is the parent condition's):
+                          child_error_message <-  conditionMessage(condition)
+                          if (!is.null(x = condition$parent)) {
+                                child_error_message <-  conditionMessage(condition$parent)
+                          }
+                          if (nchar(x = child_error_message) > 500) {
+                                child_error_message <-  paste0(substr(x = child_error_message, start = 1,
+                                                                      stop = 500), " ...")
+                          }
+                          stop(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: repeat ",
+                                      repeat_index, " failed in the child process: ", child_error_message),
+                               call. = FALSE)
+                    })
+
+              ##
+              message(colourise(paste0("  repeat ", repeat_index, " of ", n_repeats, ": ",
+                                       formatC(x = repeat_results[[repeat_index]]$gradient_memory_bytes,
+                                               format = "f", digits = 0, big.mark = ","),
+                                       " bytes (", repeat_results[[repeat_index]]$measurement_method_code, ")"),
+                                "cyan"))
+
+        }
+        ##
+        ## ---- summary over the repeats (the two estimators are never mixed in one median: when some repeats
+        ##      could not reset the peak, the median is over the repeats that did):
+        ##
+        fn_extract_from_repeats <-  function(field_name) {
+
+              sapply(X = repeat_results, FUN = function(repeat_result) repeat_result[[field_name]])
+        }
+
+        ##
+        M_bytes_per_chain_each_repeat <-  fn_extract_from_repeats(field_name = "gradient_memory_bytes")
+        measurement_method_code_each_repeat <-  fn_extract_from_repeats(field_name = "measurement_method_code")
+        measurement_method_each_repeat <-  fn_extract_from_repeats(field_name = "measurement_method")
+        ##
+        repeat_used_peak <-  measurement_method_code_each_repeat == "peak"
+        median_note <-  ""
+        ##
+        if (all(repeat_used_peak)) {
+
+              repeats_used_for_median <-  seq_len(length.out = n_repeats)
+
+        } else if (any(repeat_used_peak)) {
+
+              repeats_used_for_median <-  which(repeat_used_peak)
+              median_note <-  paste0("median over the ", length(x = repeats_used_for_median), " repeat(s) that ",
+                                     "reset the peak; ", n_repeats - length(x = repeats_used_for_median),
+                                     " repeat(s) could not reset it and are not used")
+
+        } else {
+
+              repeats_used_for_median <-  seq_len(length.out = n_repeats)
+              median_note <-  paste0("no repeat could reset the peak, so the median is of the resident growth ",
+                                     "only (a lower value)")
+              warning(paste0("fn_estimate_initial_M_bytes_per_chain_of_built_in_model: the peak resident memory ",
+                             "could not be reset (/proc/self/clear_refs) in any repeat, so M_bytes/chain is the ",
+                             "growth of the resident memory only (", measurement_method_each_repeat[1], "); ",
+                             "this misses temporaries freed before the gradient returns."))
+
+        }
+        ##
+        M_bytes_per_chain <-  stats::median(M_bytes_per_chain_each_repeat[repeats_used_for_median])
+        measurement_method <-  unique(x = measurement_method_each_repeat[repeats_used_for_median])
+        bytes_per_observation <-  M_bytes_per_chain / N_observations
+        free_heap_release_notes <-  fn_extract_from_repeats(field_name = "free_heap_release_note")
+        free_heap_release_note <-  paste(unique(x = free_heap_release_notes), collapse = " | ")
+        ##
+        message(colourise(paste0("initial M_bytes/chain = ",
+                                 formatC(x = M_bytes_per_chain, format = "f", digits = 0, big.mark = ","),
+                                 " bytes (", formatC(x = M_bytes_per_chain / 1e6, format = "f", digits = 2),
+                                 " MB; median of ", length(x = repeats_used_for_median), " fresh-process ",
+                                 "repeat(s); ", formatC(x = bytes_per_observation, format = "f", digits = 0,
+                                                        big.mark = ","),
+                                 " bytes per observation)"), "cyan"))
+        message(colourise(paste0("  ", free_heap_release_note,
+                                 if (nzchar(x = median_note)) paste0("; ", median_note) else ""), "cyan"))
+        ##
+        return(list( M_bytes_per_chain                                 = M_bytes_per_chain,
+                     M_bytes_per_chain_each_repeat                     = M_bytes_per_chain_each_repeat,
+                     repeats_used_for_median                           = repeats_used_for_median,
+                     bytes_per_observation                             = bytes_per_observation,
+                     N_observations                                    = N_observations,
+                     n_tests                                           = n_tests,
+                     n_repeats                                         = n_repeats,
+                     measurement_method                                = measurement_method,
+                     measurement_method_each_repeat                    = measurement_method_code_each_repeat,
+                     median_note                                       = median_note,
+                     free_heap_release_note                            = free_heap_release_note,
+                     evaluation_point_description                      = "zero on the unconstrained scale",
+                     n_main_parameters                                 = init_object$n_params_main,
+                     n_nuisance_parameters                             = init_object$n_nuisance,
+                     log_density_with_gradient                         =
+                           repeat_results[[1]]$log_density_with_gradient,
+                     all_outputs_finite_each_repeat                    =
+                           fn_extract_from_repeats(field_name = "all_outputs_finite"),
+                     resident_memory_growth_bytes_each_repeat          =
+                           fn_extract_from_repeats(field_name = "resident_memory_growth_bytes"),
+                     transient_peak_bytes_each_repeat                  =
+                           fn_extract_from_repeats(field_name = "transient_peak_bytes"),
+                     child_process_id_each_repeat                      =
+                           fn_extract_from_repeats(field_name = "child_process_id"),
+                     pinned_CPU_index_each_repeat                      =
+                           fn_extract_from_repeats(field_name = "pinned_CPU_index"),
+                     resident_memory_counter_batch_bytes               =
+                           repeat_results[[1]]$resident_memory_counter_batch_bytes,
+                     Model_type                                        = Model_type,
+                     vect_type                                         = vect_type))
+
+}
+
+
+
+
+
+#### ---- M_bytes/chain of a built-in model counted from the workspace of its manual gradient --------------------------------------------
+
+#' M_bytes/chain of a built-in model, counted from the workspace of its manual gradient
+#'
+#' Paper 1's M_bytes/chain for a manual gradient: the doubles that the gradient's workspace holds for each
+#' individual (one row of the data, with all n_tests tests), counted from the arrays which BayesMVP's C++ resizes
+#' for each chunk, times 8 bytes, times N, as in Paper 1 for the binary LC-MVP (31 T + 15 doubles, i.e. 1608 bytes
+#' per individual with T = 6 tests):
+#' \itemize{
+#'   \item the binary models (Model_type "MVP" and "LC_MVP"; resize_MVP_workspace() in
+#'     MVP_lp_grad_MD_AD_fns.hpp): 31 T + 13 + n_class doubles per individual (the five arrays of the latent
+#'     classes are made for 2 classes, also for the MVP; lp_array has one column per class);
+#'   \item the ordinal models (Model_type "MVOP" and "LC_MVOP"; fn_MVOP_resize_ws_for_chunk() in
+#'     MVOP_lp_grad_MD_AD_fns.hpp): (36 + n_class) T + 15 + n_class doubles per individual (the same five arrays
+#'     for 2 classes, plus Upper_Bound_Z for each class).
+#' }
+#' The inputs read for each individual from outside the workspace (its rows of y and of the covariates, and its
+#' nuisance parameters) and the nuisance gradient written to the output are not counted, as in Paper 1. Nothing is
+#' measured: unlike fn_estimate_initial_M_bytes_per_chain_of_built_in_model(), which measures the growth of the
+#' resident memory of a whole gradient evaluation (2 to 3 times this count for these models), this is the working
+#' set from which Paper 1's rule sizes the chunks of a manual gradient.
+#'
+#' @param Model_type The built-in model: "MVP", "MVOP", "LC_MVP" or "LC_MVOP".
+#' @param N The number of individuals (rows of the data).
+#' @param n_tests The number of tests (columns of the data), T.
+#' @return A list: M_bytes_per_chain, bytes_per_individual, doubles_per_individual, N, n_tests, n_class and
+#'   Model_type.
+#' @export
+fn_M_bytes_per_chain_counted_from_workspace_of_built_in_model <-  function( Model_type,
+                                                                           N,
+                                                                           n_tests
+) {
+
+        if (!is.character(Model_type) || (length(Model_type) != 1) ||
+            !(Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP"))) {
+              stop(paste0("fn_M_bytes_per_chain_counted_from_workspace_of_built_in_model: Model_type must be ",
+                          "\"MVP\", \"MVOP\", \"LC_MVP\" or \"LC_MVOP\"; got: ",
+                          paste(as.character(Model_type), collapse = ", ")))
+        }
+        n_class <-  if (Model_type %in% c("LC_MVP", "LC_MVOP")) 2 else 1
+        ##
+        ## ---- the doubles of the workspace per individual (as counted from the C++ above):
+        ##
+        if (Model_type %in% c("MVP", "LC_MVP")) {
+              doubles_per_individual <-  31 * n_tests + 13 + n_class
+        } else {
+              doubles_per_individual <-  (36 + n_class) * n_tests + 15 + n_class
+        }
+        bytes_per_individual <-  8 * doubles_per_individual
+        return(list( M_bytes_per_chain       = bytes_per_individual * N,
+                     bytes_per_individual    = bytes_per_individual,
+                     doubles_per_individual  = doubles_per_individual,
+                     N                       = N,
+                     n_tests                 = n_tests,
+                     n_class                 = n_class,
+                     Model_type              = Model_type))
+
+}
 
 
 

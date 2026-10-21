@@ -59,8 +59,10 @@
                           ##  cat("  Loaded:", dll, "\n")
                           },
                           error = function(e) {
+
                            ## cat("  Failed to load:", dll, "\n  Error:", e$message, "\n")
                           }
+
                         )
                         })
                         
@@ -130,7 +132,6 @@
 
 
  
-
 
 
 

@@ -180,10 +180,12 @@ fn_bulk_local_tuner_append <-  function( state,
         if (!state$enabled) return(state)
         state$iteration_count <-  state$iteration_count + 1
         valid_matrix <-  function(value) {
+
                 return(is.matrix(value) && is.numeric(value) &&
                        identical(dim(value), as.integer(c(length(state$parameter_names), state$n_chains))) &&
                        all(is.finite(value)))
         }
+
         if (!valid_matrix(theta_initial) || !valid_matrix(theta_accepted)) {
                 return(fn_bulk_local_tuner_reset(state, "invalid_or_nonfinite_accepted_state"))
         }
@@ -199,8 +201,10 @@ fn_bulk_local_tuner_append <-  function( state,
         if (is.null(trajectory) || any(trajectory$steps != floor(trajectory$steps)) ||
             !is.logical(shared_jitter) || length(shared_jitter) != 1 || is.na(shared_jitter) ||
             is.null(kernel_signature) || !length(kernel_signature) || anyNA(kernel_signature, recursive = TRUE)) {
+
                 return(fn_bulk_local_tuner_reset(state, "invalid_trajectory_metadata"))
         }
+
         probability <-  fn_bulk_local_tuner_length_probability(trajectory$steps,
                                                                trajectory$nominal_tau,
                                                                trajectory$eps)
@@ -281,6 +285,7 @@ fn_bulk_local_tuner_stationarity <-  function( state ) {
                             interpretation = "A finite-window stationarity screen, not proof of stationarity."))
         }
         values <-  lapply(seq_along(state$parameter_names), function(index) {
+
                 raw <-  t(matrix(state$draws[index, , ], nrow = state$n_chains))
                 ranked <-  matrix(fn_bulk_local_tuner_rank(as.vector(raw)), nrow = nrow(raw))
                 folded <-  abs(raw - stats::median(raw))
@@ -288,6 +293,7 @@ fn_bulk_local_tuner_stationarity <-  function( state ) {
                 return(c(rank = fn_bulk_local_tuner_rhat(ranked),
                          folded = fn_bulk_local_tuner_rhat(folded)))
         })
+
         names(values) <-  state$parameter_names
         maximum <-  max(unlist(values))
         return(list(passed = is.finite(maximum) && maximum <= state$settings$stationarity_rhat_max,
@@ -323,9 +329,11 @@ fn_bulk_local_tuner_support <-  function( weights, shared_jitter ) {
         path_weights <-  if (shared_jitter) weights[, 1] else as.vector(weights)
         time_weights <-  rowSums(weights)
         kish <-  function(value) {
+
                 if (!length(value) || sum(value * value) <= 0) return(0)
                 return(sum(value)^2 / sum(value * value))
         }
+
         return(c(effective_paths = kish(path_weights),
                  effective_time_clusters = kish(time_weights),
                  nonzero_time_clusters = sum(time_weights > 0)))
@@ -359,8 +367,10 @@ fn_bulk_local_tuner_score <-  function( state, observables, scale, deleted_draws
                 starts <-  seq_len(n_draws - lag)
                 if (length(deleted_draws)) {
                         keep <-  vapply(starts, function(start) {
+
                                 return(!any(seq.int(start, start + lag) %in% deleted_draws))
                         }, logical(1))
+
                         starts <-  starts[keep]
                 }
                 if (!length(starts)) return(list(defined = FALSE, reason = "no_retained_lag_paths"))
@@ -459,8 +469,8 @@ fn_bulk_local_tuner_decide <-  function( state ) {
                         stationarity = NULL,
                         method = method,
                         buffer_count = state$buffer_count,
-                        raw_buffer_bytes = as.numeric(object.size(state$draws)) +
-                                           as.numeric(object.size(state$leapfrog_steps)),
+                        raw_buffer_bytes = as.numeric(utils::object.size(state$draws)) +
+                                           as.numeric(utils::object.size(state$leapfrog_steps)),
                         raw_parameter_count = length(state$parameter_names),
                         selected_parameter_count = length(state$selected_indices),
                         realised_leapfrog_steps = state$leapfrog_steps)
@@ -476,8 +486,10 @@ fn_bulk_local_tuner_decide <-  function( state ) {
         if (state$shared_jitter && (length(unique(state$nominal_tau)) != 1 ||
                                    length(unique(state$eps)) != 1 ||
                                    any(apply(state$leapfrog_steps, 1, function(value) {
+
                                            return(length(unique(value)) != 1)
                                    })))) {
+
                 result$reason <-  "unsupported_unequal_chain_law_for_shared_jitter"
                 return(result)
         }
@@ -508,6 +520,7 @@ fn_bulk_local_tuner_decide <-  function( state ) {
         best_gain <-  log1p(state$settings$min_gain)
         result$reason <-  "no_supported_conservative_improvement"
         for (scale in state$settings$candidate_scales[state$settings$candidate_scales < 1]) {
+
                 if (any(state$nominal_tau * scale < state$eps)) {
                         result$candidates[[as.character(scale)]] <-  list(
                                 scale = scale, tau = state$nominal_tau * scale,
@@ -525,9 +538,12 @@ fn_bulk_local_tuner_decide <-  function( state ) {
                         candidate$reason <-  "insufficient_path_or_time_cluster_support"
                 } else if (candidate$defined) {
                         jack_candidate <-  lapply(blocks, function(block) {
+
                                 return(fn_bulk_local_tuner_score(state, observables, scale, block))
                         })
+
                         valid <-  vapply(seq_len(n_blocks), function(index) {
+
                                 defined <-  isTRUE(jack_baseline[[index]]$defined) &&
                                             isTRUE(jack_candidate[[index]]$defined)
                                 if (!defined) return(FALSE)
@@ -535,13 +551,16 @@ fn_bulk_local_tuner_decide <-  function( state ) {
                                 return(support["effective_paths"] >= state$settings$min_effective_paths &&
                                        support["effective_time_clusters"] >= state$settings$min_time_clusters)
                         }, logical(1))
+
                         if (!all(valid)) {
                                 candidate$reason <-  "undefined_or_unsupported_delete_block_comparison"
                         } else {
                                 log_ratios <-  vapply(seq_len(n_blocks), function(index) {
+
                                         return(log(jack_candidate[[index]]$efficiency /
                                                    jack_baseline[[index]]$efficiency))
                                 }, numeric(1))
+
                                 se <-  sqrt((n_blocks - 1) / n_blocks *
                                             sum((log_ratios - mean(log_ratios))^2))
                                 candidate$log_ratio <-  log(candidate$efficiency / baseline$efficiency)
@@ -561,6 +580,7 @@ fn_bulk_local_tuner_decide <-  function( state ) {
                 }
                 result$candidates[[as.character(scale)]] <-  candidate
         }
+
         for (key in names(result$candidates)) {
                 result$candidates[[key]]$accepted <-  result$status == "select_shorter_tau" &&
                                                      identical(result$candidates[[key]]$tau, result$tau_selected)
@@ -568,11 +588,6 @@ fn_bulk_local_tuner_decide <-  function( state ) {
         return(result)
 
 }
-
-
-
-
-
 
 
 

@@ -69,6 +69,16 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace
+void Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace(const Rcpp::IntegerVector positions_from_0);
+RcppExport SEXP _NicoStan_Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace(SEXP positions_from_0SEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type positions_from_0(positions_from_0SEXP);
+    Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace(positions_from_0);
+    return R_NilValue;
+END_RCPP
+}
 // Rcpp_fn_check_joint_trajectory
 Rcpp::List Rcpp_fn_check_joint_trajectory(const Rcpp::List EHMC_args_as_Rcpp_List);
 RcppExport SEXP _NicoStan_Rcpp_fn_check_joint_trajectory(SEXP EHMC_args_as_Rcpp_ListSEXP) {
@@ -204,15 +214,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_Rcpp_wrapper_update_M_dense_main_Hessian
-Rcpp::List fn_Rcpp_wrapper_update_M_dense_main_Hessian(Eigen::Matrix<double, -1, -1> M_dense_main, Eigen::Matrix<double, -1, -1> M_inv_dense_main, Eigen::Matrix<double, -1, -1> M_inv_dense_main_chol, const double shrinkage_factor, const double ratio_Hess_main, const int interval_width, const double num_diff_e, const std::string Model_type, const bool force_autodiff, const bool force_PartialLog, const bool multi_attempts, const Eigen::Matrix<double, -1, 1> theta_main_vec, const Eigen::Matrix<double, -1, 1> theta_us_vec, const Eigen::Matrix<int, -1, -1> y, const Rcpp::List Model_args_as_Rcpp_List, const double ii, const double n_burnin, const std::string metric_type);
+Rcpp::List fn_Rcpp_wrapper_update_M_dense_main_Hessian(Eigen::Matrix<double, -1, -1> M_dense_main, /* to be updated */                                                                       Eigen::Matrix<double, -1, -1> M_inv_dense_main, /* to be updated */                                                                       Eigen::Matrix<double, -1, -1> M_inv_dense_main_chol, /* to be updated */                                                                       const double shrinkage_factor, const double ratio_Hess_main, const int interval_width, const double num_diff_e, const std::string Model_type, const bool force_autodiff, const bool force_PartialLog, const bool multi_attempts, const Eigen::Matrix<double, -1, 1> theta_main_vec, const Eigen::Matrix<double, -1, 1> theta_us_vec, const Eigen::Matrix<int, -1, -1> y, const Rcpp::List Model_args_as_Rcpp_List, const double ii, const double n_burnin, const std::string metric_type);
 RcppExport SEXP _NicoStan_fn_Rcpp_wrapper_update_M_dense_main_Hessian(SEXP M_dense_mainSEXP, SEXP M_inv_dense_mainSEXP, SEXP M_inv_dense_main_cholSEXP, SEXP shrinkage_factorSEXP, SEXP ratio_Hess_mainSEXP, SEXP interval_widthSEXP, SEXP num_diff_eSEXP, SEXP Model_typeSEXP, SEXP force_autodiffSEXP, SEXP force_PartialLogSEXP, SEXP multi_attemptsSEXP, SEXP theta_main_vecSEXP, SEXP theta_us_vecSEXP, SEXP ySEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP iiSEXP, SEXP n_burninSEXP, SEXP metric_typeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, -1> >::type M_dense_main(M_dense_mainSEXP);
-    Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, -1> >::type M_inv_dense_main(M_inv_dense_mainSEXP);
-    Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, -1> >::type M_inv_dense_main_chol(M_inv_dense_main_cholSEXP);
-    Rcpp::traits::input_parameter< const double >::type shrinkage_factor(shrinkage_factorSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                                       Eigen::Matrix<double, -1, -1> >::type M_inv_dense_main(M_inv_dense_mainSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                                       Eigen::Matrix<double, -1, -1> >::type M_inv_dense_main_chol(M_inv_dense_main_cholSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                                       const double >::type shrinkage_factor(shrinkage_factorSEXP);
     Rcpp::traits::input_parameter< const double >::type ratio_Hess_main(ratio_Hess_mainSEXP);
     Rcpp::traits::input_parameter< const int >::type interval_width(interval_widthSEXP);
     Rcpp::traits::input_parameter< const double >::type num_diff_e(num_diff_eSEXP);
@@ -252,14 +262,14 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_Rcpp_wrapper_update_M_diag_Hessian
-Rcpp::List fn_Rcpp_wrapper_update_M_diag_Hessian(Eigen::Matrix<double, -1, 1> M_main_vec, Eigen::Matrix<double, -1, 1> M_inv_main_vec, const double shrinkage_factor, const double ratio_Hess_main, const int interval_width, const double num_diff_e, const std::string Model_type, const bool force_autodiff, const bool force_PartialLog, const bool multi_attempts, const Eigen::Matrix<double, -1, 1> theta_main_vec, const Eigen::Matrix<double, -1, 1> theta_us_vec, const Eigen::Matrix<int, -1, -1> y, const Rcpp::List Model_args_as_Rcpp_List, const double ii, const double n_burnin, const std::string metric_type);
+Rcpp::List fn_Rcpp_wrapper_update_M_diag_Hessian(Eigen::Matrix<double, -1, 1> M_main_vec, /* to be updated */                                                           Eigen::Matrix<double, -1, 1> M_inv_main_vec, /* to be updated */                                                           const double shrinkage_factor, const double ratio_Hess_main, const int interval_width, const double num_diff_e, const std::string Model_type, const bool force_autodiff, const bool force_PartialLog, const bool multi_attempts, const Eigen::Matrix<double, -1, 1> theta_main_vec, const Eigen::Matrix<double, -1, 1> theta_us_vec, const Eigen::Matrix<int, -1, -1> y, const Rcpp::List Model_args_as_Rcpp_List, const double ii, const double n_burnin, const std::string metric_type);
 RcppExport SEXP _NicoStan_fn_Rcpp_wrapper_update_M_diag_Hessian(SEXP M_main_vecSEXP, SEXP M_inv_main_vecSEXP, SEXP shrinkage_factorSEXP, SEXP ratio_Hess_mainSEXP, SEXP interval_widthSEXP, SEXP num_diff_eSEXP, SEXP Model_typeSEXP, SEXP force_autodiffSEXP, SEXP force_PartialLogSEXP, SEXP multi_attemptsSEXP, SEXP theta_main_vecSEXP, SEXP theta_us_vecSEXP, SEXP ySEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP iiSEXP, SEXP n_burninSEXP, SEXP metric_typeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, 1> >::type M_main_vec(M_main_vecSEXP);
-    Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, 1> >::type M_inv_main_vec(M_inv_main_vecSEXP);
-    Rcpp::traits::input_parameter< const double >::type shrinkage_factor(shrinkage_factorSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                           Eigen::Matrix<double, -1, 1> >::type M_inv_main_vec(M_inv_main_vecSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                           const double >::type shrinkage_factor(shrinkage_factorSEXP);
     Rcpp::traits::input_parameter< const double >::type ratio_Hess_main(ratio_Hess_mainSEXP);
     Rcpp::traits::input_parameter< const int >::type interval_width(interval_widthSEXP);
     Rcpp::traits::input_parameter< const double >::type num_diff_e(num_diff_eSEXP);
@@ -279,7 +289,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_find_initial_eps_main_and_us
-Rcpp::List fn_find_initial_eps_main_and_us(Eigen::Matrix<double, -1, 1> theta_main_vec_initial_ref, Eigen::Matrix<double, -1, 1> theta_us_vec_initial_ref, const bool partitioned_HMC, const double seed, const std::string Model_type, const bool force_autodiff, const bool force_PartialLog, const bool multi_attempts, Eigen::Matrix<int, -1, -1> y_ref, const Rcpp::List Model_args_as_Rcpp_List, Rcpp::List EHMC_args_as_Rcpp_List, const Rcpp::List EHMC_Metric_as_Rcpp_List, const int n_threads);
+Rcpp::List fn_find_initial_eps_main_and_us(Eigen::Matrix<double, -1, 1> theta_main_vec_initial_ref, Eigen::Matrix<double, -1, 1> theta_us_vec_initial_ref, const bool partitioned_HMC, const double seed, const std::string Model_type, const bool force_autodiff, const bool force_PartialLog, const bool multi_attempts, Eigen::Matrix<int, -1, -1> y_ref, const Rcpp::List Model_args_as_Rcpp_List, Rcpp::List EHMC_args_as_Rcpp_List, /* pass by ref. to modify (???) */                                                                               const Rcpp::List EHMC_Metric_as_Rcpp_List, const int n_threads);
 RcppExport SEXP _NicoStan_fn_find_initial_eps_main_and_us(SEXP theta_main_vec_initial_refSEXP, SEXP theta_us_vec_initial_refSEXP, SEXP partitioned_HMCSEXP, SEXP seedSEXP, SEXP Model_typeSEXP, SEXP force_autodiffSEXP, SEXP force_PartialLogSEXP, SEXP multi_attemptsSEXP, SEXP y_refSEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP EHMC_args_as_Rcpp_ListSEXP, SEXP EHMC_Metric_as_Rcpp_ListSEXP, SEXP n_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -295,25 +305,25 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Eigen::Matrix<int, -1, -1> >::type y_ref(y_refSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List >::type Model_args_as_Rcpp_List(Model_args_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::List >::type EHMC_Metric_as_Rcpp_List(EHMC_Metric_as_Rcpp_ListSEXP);
+    Rcpp::traits::input_parameter< /* pass by ref. to modify (???) */                                                                               const Rcpp::List >::type EHMC_Metric_as_Rcpp_List(EHMC_Metric_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< const int >::type n_threads(n_threadsSEXP);
     rcpp_result_gen = Rcpp::wrap(fn_find_initial_eps_main_and_us(theta_main_vec_initial_ref, theta_us_vec_initial_ref, partitioned_HMC, seed, Model_type, force_autodiff, force_PartialLog, multi_attempts, y_ref, Model_args_as_Rcpp_List, EHMC_args_as_Rcpp_List, EHMC_Metric_as_Rcpp_List, n_threads));
     return rcpp_result_gen;
 END_RCPP
 }
 // fn_Rcpp_wrapper_adapt_eps_ADAM
-Eigen::Matrix<double, -1, 1> fn_Rcpp_wrapper_adapt_eps_ADAM(double eps, double eps_m_adam, double eps_v_adam, const int iter, const int n_burnin, const double LR, const double p_jump, const double adapt_delta, const double beta1_adam, const double beta2_adam, const double eps_adam);
+Eigen::Matrix<double, -1, 1> fn_Rcpp_wrapper_adapt_eps_ADAM(double eps, /* updating this */                                                                    double eps_m_adam, /* updating this */                                                                    double eps_v_adam, /* updating this */                                                                    const int iter, const int n_burnin, const double LR, /* ADAM learning rate */                                                                    const double p_jump, const double adapt_delta, const double beta1_adam, const double beta2_adam, const double eps_adam);
 RcppExport SEXP _NicoStan_fn_Rcpp_wrapper_adapt_eps_ADAM(SEXP epsSEXP, SEXP eps_m_adamSEXP, SEXP eps_v_adamSEXP, SEXP iterSEXP, SEXP n_burninSEXP, SEXP LRSEXP, SEXP p_jumpSEXP, SEXP adapt_deltaSEXP, SEXP beta1_adamSEXP, SEXP beta2_adamSEXP, SEXP eps_adamSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< double >::type eps(epsSEXP);
-    Rcpp::traits::input_parameter< double >::type eps_m_adam(eps_m_adamSEXP);
-    Rcpp::traits::input_parameter< double >::type eps_v_adam(eps_v_adamSEXP);
-    Rcpp::traits::input_parameter< const int >::type iter(iterSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                    double >::type eps_m_adam(eps_m_adamSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                    double >::type eps_v_adam(eps_v_adamSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                    const int >::type iter(iterSEXP);
     Rcpp::traits::input_parameter< const int >::type n_burnin(n_burninSEXP);
     Rcpp::traits::input_parameter< const double >::type LR(LRSEXP);
-    Rcpp::traits::input_parameter< const double >::type p_jump(p_jumpSEXP);
+    Rcpp::traits::input_parameter< /* ADAM learning rate */                                                                    const double >::type p_jump(p_jumpSEXP);
     Rcpp::traits::input_parameter< const double >::type adapt_delta(adapt_deltaSEXP);
     Rcpp::traits::input_parameter< const double >::type beta1_adam(beta1_adamSEXP);
     Rcpp::traits::input_parameter< const double >::type beta2_adam(beta2_adamSEXP);
@@ -323,27 +333,27 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_update_snaper_m_and_s
-Eigen::Matrix<double, -1, -1> fn_update_snaper_m_and_s(Eigen::Matrix<double, -1, 1> snaper_m, Eigen::Matrix<double, -1, 1> snaper_s_empirical, const Eigen::Matrix<double, -1, 1> theta_vec_mean, const double ii);
+Eigen::Matrix<double, -1, -1> fn_update_snaper_m_and_s(Eigen::Matrix<double, -1, 1> snaper_m, /* to be updated */                                                              Eigen::Matrix<double, -1, 1> snaper_s_empirical, /* to be updated */                                                              const Eigen::Matrix<double, -1, 1> theta_vec_mean, /* mean theta_vec across all K chains */                                                              const double ii);
 RcppExport SEXP _NicoStan_fn_update_snaper_m_and_s(SEXP snaper_mSEXP, SEXP snaper_s_empiricalSEXP, SEXP theta_vec_meanSEXP, SEXP iiSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, 1> >::type snaper_m(snaper_mSEXP);
-    Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, 1> >::type snaper_s_empirical(snaper_s_empiricalSEXP);
-    Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type theta_vec_mean(theta_vec_meanSEXP);
-    Rcpp::traits::input_parameter< const double >::type ii(iiSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                              Eigen::Matrix<double, -1, 1> >::type snaper_s_empirical(snaper_s_empiricalSEXP);
+    Rcpp::traits::input_parameter< /* to be updated */                                                              const Eigen::Matrix<double, -1, 1> >::type theta_vec_mean(theta_vec_meanSEXP);
+    Rcpp::traits::input_parameter< /* mean theta_vec across all K chains */                                                              const double >::type ii(iiSEXP);
     rcpp_result_gen = Rcpp::wrap(fn_update_snaper_m_and_s(snaper_m, snaper_s_empirical, theta_vec_mean, ii));
     return rcpp_result_gen;
 END_RCPP
 }
 // fn_update_snaper_w_dense_M
-Eigen::Matrix<double, -1, 1> fn_update_snaper_w_dense_M(Eigen::Matrix<double, -1, 1> snaper_w_vec, const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const double ii, const Eigen::Matrix<double, -1, -1> M_dense_sqrt);
+Eigen::Matrix<double, -1, 1> fn_update_snaper_w_dense_M(Eigen::Matrix<double, -1, 1> snaper_w_vec, /* NOT const as updating! */                                                             const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const double ii, const Eigen::Matrix<double, -1, -1> M_dense_sqrt);
 RcppExport SEXP _NicoStan_fn_update_snaper_w_dense_M(SEXP snaper_w_vecSEXP, SEXP eigen_vectorSEXP, SEXP eigen_maxSEXP, SEXP theta_vecSEXP, SEXP snaper_m_vecSEXP, SEXP iiSEXP, SEXP M_dense_sqrtSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, 1> >::type snaper_w_vec(snaper_w_vecSEXP);
-    Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type eigen_vector(eigen_vectorSEXP);
+    Rcpp::traits::input_parameter< /* NOT const as updating! */                                                             const Eigen::Matrix<double, -1, 1> >::type eigen_vector(eigen_vectorSEXP);
     Rcpp::traits::input_parameter< const double >::type eigen_max(eigen_maxSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type theta_vec(theta_vecSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type snaper_m_vec(snaper_m_vecSEXP);
@@ -354,13 +364,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_update_snaper_w_diag_M
-Eigen::Matrix<double, -1, 1> fn_update_snaper_w_diag_M(Eigen::Matrix<double, -1, 1> snaper_w_vec, const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const double ii, const Eigen::Matrix<double, -1, 1> sqrt_M_vec);
+Eigen::Matrix<double, -1, 1> fn_update_snaper_w_diag_M(Eigen::Matrix<double, -1, 1> snaper_w_vec, /* NOT const as updating! */                                                                const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const double ii, const Eigen::Matrix<double, -1, 1> sqrt_M_vec);
 RcppExport SEXP _NicoStan_fn_update_snaper_w_diag_M(SEXP snaper_w_vecSEXP, SEXP eigen_vectorSEXP, SEXP eigen_maxSEXP, SEXP theta_vecSEXP, SEXP snaper_m_vecSEXP, SEXP iiSEXP, SEXP sqrt_M_vecSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, 1> >::type snaper_w_vec(snaper_w_vecSEXP);
-    Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type eigen_vector(eigen_vectorSEXP);
+    Rcpp::traits::input_parameter< /* NOT const as updating! */                                                                const Eigen::Matrix<double, -1, 1> >::type eigen_vector(eigen_vectorSEXP);
     Rcpp::traits::input_parameter< const double >::type eigen_max(eigen_maxSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type theta_vec(theta_vecSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type snaper_m_vec(snaper_m_vecSEXP);
@@ -382,7 +392,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_Rcpp_wrapper_update_tau_w_diag_M_ADAM
-Eigen::Matrix<double, -1, 1> fn_Rcpp_wrapper_update_tau_w_diag_M_ADAM(const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec_initial, const Eigen::Matrix<double, -1, 1> theta_vec_prop, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const Eigen::Matrix<double, -1, 1> velocity_prop, const Eigen::Matrix<double, -1, 1> velocity_0, double tau, const double LR, const double ii, const double n_burnin, const Eigen::Matrix<double, -1, 1> sqrt_M_vec, double tau_m_adam, double tau_v_adam, const double tau_ii, const double beta1_adam, const double beta2_adam, const double eps_adam);
+Eigen::Matrix<double, -1, 1> fn_Rcpp_wrapper_update_tau_w_diag_M_ADAM(const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec_initial, const Eigen::Matrix<double, -1, 1> theta_vec_prop, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const Eigen::Matrix<double, -1, 1> velocity_prop, const Eigen::Matrix<double, -1, 1> velocity_0, double tau, /* updating this */                                                                          const double LR, const double ii, const double n_burnin, const Eigen::Matrix<double, -1, 1> sqrt_M_vec, double tau_m_adam, /* updating this */                                                                          double tau_v_adam, /* updating this */                                                                          const double tau_ii, const double beta1_adam, const double beta2_adam, const double eps_adam);
 RcppExport SEXP _NicoStan_fn_Rcpp_wrapper_update_tau_w_diag_M_ADAM(SEXP eigen_vectorSEXP, SEXP eigen_maxSEXP, SEXP theta_vec_initialSEXP, SEXP theta_vec_propSEXP, SEXP snaper_m_vecSEXP, SEXP velocity_propSEXP, SEXP velocity_0SEXP, SEXP tauSEXP, SEXP LRSEXP, SEXP iiSEXP, SEXP n_burninSEXP, SEXP sqrt_M_vecSEXP, SEXP tau_m_adamSEXP, SEXP tau_v_adamSEXP, SEXP tau_iiSEXP, SEXP beta1_adamSEXP, SEXP beta2_adamSEXP, SEXP eps_adamSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -395,13 +405,13 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type velocity_prop(velocity_propSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type velocity_0(velocity_0SEXP);
     Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
-    Rcpp::traits::input_parameter< const double >::type LR(LRSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                          const double >::type LR(LRSEXP);
     Rcpp::traits::input_parameter< const double >::type ii(iiSEXP);
     Rcpp::traits::input_parameter< const double >::type n_burnin(n_burninSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type sqrt_M_vec(sqrt_M_vecSEXP);
     Rcpp::traits::input_parameter< double >::type tau_m_adam(tau_m_adamSEXP);
-    Rcpp::traits::input_parameter< double >::type tau_v_adam(tau_v_adamSEXP);
-    Rcpp::traits::input_parameter< const double >::type tau_ii(tau_iiSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                          double >::type tau_v_adam(tau_v_adamSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                          const double >::type tau_ii(tau_iiSEXP);
     Rcpp::traits::input_parameter< const double >::type beta1_adam(beta1_adamSEXP);
     Rcpp::traits::input_parameter< const double >::type beta2_adam(beta2_adamSEXP);
     Rcpp::traits::input_parameter< const double >::type eps_adam(eps_adamSEXP);
@@ -410,7 +420,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_Rcpp_wrapper_update_tau_w_dense_M_ADAM
-Eigen::Matrix<double, -1, 1> fn_Rcpp_wrapper_update_tau_w_dense_M_ADAM(const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec_initial, const Eigen::Matrix<double, -1, 1> theta_vec_prop, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const Eigen::Matrix<double, -1, 1> velocity_prop, const Eigen::Matrix<double, -1, 1> velocity_0, double tau, const double LR, const double ii, const double n_burnin, const Eigen::Matrix<double, -1, -1> M_dense_sqrt, double tau_m_adam, double tau_v_adam, const double tau_ii, const double beta1_adam, const double beta2_adam, const double eps_adam);
+Eigen::Matrix<double, -1, 1> fn_Rcpp_wrapper_update_tau_w_dense_M_ADAM(const Eigen::Matrix<double, -1, 1> eigen_vector, const double eigen_max, const Eigen::Matrix<double, -1, 1> theta_vec_initial, const Eigen::Matrix<double, -1, 1> theta_vec_prop, const Eigen::Matrix<double, -1, 1> snaper_m_vec, const Eigen::Matrix<double, -1, 1> velocity_prop, const Eigen::Matrix<double, -1, 1> velocity_0, double tau, /* updating this */                                                                            const double LR, const double ii, const double n_burnin, const Eigen::Matrix<double, -1, -1> M_dense_sqrt, double tau_m_adam, /* updating this */                                                                            double tau_v_adam, /* updating this */                                                                            const double tau_ii, const double beta1_adam, const double beta2_adam, const double eps_adam);
 RcppExport SEXP _NicoStan_fn_Rcpp_wrapper_update_tau_w_dense_M_ADAM(SEXP eigen_vectorSEXP, SEXP eigen_maxSEXP, SEXP theta_vec_initialSEXP, SEXP theta_vec_propSEXP, SEXP snaper_m_vecSEXP, SEXP velocity_propSEXP, SEXP velocity_0SEXP, SEXP tauSEXP, SEXP LRSEXP, SEXP iiSEXP, SEXP n_burninSEXP, SEXP M_dense_sqrtSEXP, SEXP tau_m_adamSEXP, SEXP tau_v_adamSEXP, SEXP tau_iiSEXP, SEXP beta1_adamSEXP, SEXP beta2_adamSEXP, SEXP eps_adamSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -423,13 +433,13 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type velocity_prop(velocity_propSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, 1> >::type velocity_0(velocity_0SEXP);
     Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
-    Rcpp::traits::input_parameter< const double >::type LR(LRSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                            const double >::type LR(LRSEXP);
     Rcpp::traits::input_parameter< const double >::type ii(iiSEXP);
     Rcpp::traits::input_parameter< const double >::type n_burnin(n_burninSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, -1> >::type M_dense_sqrt(M_dense_sqrtSEXP);
     Rcpp::traits::input_parameter< double >::type tau_m_adam(tau_m_adamSEXP);
-    Rcpp::traits::input_parameter< double >::type tau_v_adam(tau_v_adamSEXP);
-    Rcpp::traits::input_parameter< const double >::type tau_ii(tau_iiSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                            double >::type tau_v_adam(tau_v_adamSEXP);
+    Rcpp::traits::input_parameter< /* updating this */                                                                            const double >::type tau_ii(tau_iiSEXP);
     Rcpp::traits::input_parameter< const double >::type beta1_adam(beta1_adamSEXP);
     Rcpp::traits::input_parameter< const double >::type beta2_adam(beta2_adamSEXP);
     Rcpp::traits::input_parameter< const double >::type eps_adam(eps_adamSEXP);
@@ -541,7 +551,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // Rcpp_fn_RcppParallel_EHMC_sampling
-Rcpp::List Rcpp_fn_RcppParallel_EHMC_sampling(const int n_threads_R, const int seed_R, const int n_iter_R, const bool iter_one_by_one, const bool partitioned_HMC_R, const bool diffusion_HMC_R, const std::string Model_type_R, const bool sample_nuisance_R, const bool force_autodiff_R, const bool force_PartialLog_R, const bool multi_attempts_R, const int n_nuisance_to_track, const Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, const Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, const Rcpp::List EHMC_args_as_Rcpp_List, const Rcpp::List EHMC_Metric_as_Rcpp_List, const bool use_disk, const std::string trace_dir, const int n_threads_WCP);
+Rcpp::List Rcpp_fn_RcppParallel_EHMC_sampling(const int n_threads_R, const int seed_R, const int n_iter_R, const bool iter_one_by_one, const bool partitioned_HMC_R, const bool diffusion_HMC_R, const std::string Model_type_R, const bool sample_nuisance_R, const bool force_autodiff_R, const bool force_PartialLog_R, const bool multi_attempts_R, const int n_nuisance_to_track, const Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, const Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, /* ALWAYS read-only */                                                const Rcpp::List EHMC_args_as_Rcpp_List, const Rcpp::List EHMC_Metric_as_Rcpp_List, const bool use_disk, const std::string trace_dir, const int n_threads_WCP);
 RcppExport SEXP _NicoStan_Rcpp_fn_RcppParallel_EHMC_sampling(SEXP n_threads_RSEXP, SEXP seed_RSEXP, SEXP n_iter_RSEXP, SEXP iter_one_by_oneSEXP, SEXP partitioned_HMC_RSEXP, SEXP diffusion_HMC_RSEXP, SEXP Model_type_RSEXP, SEXP sample_nuisance_RSEXP, SEXP force_autodiff_RSEXP, SEXP force_PartialLog_RSEXP, SEXP multi_attempts_RSEXP, SEXP n_nuisance_to_trackSEXP, SEXP theta_main_vectors_all_chains_input_from_RSEXP, SEXP theta_us_vectors_all_chains_input_from_RSEXP, SEXP y_Eigen_RSEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP EHMC_args_as_Rcpp_ListSEXP, SEXP EHMC_Metric_as_Rcpp_ListSEXP, SEXP use_diskSEXP, SEXP trace_dirSEXP, SEXP n_threads_WCPSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -562,7 +572,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, -1> >::type theta_us_vectors_all_chains_input_from_R(theta_us_vectors_all_chains_input_from_RSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<int, -1, -1> >::type y_Eigen_R(y_Eigen_RSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List >::type Model_args_as_Rcpp_List(Model_args_as_Rcpp_ListSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
+    Rcpp::traits::input_parameter< /* ALWAYS read-only */                                                const Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List >::type EHMC_Metric_as_Rcpp_List(EHMC_Metric_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< const bool >::type use_disk(use_diskSEXP);
     Rcpp::traits::input_parameter< const std::string >::type trace_dir(trace_dirSEXP);
@@ -572,7 +582,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_R_RcppParallel_EHMC_single_iter_burnin
-Rcpp::List fn_R_RcppParallel_EHMC_single_iter_burnin(int n_threads_R, int seed_R, int n_iter_R, int current_iter_R, int n_adapt, const bool burnin_indicator, std::string Model_type_R, bool sample_nuisance_R, bool force_autodiff_R, bool force_PartialLog_R, bool multi_attempts_R, const int n_nuisance_to_track, const double max_eps_main, const double max_eps_us, bool partitioned_HMC_R, bool diffusion_HMC_R, const std::string metric_type_main, double shrinkage_factor, const std::string metric_type_nuisance, const double tau_main_target, const double tau_us_target, const int clip_iter, const int gap, const bool main_L_manual, const bool us_L_manual, const int L_main_if_manual, const int L_us_if_manual, const int max_L, const double tau_mult, const double ratio_M_us, const double ratio_Hess_main, const int M_interval_width, Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, Eigen::Matrix<double, -1, -1> velocity_main_vectors_all_chains_input_from_R, Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, Eigen::Matrix<double, -1, -1> velocity_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, Rcpp::List EHMC_args_as_Rcpp_List, Rcpp::List EHMC_Metric_as_Rcpp_List, Rcpp::List EHMC_burnin_as_Rcpp_List, const int n_threads_WCP);
+Rcpp::List fn_R_RcppParallel_EHMC_single_iter_burnin(int n_threads_R, int seed_R, int n_iter_R, int current_iter_R, int n_adapt, const bool burnin_indicator, std::string Model_type_R, bool sample_nuisance_R, bool force_autodiff_R, bool force_PartialLog_R, bool multi_attempts_R, const int n_nuisance_to_track, const double max_eps_main, const double max_eps_us, bool partitioned_HMC_R, bool diffusion_HMC_R, const std::string metric_type_main, double shrinkage_factor, const std::string metric_type_nuisance, const double tau_main_target, const double tau_us_target, const int clip_iter, const int gap, const bool main_L_manual, const bool us_L_manual, const int L_main_if_manual, const int L_us_if_manual, const int max_L, const double tau_mult, const double ratio_M_us, const double ratio_Hess_main, const int M_interval_width, Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, Eigen::Matrix<double, -1, -1> velocity_main_vectors_all_chains_input_from_R, Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, Eigen::Matrix<double, -1, -1> velocity_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, /* ALWAYS read-only */                                                                                               Rcpp::List EHMC_args_as_Rcpp_List, Rcpp::List EHMC_Metric_as_Rcpp_List, Rcpp::List EHMC_burnin_as_Rcpp_List, const int n_threads_WCP);
 RcppExport SEXP _NicoStan_fn_R_RcppParallel_EHMC_single_iter_burnin(SEXP n_threads_RSEXP, SEXP seed_RSEXP, SEXP n_iter_RSEXP, SEXP current_iter_RSEXP, SEXP n_adaptSEXP, SEXP burnin_indicatorSEXP, SEXP Model_type_RSEXP, SEXP sample_nuisance_RSEXP, SEXP force_autodiff_RSEXP, SEXP force_PartialLog_RSEXP, SEXP multi_attempts_RSEXP, SEXP n_nuisance_to_trackSEXP, SEXP max_eps_mainSEXP, SEXP max_eps_usSEXP, SEXP partitioned_HMC_RSEXP, SEXP diffusion_HMC_RSEXP, SEXP metric_type_mainSEXP, SEXP shrinkage_factorSEXP, SEXP metric_type_nuisanceSEXP, SEXP tau_main_targetSEXP, SEXP tau_us_targetSEXP, SEXP clip_iterSEXP, SEXP gapSEXP, SEXP main_L_manualSEXP, SEXP us_L_manualSEXP, SEXP L_main_if_manualSEXP, SEXP L_us_if_manualSEXP, SEXP max_LSEXP, SEXP tau_multSEXP, SEXP ratio_M_usSEXP, SEXP ratio_Hess_mainSEXP, SEXP M_interval_widthSEXP, SEXP theta_main_vectors_all_chains_input_from_RSEXP, SEXP velocity_main_vectors_all_chains_input_from_RSEXP, SEXP theta_us_vectors_all_chains_input_from_RSEXP, SEXP velocity_us_vectors_all_chains_input_from_RSEXP, SEXP y_Eigen_RSEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP EHMC_args_as_Rcpp_ListSEXP, SEXP EHMC_Metric_as_Rcpp_ListSEXP, SEXP EHMC_burnin_as_Rcpp_ListSEXP, SEXP n_threads_WCPSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -615,7 +625,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Eigen::Matrix<double, -1, -1> >::type velocity_us_vectors_all_chains_input_from_R(velocity_us_vectors_all_chains_input_from_RSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<int, -1, -1> >::type y_Eigen_R(y_Eigen_RSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List >::type Model_args_as_Rcpp_List(Model_args_as_Rcpp_ListSEXP);
-    Rcpp::traits::input_parameter< Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
+    Rcpp::traits::input_parameter< /* ALWAYS read-only */                                                                                               Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< Rcpp::List >::type EHMC_Metric_as_Rcpp_List(EHMC_Metric_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< Rcpp::List >::type EHMC_burnin_as_Rcpp_List(EHMC_burnin_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< const int >::type n_threads_WCP(n_threads_WCPSEXP);
@@ -1085,7 +1095,7 @@ BEGIN_RCPP
 END_RCPP
 }
 // Rcpp_fn_OpenMP_EHMC_sampling
-Rcpp::List Rcpp_fn_OpenMP_EHMC_sampling(const int n_threads_R, const int seed_R, const int n_iter_R, const bool iter_one_by_one, const bool partitioned_HMC_R, const bool diffusion_HMC_R, const std::string Model_type_R, const bool sample_nuisance_R, const bool force_autodiff_R, const bool force_PartialLog_R, const bool multi_attempts_R, const int n_nuisance_to_track, const Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, const Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, const Rcpp::List EHMC_args_as_Rcpp_List, const Rcpp::List EHMC_Metric_as_Rcpp_List, const int n_threads_WCP);
+Rcpp::List Rcpp_fn_OpenMP_EHMC_sampling(const int n_threads_R, const int seed_R, const int n_iter_R, const bool iter_one_by_one, const bool partitioned_HMC_R, const bool diffusion_HMC_R, const std::string Model_type_R, const bool sample_nuisance_R, const bool force_autodiff_R, const bool force_PartialLog_R, const bool multi_attempts_R, const int n_nuisance_to_track, const Eigen::Matrix<double, -1, -1> theta_main_vectors_all_chains_input_from_R, const Eigen::Matrix<double, -1, -1> theta_us_vectors_all_chains_input_from_R, const Eigen::Matrix<int, -1, -1> y_Eigen_R, const Rcpp::List Model_args_as_Rcpp_List, /* ALWAYS read-only */                                                                                   const Rcpp::List EHMC_args_as_Rcpp_List, const Rcpp::List EHMC_Metric_as_Rcpp_List, const int n_threads_WCP);
 RcppExport SEXP _NicoStan_Rcpp_fn_OpenMP_EHMC_sampling(SEXP n_threads_RSEXP, SEXP seed_RSEXP, SEXP n_iter_RSEXP, SEXP iter_one_by_oneSEXP, SEXP partitioned_HMC_RSEXP, SEXP diffusion_HMC_RSEXP, SEXP Model_type_RSEXP, SEXP sample_nuisance_RSEXP, SEXP force_autodiff_RSEXP, SEXP force_PartialLog_RSEXP, SEXP multi_attempts_RSEXP, SEXP n_nuisance_to_trackSEXP, SEXP theta_main_vectors_all_chains_input_from_RSEXP, SEXP theta_us_vectors_all_chains_input_from_RSEXP, SEXP y_Eigen_RSEXP, SEXP Model_args_as_Rcpp_ListSEXP, SEXP EHMC_args_as_Rcpp_ListSEXP, SEXP EHMC_Metric_as_Rcpp_ListSEXP, SEXP n_threads_WCPSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -1106,7 +1116,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Eigen::Matrix<double, -1, -1> >::type theta_us_vectors_all_chains_input_from_R(theta_us_vectors_all_chains_input_from_RSEXP);
     Rcpp::traits::input_parameter< const Eigen::Matrix<int, -1, -1> >::type y_Eigen_R(y_Eigen_RSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List >::type Model_args_as_Rcpp_List(Model_args_as_Rcpp_ListSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
+    Rcpp::traits::input_parameter< /* ALWAYS read-only */                                                                                   const Rcpp::List >::type EHMC_args_as_Rcpp_List(EHMC_args_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< const Rcpp::List >::type EHMC_Metric_as_Rcpp_List(EHMC_Metric_as_Rcpp_ListSEXP);
     Rcpp::traits::input_parameter< const int >::type n_threads_WCP(n_threads_WCPSEXP);
     rcpp_result_gen = Rcpp::wrap(Rcpp_fn_OpenMP_EHMC_sampling(n_threads_R, seed_R, n_iter_R, iter_one_by_one, partitioned_HMC_R, diffusion_HMC_R, Model_type_R, sample_nuisance_R, force_autodiff_R, force_PartialLog_R, multi_attempts_R, n_nuisance_to_track, theta_main_vectors_all_chains_input_from_R, theta_us_vectors_all_chains_input_from_R, y_Eigen_R, Model_args_as_Rcpp_List, EHMC_args_as_Rcpp_List, EHMC_Metric_as_Rcpp_List, n_threads_WCP));
@@ -1123,12 +1133,25 @@ BEGIN_RCPP
 END_RCPP
 }
 
+RcppExport void bs_log_density_gradient_R(void *, void *, void *, void *, void *, void *, void *, void *, void *);
+RcppExport void bs_log_density_R(void *, void *, void *, void *, void *, void *, void *, void *);
+RcppExport void bs_model_construct_R(void *, void *, void *, void *, void *);
+RcppExport void bs_model_destruct_R(void *);
+RcppExport void bs_param_constrain_R(void *, void *, void *, void *, void *, void *, void *, void *, void *);
+RcppExport void bs_param_names_R(void *, void *, void *, void *);
+RcppExport void bs_param_num_R(void *, void *, void *, void *);
+RcppExport void bs_param_unc_names_R(void *, void *);
+RcppExport void bs_param_unc_num_R(void *, void *);
+RcppExport void bs_param_unconstrain_R(void *, void *, void *, void *, void *, void *);
+RcppExport void bs_rng_construct_R(void *, void *, void *, void *);
+
 static const R_CallMethodDef CallEntries[] = {
     {"_NicoStan_cpp_fn_post_burnin_prep_for_sampling", (DL_FUNC) &_NicoStan_cpp_fn_post_burnin_prep_for_sampling, 9},
     {"_NicoStan_set_debug_cutpoint_grads", (DL_FUNC) &_NicoStan_set_debug_cutpoint_grads, 1},
     {"_NicoStan_fn_get_stan_load_time_sec", (DL_FUNC) &_NicoStan_fn_get_stan_load_time_sec, 0},
     {"_NicoStan_fn_get_stan_load_count", (DL_FUNC) &_NicoStan_fn_get_stan_load_count, 0},
     {"_NicoStan_fn_reset_stan_load_timer", (DL_FUNC) &_NicoStan_fn_reset_stan_load_timer, 0},
+    {"_NicoStan_Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace", (DL_FUNC) &_NicoStan_Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace, 1},
     {"_NicoStan_Rcpp_fn_check_joint_trajectory", (DL_FUNC) &_NicoStan_Rcpp_fn_check_joint_trajectory, 1},
     {"_NicoStan_fn_set_sampling_tau_jitter_halton", (DL_FUNC) &_NicoStan_fn_set_sampling_tau_jitter_halton, 1},
     {"_NicoStan_fn_get_sampling_tau_jitter_halton", (DL_FUNC) &_NicoStan_fn_get_sampling_tau_jitter_halton, 0},
@@ -1197,6 +1220,17 @@ static const R_CallMethodDef CallEntries[] = {
     {"_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_get_resident", (DL_FUNC) &_NicoStan_fn_persistent_burnin_tau_initial_nuisance_moments_get_resident, 1},
     {"_NicoStan_Rcpp_fn_OpenMP_EHMC_sampling", (DL_FUNC) &_NicoStan_Rcpp_fn_OpenMP_EHMC_sampling, 19},
     {"_NicoStan_Rcpp_fn_release_free_heap_memory", (DL_FUNC) &_NicoStan_Rcpp_fn_release_free_heap_memory, 0},
+    {"bs_log_density_gradient_R", (DL_FUNC) &bs_log_density_gradient_R, 9},
+    {"bs_log_density_R",          (DL_FUNC) &bs_log_density_R,          8},
+    {"bs_model_construct_R",      (DL_FUNC) &bs_model_construct_R,      5},
+    {"bs_model_destruct_R",       (DL_FUNC) &bs_model_destruct_R,       1},
+    {"bs_param_constrain_R",      (DL_FUNC) &bs_param_constrain_R,      9},
+    {"bs_param_names_R",          (DL_FUNC) &bs_param_names_R,          4},
+    {"bs_param_num_R",            (DL_FUNC) &bs_param_num_R,            4},
+    {"bs_param_unc_names_R",      (DL_FUNC) &bs_param_unc_names_R,      2},
+    {"bs_param_unc_num_R",        (DL_FUNC) &bs_param_unc_num_R,        2},
+    {"bs_param_unconstrain_R",    (DL_FUNC) &bs_param_unconstrain_R,    6},
+    {"bs_rng_construct_R",        (DL_FUNC) &bs_rng_construct_R,        4},
     {NULL, NULL, 0}
 };
 

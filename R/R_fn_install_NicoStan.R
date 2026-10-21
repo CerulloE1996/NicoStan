@@ -36,6 +36,7 @@
 }
 
 
+
 .nicostan_try_load_runtime <- function(libname = NULL,
                                        pkgname = "NicoStan") {
 
@@ -50,6 +51,7 @@
 }
 
 
+
 #' setup_env_pre_install
 #' @export
 setup_env_pre_install <- function() {
@@ -62,6 +64,7 @@ setup_env_pre_install <- function() {
 }
 
 
+
 #' setup_env_post_install
 #' @export
 setup_env_post_install <- function() {
@@ -69,6 +72,7 @@ setup_env_post_install <- function() {
     .nicostan_try_load_runtime()
     invisible(TRUE)
 }
+
 
 
 ## ---- Fresh-process inner installation ---------------------------------------
@@ -103,7 +107,7 @@ setup_env_post_install <- function() {
     )
 
     invalid_flags <- setdiff(names(CUSTOM_FLAGS), allowed_flags)
-    if (length(invalid_flags) > 0L) {
+    if (length(invalid_flags) > 0) {
         stop(
             paste0(
                 "Invalid custom flags: ", paste(invalid_flags, collapse = ", "),
@@ -113,14 +117,17 @@ setup_env_post_install <- function() {
     }
 
     bad_values <- vapply(CUSTOM_FLAGS, function(value) {
-        length(value) != 1L || is.na(value)
-    }, logical(1L))
+
+        length(value) != 1 || is.na(value)
+    }, logical(1))
+
     if (any(bad_values)) {
         stop("Each CUSTOM_FLAGS value must be one non-missing character or numeric value.")
     }
 
     CUSTOM_FLAGS
 }
+
 
 
 .nicostan_write_custom_flags <- function(staged_inner,
@@ -132,10 +139,12 @@ setup_env_post_install <- function() {
 
     makevars_files <- file.path(staged_inner, "src", c("Makevars", "Makevars.win"))
     custom_lines <- vapply(names(CUSTOM_FLAGS), function(flag_name) {
+
         flag_value <- as.character(CUSTOM_FLAGS[[flag_name]])
         flag_value <- gsub('"', '\\"', flag_value, fixed = TRUE)
         paste0("USER_SUPPLIED_", flag_name, ' = "', flag_value, '"')
-    }, character(1L))
+    }, character(1))
+
 
     for (makevars_file in makevars_files[file.exists(makevars_files)]) {
         writeLines(c(custom_lines, readLines(makevars_file, warn = FALSE)), makevars_file)
@@ -143,6 +152,7 @@ setup_env_post_install <- function() {
 
     invisible(TRUE)
 }
+
 
 
 .nicostan_sync_outer_examples <- function(outer_root,
@@ -168,7 +178,7 @@ setup_env_post_install <- function() {
                               include.dirs = FALSE,
                               all.files = TRUE)
     outer_files <- outer_files[file.info(outer_files)$isdir %in% FALSE]
-    relative_files <- substring(outer_files, nchar(outer_examples) + 2L)
+    relative_files <- substring(outer_files, nchar(outer_examples) + 2)
     keep_files <- !tolower(tools::file_ext(relative_files)) %in% tolower(runtime_extensions)
 
     for (relative_file in relative_files[keep_files]) {
@@ -184,6 +194,7 @@ setup_env_post_install <- function() {
 }
 
 
+
 .nicostan_run_inner_install <- function(staged_inner,
                                          lib,
                                          output_script) {
@@ -194,13 +205,38 @@ setup_env_post_install <- function() {
         file.path(R.home("bin"), "Rscript")
     }
 
+    ## ---- the test before the install: the new NicoStan is installed into a test library first and loaded
+    ##      there in a fresh R process (library(NicoStan) and one call into NicoStan.so); only if both work is
+    ##      the main library touched, so that a NicoStan that cannot load never replaces one that can
+    test_library <- file.path(dirname(output_script), "library_of_the_test_load_before_the_install")
+    test_load_script <- file.path(dirname(output_script), "test_load_of_the_new_NicoStan_in_a_fresh_process.R")
+    writeLines(c(
+        "test_library <- commandArgs(trailingOnly = TRUE)[1]",
+        "suppressPackageStartupMessages(library('NicoStan', lib.loc = test_library))",
+        "invisible(NicoStan:::detect_vectorization_support())",
+        "message('The new NicoStan loads from the test library, and NicoStan.so answers a call.')"
+    ), test_load_script)
+
     child_lines <- c(
         "args <- commandArgs(trailingOnly = TRUE)",
-        "staged_inner <- normalizePath(args[[1L]], mustWork = TRUE)",
-        "install_library <- normalizePath(args[[2L]], mustWork = FALSE)",
+        "staged_inner <- normalizePath(args[[1]], mustWork = TRUE)",
+        "install_library <- normalizePath(args[[2]], mustWork = FALSE)",
+        "test_library <- normalizePath(args[[3]], mustWork = FALSE)",
+        "test_load_script <- normalizePath(args[[4]], mustWork = TRUE)",
         "dir.create(install_library, recursive = TRUE, showWarnings = FALSE)",
+        "dir.create(test_library, recursive = TRUE, showWarnings = FALSE)",
         ".libPaths(c(install_library, .libPaths()))",
         "if (any(grepl('NicoStan', loadedNamespaces()))) stop('NicoStan must not be loaded in the installer child process.')",
+        paste0("status <- system2(command = file.path(R.home('bin'), if (.Platform$OS.type == 'windows') ",
+               "'R.exe' else 'R'), args = c('CMD', 'INSTALL', paste0('--library=', shQuote(test_library)), ",
+               "'--no-test-load', '--preclean', shQuote(staged_inner)))"),
+        paste0("if (!identical(as.integer(status), 0L)) stop(paste0('R CMD INSTALL into the test library ",
+               "failed with status ', status, '; the main library is left untouched.'))"),
+        paste0("status <- system2(command = file.path(R.home('bin'), if (.Platform$OS.type == 'windows') ",
+               "'Rscript.exe' else 'Rscript'), args = c('--vanilla', shQuote(test_load_script), ",
+               "shQuote(test_library)))"),
+        paste0("if (!identical(as.integer(status), 0L)) stop(paste0('The new NicoStan does not load from the ",
+               "test library (status ', status, '); the main library is left untouched.'))"),
         "status <- system2(command = file.path(R.home('bin'), if (.Platform$OS.type == 'windows') 'R.exe' else 'R'), args = c('CMD', 'INSTALL', paste0('--library=', shQuote(install_library)), '--no-test-load', '--preclean', shQuote(staged_inner)))",
         "if (!identical(as.integer(status), 0L)) stop(paste0('R CMD INSTALL failed with status ', status, '.'))",
         "loadNamespace('NicoStan', lib.loc = install_library)",
@@ -214,7 +250,8 @@ setup_env_post_install <- function() {
 
     status <- system2(
         command = r_executable,
-        args = c("--vanilla", shQuote(output_script), shQuote(staged_inner), shQuote(lib))
+        args = c("--vanilla", shQuote(output_script), shQuote(staged_inner), shQuote(lib),
+                 shQuote(test_library), shQuote(test_load_script))
     )
 
     if (!identical(as.integer(status), 0L)) {
@@ -223,6 +260,44 @@ setup_env_post_install <- function() {
 
     invisible(TRUE)
 }
+
+
+
+
+## ---- NicoSIMD, installed with NicoStan -----------------------------------------
+##
+## NicoSIMD (the header-only package of the SIMD functions: AVX-512, AVX2, and NEON through SIMDe on 64-bit
+## ARM CPUs) is bundled with the outer NicoStan package (inst/NicoSIMD, copied from the NicoSIMD repository by
+## tools/copy_NicoSIMD_into_NicoStan_so_that_it_is_installed_with_NicoStan.R).
+## # It is installed after the inner
+## # NicoStan package, in a fresh R process.
+## It is installed BEFORE the inner NicoStan package (NicoStan and BayesMVP import NicoSIMD, the one home of
+## every AVX2 / AVX-512 function), in a fresh R process. Nothing is compiled: which SIMD instructions are used is
+## decided
+## when each Stan model is compiled, from the user's CPU.
+
+.nicostan_install_NicoSIMD_bundled_with_NicoStan <- function(staged_NicoSIMD,
+                                                              lib) {
+
+    status <- system2(
+        command = file.path(R.home("bin"), if (.Platform$OS.type == "windows") "R.exe" else "R"),
+        args = c("CMD", "INSTALL", paste0("--library=", shQuote(lib)), "--no-test-load",
+                 shQuote(staged_NicoSIMD))
+    )
+
+    if (!identical(as.integer(status), 0L)) {
+        warning(paste0(
+            "R CMD INSTALL of NicoSIMD failed with status ", status, ". NicoStan is installed and runs ",
+            "without it (on Stan's own math library)."
+        ))
+        return(invisible(FALSE))
+    }
+
+    message(paste0("NicoSIMD installed in ", lib, "."))
+
+    invisible(TRUE)
+}
+
 
 
 ## ---- Public installer --------------------------------------------------------
@@ -239,13 +314,17 @@ setup_env_post_install <- function() {
 #' @param force Passed through as an installation intent.  The installer never
 #'   removes a package directory itself; the fresh R CMD INSTALL process handles
 #'   replacement while no NicoStan namespace is loaded in that process.
+#' @param install_NicoSIMD_bundled_with_NicoStan If TRUE (the default), NicoSIMD (the header-only SIMD
+#'   functions: AVX-512, AVX2, and NEON through SIMDe on 64-bit ARM CPUs), which is bundled with NicoStan, is
+#'   installed too, after NicoStan. NicoStan runs without it (on Stan's own math library).
 #' @return Invisibly, the target library path.
 #' @export
 install_NicoStan <- function(CUSTOM_FLAGS = NULL,
-                             lib = .libPaths()[1L],
-                             force = TRUE) {
+                             lib = .libPaths()[1],
+                             force = TRUE,
+                             install_NicoSIMD_bundled_with_NicoStan = TRUE) {
 
-    if (!is.character(lib) || length(lib) != 1L || !nzchar(lib)) {
+    if (!is.character(lib) || length(lib) != 1 || !nzchar(lib)) {
         stop("lib must be one non-empty directory path.")
     }
     if (!isTRUE(force)) {
@@ -284,13 +363,39 @@ install_NicoStan <- function(CUSTOM_FLAGS = NULL,
     .nicostan_sync_outer_examples(outer_root = outer_root,
                                   staged_inner = staged_inner)
 
+    ## (NicoSIMD is staged now, since the install of the inner package replaces the outer package's files)
+    bundled_NicoSIMD <- system.file("NicoSIMD", package = "NicoStan")
+    staged_NicoSIMD <- file.path(staging_root, "NicoSIMD_bundled_with_NicoStan", "NicoSIMD")
+    NicoSIMD_is_staged <- FALSE
+    if (isTRUE(install_NicoSIMD_bundled_with_NicoStan)) {
+        if (nzchar(bundled_NicoSIMD) && file.exists(file.path(bundled_NicoSIMD, "DESCRIPTION"))) {
+            dir.create(dirname(staged_NicoSIMD), recursive = TRUE, showWarnings = FALSE)
+            NicoSIMD_is_staged <- file.copy(bundled_NicoSIMD, dirname(staged_NicoSIMD), recursive = TRUE,
+                                            copy.date = TRUE)
+        } else {
+            message(paste0("NicoSIMD is not bundled with this copy of NicoStan; NicoStan runs on Stan's own ",
+                           "math library."))
+        }
+    }
+
     .nicostan_write_custom_flags(staged_inner = staged_inner,
                                  CUSTOM_FLAGS = CUSTOM_FLAGS)
+
+    ## (NicoSIMD first: NicoStan imports NicoSIMD, so it must be installed before NicoStan itself)
+    if (NicoSIMD_is_staged) {
+        .nicostan_install_NicoSIMD_bundled_with_NicoStan(staged_NicoSIMD = staged_NicoSIMD,
+                                                         lib = lib)
+    }
 
     child_script <- file.path(staging_root, "install_inner_in_fresh_process.R")
     .nicostan_run_inner_install(staged_inner = staged_inner,
                                 lib = lib,
                                 output_script = child_script)
+
+    # if (NicoSIMD_is_staged) {
+    #     .nicostan_install_NicoSIMD_bundled_with_NicoStan(staged_NicoSIMD = staged_NicoSIMD,
+    #                                                      lib = lib)
+    # }
 
     message(paste0(
         "NicoStan inner package installation complete in ", lib,

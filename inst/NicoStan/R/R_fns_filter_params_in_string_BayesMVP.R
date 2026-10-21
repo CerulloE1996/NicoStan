@@ -12,6 +12,7 @@ filtered_param_names_string <-   function( all_param_names_vec,
                                            param_string, 
                                            condition = "exact_match",
                                            debugging = FALSE) {
+
         if (condition == "exact_match") { 
           
           filtered_param_names_vec <- all_param_names_vec[grep(paste0("^", param_string, "($|\\[)"), all_param_names_vec)]
@@ -353,11 +354,13 @@ extract_params_from_array_batch <- function(debugging,
           # Fill the combined array
           param_start <- 1
           for (param_string in names(results_list)) {
+
             n_params_group <- dim(results_list[[param_string]])[3]
             param_end <- param_start + n_params_group - 1
             combined_array[, , param_start:param_end] <- results_list[[param_string]]
             param_start <- param_end + 1
           }
+
           
           # Add attribute to track which parameters came from which group
           attr(combined_array, "param_groups") <- rep(names(results_list), 
@@ -365,8 +368,10 @@ extract_params_from_array_batch <- function(debugging,
           
           return(combined_array)
         } else {
+
           return(results_list)
         }
+
   
 }
 
@@ -376,6 +381,11 @@ extract_params_from_array_batch <- function(debugging,
 
 
  
+
+
+
+
+
 
 
 

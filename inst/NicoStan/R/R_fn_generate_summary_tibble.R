@@ -16,18 +16,22 @@ generate_summary_tibble <- function(n_threads = NULL,
         
               ##
               ## ---- Fix: the n_threads argument used to be overwritten here with detectCores() / 2 (96 on the
-              ##      local HPC), so the caller's thread count was silently ignored. Honour it; only when it is NULL use
-              ##      half of the CPUs this process may run on (taskset / CPU affinity respected).
+              ##      local HPC), so the caller's thread count was silently ignored. Honour it; only when it is
+              ##      NULL use half of the CPUs this process may run on (taskset / CPU affinity respected).
               ##
               if (is.null(n_threads)) {
-                    n_cpus_available_to_this_process <-  length(tryCatch(parallel::mcaffinity(), error = function(error_object) NULL))
-                    if (n_cpus_available_to_this_process < 1) n_cpus_available_to_this_process <-  parallel::detectCores()
+                    n_cpus_available_to_this_process <-  length(tryCatch(parallel::mcaffinity(),
+                                                                         error = function(error_object) NULL))
+                    if (n_cpus_available_to_this_process < 1)
+                        n_cpus_available_to_this_process <-  parallel::detectCores()
                     n_threads <-  max(1, round(n_cpus_available_to_this_process / 2, 0))
               }
               if (!(is.numeric(n_threads) && length(n_threads) == 1 && is.finite(n_threads) && n_threads >= 1)) {
+
                     stop(paste0("generate_summary_tibble: n_threads must be a single number >= 1, got: ",
                                 paste(format(n_threads), collapse = ", ")))
               }
+
 
               #### Initialize summary dataframe
               summary_df <- data.frame(     parameter = param_names,
@@ -39,15 +43,24 @@ generate_summary_tibble <- function(n_threads = NULL,
                                             n_eff = NA,
                                             Rhat = NA,
                                             n_Rhat = NA,
-                                            n_eff_tail = NA,   ## tail ESS (Vehtari et al. 2021): the smaller of the 5% and 95% quantile ESS
-                                            n_eff_sd = NA,     ## ESS of the centred squared draws, (x - mean)^2: the ESS for estimating the posterior SD
-                                                               ## ("ESS(theta^2)"; the definition behind posterior::ess_sd; Enzo, 4 Oct 2026)
+                                            ## tail ESS (Vehtari et al. 2021): the smaller of the 5% and 95%
+                                            ## quantile ESS
+                                            n_eff_tail = NA,
+                                            ## ESS of the centred squared draws, (x - mean)^2: the ESS for
+                                            ## estimating the posterior SD
+                                            n_eff_sd = NA,
+                                                               ## ("ESS(theta^2)"; the definition behind
+                                                               ## posterior::ess_sd)
                                             check.names = FALSE)
               
               # # Effective Sample Size (ESS) and Rhat - using the fast custom RcppParallel fn "NicoStan::Rcpp_compute_MCMC_diagnostics()"
               posterior_draws_as_std_vec_of_mats <- list()
               ##
               n_iter <- dim(trace)[2]
+              if (n_iter == 0 || n_chains == 0) {
+                    stop(paste0("the summary of the trace needs at least one draw and one chain; the trace has ",
+                                n_iter, " draws and ", n_chains, " chains."))
+              }
               mat <- matrix(nrow = n_iter, ncol = n_chains)
 
               n_params <- n_to_compute
@@ -90,32 +103,37 @@ generate_summary_tibble <- function(n_threads = NULL,
                                                         n_threads = n_threads))
               ess_vec <- outs$diagnostics[, 1]
               # ess_tail_vec <- outs$diagnostics[, 2]
-              ess_tail_vec <- outs$diagnostics[, 2]   ## the tail ESS "split_ESS_rank" already returns (column 2), now kept
+              ## the tail ESS "split_ESS_rank" already returns (column 2), now kept
+              ess_tail_vec <-  outs$diagnostics[, 2]
               ## ---- where draws tie at a quantile (e.g. a probability that equals 1 in more than 5% of the
               ##      draws, so that I(x <= q95) never changes), the tail ESS of x is undefined: it is then the
               ##      tail ESS of -x, i.e. the same two tails counted with the tied draws on the other side
               ##      (without ties the two agree to within one draw). Draws that never change stay undefined:
-              tail_ESS_undefined <- which(!is.finite(ess_tail_vec))
+              tail_ESS_undefined <-  which(!is.finite(ess_tail_vec))
               if (length(tail_ESS_undefined) > 0) {
-                    negated_draws <- lapply(X = posterior_draws_as_std_vec_of_mats[tail_ESS_undefined],
+                    negated_draws <-  lapply(X = posterior_draws_as_std_vec_of_mats[tail_ESS_undefined],
                                             FUN = function(draws_matrix) -draws_matrix)
-                    tail_ESS_of_negated_draws <- Rcpp_compute_MCMC_diagnostics( negated_draws,
+                    tail_ESS_of_negated_draws <-  Rcpp_compute_MCMC_diagnostics( negated_draws,
                                                                                 diagnostic = "split_ESS_rank",
                                                                                 n_threads = n_threads)
-                    ess_tail_vec[tail_ESS_undefined] <- tail_ESS_of_negated_draws$diagnostics[, 2]
+                    ess_tail_vec[tail_ESS_undefined] <-  tail_ESS_of_negated_draws$diagnostics[, 2]
               }
               ##
-              ## ESS of the centred squared draws, (x - mean(x))^2 with ONE pooled mean over all chains and iterations: the ESS
-              ## for estimating the posterior SD (the definition of posterior::ess_sd), computed with the plain split-chain ESS
-              ## "split_ESS" of the same C++ routine. Anticorrelated draws inflate the bulk (and, less, the tail) ESS of x while
-              ## this one falls, so it is reported for every parameter alongside them (Enzo, 4 Oct 2026).
-              posterior_draws_centred_squared <- lapply(X = posterior_draws_as_std_vec_of_mats, FUN = function(draws_matrix) {
+              ## ESS of the centred squared draws, (x - mean(x))^2 with ONE pooled mean over all chains and
+              ## iterations: the ESS for estimating the posterior SD (the definition of posterior::ess_sd),
+              ## computed with the plain split-chain ESS "split_ESS" of the same C++ routine. Anticorrelated draws
+              ## inflate the bulk (and, less, the tail) ESS of x whilst this one falls, so it is reported for
+              ## every parameter alongside them.
+              posterior_draws_centred_squared <-  lapply(X = posterior_draws_as_std_vec_of_mats,
+                                                         FUN = function(draws_matrix) {
+
                     (draws_matrix - mean(draws_matrix))^2
               })
+
               outs <-  (Rcpp_compute_MCMC_diagnostics(  posterior_draws_centred_squared,
                                                         diagnostic = "split_ESS",
                                                         n_threads = n_threads))
-              ess_sd_vec <- outs$diagnostics[, 1]
+              ess_sd_vec <-  outs$diagnostics[, 1]
               ##
               outs <-  (Rcpp_compute_MCMC_diagnostics(  posterior_draws_as_std_vec_of_mats,
                                                         diagnostic = "split_rhat_rank",
@@ -138,8 +156,8 @@ generate_summary_tibble <- function(n_threads = NULL,
                             #### summary_df[i, c("2.5%", "50%", "97.5%")] <- quantiles_between_chains[, i]
                         })
                         summary_df$n_eff[i] <- round(ess_vec[i])
-                        summary_df$n_eff_tail[i] <- round(ess_tail_vec[i])
-                        summary_df$n_eff_sd[i] <- round(ess_sd_vec[i])
+                        summary_df$n_eff_tail[i] <-  round(ess_tail_vec[i])
+                        summary_df$n_eff_sd[i] <-  round(ess_sd_vec[i])
                         summary_df$Rhat[i] <- rhat_vec[i]
                 
               }
@@ -148,11 +166,13 @@ generate_summary_tibble <- function(n_threads = NULL,
                 
                         if (is.null(x = nested_rhat_grouping)) {
                             nested_rhat_grouping <-  fn_prepare_nested_rhat_grouping(
-                                superchain_ids = create_superchain_ids(n_chains = n_chains, n_superchains = n_superchains),
+                                superchain_ids = create_superchain_ids(n_chains = n_chains,
+                                                                       n_superchains = n_superchains),
                                 source = "caller_supplied_nominal_groups")
                         }
                         summary_df$n_Rhat[seq_len(length.out = n_to_compute)] <-  fn_nested_rhat_from_draws_array(
-                            draws_array = aperm(a = trace[seq_len(length.out = n_to_compute), , , drop = FALSE], perm = c(2, 3, 1)),
+                            draws_array = aperm(a = trace[seq_len(length.out = n_to_compute), , , drop = FALSE],
+                                                perm = c(2, 3, 1)),
                             nested_rhat_grouping = nested_rhat_grouping)
                                     
               }
@@ -170,7 +190,6 @@ generate_summary_tibble <- function(n_threads = NULL,
 
 
  
-
 
 
 

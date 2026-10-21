@@ -2,17 +2,17 @@
 ////
 //// ---- The complete per-update computation of the spectral LQ_ESSR criterion (burnin_algorithm =
 ////      "LQ_ESSR_spectral", "LQ_ESSR_spectral_long_bin_memory" and "LQ_ESSR_spec_bins99_evid_expand";
-////      R_fn_spectral_ESS_tau_criterion.R), in C++ (8 Oct 2026): the moving averages, the quadratic and flow length
+////      R_fn_spectral_ESS_tau_criterion.R), in C++: the moving averages, the quadratic and flow length
 ////      bins, the cosine-mixture fit (NNLS on the normal equations), the objective on the grid of candidate tau,
 ////      its maximiser, the bootstrap test of the expansion rule "evidence", and the tau move. The arithmetic is
-////      that of fn_spectral_ESS_soft_minimum_tau_update() with finite_run_draws = NULL, objective_mix = "none" and
-////      jump_weighted_acceptance = FALSE, step by step (R's seq(), findInterval(), which.max() and sd()
+////      that of fn_spectral_ESS_soft_minimum_tau_update() with finite_run_draws = NULL, objective_mix = "none"
+////      and jump_weighted_acceptance = FALSE, step by step (R's seq(), findInterval(), which.max() and sd()
 ////      conventions included), so that the tau path is the same as the R code's up to floating-point rounding
-////      (8 Oct 2026: except for the bootstrap draws of the expansion rule "evidence", which come from the
-////      bootstrap's own generator, BootstrapNormalGenerator, rather than from R's, for speed).
-////      The state is the same nested list as the R code's, so the two can be swapped mid-run.
-////      (8 Oct 2026) The cost per update is kept small: no heap allocations in the NNLS refits, the cosine
-////      sums of the jitter by rotation, and the soft minimum's power 8 by repeated squaring.
+////      (except for the bootstrap draws of the expansion rule "evidence", which come from the bootstrap's own
+////      generator, BootstrapNormalGenerator, rather than from R's, for speed). The state is the same nested list
+////      as the R code's, so the two can be swapped mid-run. The cost per update is kept small: no heap
+////      allocations in the NNLS refits, the cosine sums of the jitter by rotation, and the soft minimum's power
+////      8 by repeated squaring.
 ////
 ////      Compiled at first use by Rcpp::sourceCpp() (no rebuild of NicoStan), as
 ////      spectral_ESS_nnls_normal_equations.cpp.
@@ -90,8 +90,8 @@ double fn_expected_leapfrog_steps_under_jitter(const double tau, const double ep
         return ((n - 1.0) * n / 2.0 + (a - n + 1.0) * n) / a;
 }
 
-//// ---- NNLS on the normal equations (spectral_ESS_nnls_normal_equations.cpp, unchanged): AtA (n x n, row-major),
-////      one right-hand side Atb (n); Lawson-Hanson active set, Cholesky with a tiny ridge:
+//// ---- NNLS on the normal equations (spectral_ESS_nnls_normal_equations.cpp, unchanged): AtA (n x n,
+////      row-major), one right-hand side Atb (n); Lawson-Hanson active set, Cholesky with a tiny ridge:
 bool fn_cholesky_solve(std::vector<double> gram, const std::vector<double> &right_hand_side, const int n,
                        std::vector<double> &solution) {
         double largest_diagonal = 0.0;
@@ -204,7 +204,7 @@ std::vector<double> fn_nnls_one_column(const std::vector<double> &AtA, const std
                                 }
                         }
                 }
-                // (8 Oct 2026) w = Atb - AtA x over the non-zero x only: the zero terms subtract exactly zero, so
+                // w = Atb - AtA x over the non-zero x only: the zero terms subtract exactly zero, so
                 // w is unchanged (up to the sign of a zero, which only enters the comparisons above)
                 std::vector<int> support;
                 for (int j = 0; j < n; j++) if (x[j] != 0.0) support.push_back(j);
@@ -217,7 +217,7 @@ std::vector<double> fn_nnls_one_column(const std::vector<double> &AtA, const std
         return x;
 }
 
-//// ---- (8 Oct 2026) the same Cholesky solve and NNLS without heap allocations: every buffer comes from a
+//// ---- the same Cholesky solve and NNLS without heap allocations: every buffer comes from a
 ////      workspace that is reused across rows, bootstrap draws and updates (the arithmetic is that of
 ////      fn_cholesky_solve() and fn_nnls_one_column() above, which are kept for reference):
 struct NNLSWorkspace {
@@ -555,7 +555,7 @@ void fn_perturbed_inputs_of_draw(const double *pair_u, const double *pair_v, con
         }
 }
 
-//// ---- (8 Oct 2026) the bootstrap's own normal generator (xoshiro256++ seeded by splitmix64, Marsaglia's polar
+//// ---- the bootstrap's own normal generator (xoshiro256++ seeded by splitmix64, Marsaglia's polar
 ////      method), in place of R's generator: about ten times faster per draw, it leaves R's random-number stream
 ////      untouched, and it is seeded from the update count as before (104729 + the quadratic updates so far):
 struct BootstrapNormalGenerator {
@@ -815,7 +815,8 @@ struct Bins {
         double reference_length = 0.0;
         std::vector<double> edges;                 // bin edges in doublings
         int n_rows = 0, n_bins = 0;
-        std::vector<double> sums;                  // n_rows x n_bins, the forgotten sums of normalised squared jumps
+        std::vector<double> sums;                  // n_rows x n_bins, the forgotten sums of normalised
+                                                   // squared jumps
         std::vector<double> counts;                // n_bins
         std::vector<double> length_sums;           // n_bins (trajectory or executed lengths)
         std::vector<double> largest_length;        // n_bins
@@ -877,8 +878,10 @@ Rcpp::List fn_write_bins(const Bins &b, const bool flow, const int n_threads_for
                       Rcpp::Named("sum_of_chain_counts")             = Rcpp::wrap(b.counts),
                       Rcpp::Named("sum_of_executed_lengths")         = Rcpp::wrap(b.length_sums),
                       Rcpp::Named("largest_executed_length_in_bin")  = Rcpp::wrap(b.largest_length),
-                      Rcpp::Named("sum_of_cosines")                  = fn_matrix(b.cosine_sums, b.n_bins,
-                                                                                 static_cast<int>(b.frequencies.size())),
+                      Rcpp::Named("sum_of_cosines")                  = fn_matrix(
+                            b.cosine_sums,
+                            b.n_bins,
+                            static_cast<int>(b.frequencies.size())),
                       Rcpp::Named("n_updates")                       = b.n_updates);
         }
         return Rcpp::List::create(
@@ -896,7 +899,10 @@ Rcpp::List fn_write_bins(const Bins &b, const bool flow, const int n_threads_for
 
 //// ---- fn_length_response_initialise_state / fn_spectral_ESS_initialise_flow_state (bins a quarter of a
 ////      doubling wide from -10 to 6 doublings; the flow's frequencies a quarter of a doubling apart):
-Bins fn_initialise_bins(const int n_rows, const double reference_length, const bool flow, const double eps_at_start) {
+Bins fn_initialise_bins( const int n_rows,
+                         const double reference_length,
+                         const bool flow,
+                         const double eps_at_start) {
         Bins b;
         b.reference_length = reference_length;
         b.edges = fn_seq_by(-10.0, 6.0, 0.25);
@@ -910,7 +916,9 @@ Bins fn_initialise_bins(const int n_rows, const double reference_length, const b
         if (flow) {
                 const double lowest_frequency = PI_VALUE / (2.0 * std::pow(2.0, 6.0) * reference_length);
                 const double highest_frequency = 4.0 * PI_VALUE / eps_at_start;
-                std::vector<double> exponents = fn_seq_by(std::log2(lowest_frequency), std::log2(highest_frequency), 0.25);
+                std::vector<double> exponents = fn_seq_by(std::log2(lowest_frequency),
+                                                          std::log2(highest_frequency),
+                                                          0.25);
                 for (double e : exponents) b.frequencies.push_back(std::pow(2.0, e));
                 b.cosine_sums.assign(static_cast<size_t>(b.n_bins) * b.frequencies.size(), 0.0);
         }
@@ -918,7 +926,9 @@ Bins fn_initialise_bins(const int n_rows, const double reference_length, const b
 }
 
 //// ---- forgotten sums of squares per row and bin (fn_spectral_ESS_add_bin_sum_of_squares):
-void fn_add_sum_of_squares(std::vector<double> &sum_of_squares, const int n_rows, const std::vector<double> &values,
+void fn_add_sum_of_squares(std::vector<double> &sum_of_squares,
+                           const int n_rows,
+                           const std::vector<double> &values,
                            const std::vector<int> &bin_index, const std::vector<int> &chains,
                            const double forgetting_factor, const int n_threads_for_update_loops = 1,
                            const std::vector<double> *counts_before_update = nullptr) {
@@ -953,9 +963,14 @@ void fn_add_sum_of_squares(std::vector<double> &sum_of_squares, const int n_rows
 //// ---- the objective's inputs that do not change within an update (the candidates and their integral weights):
 struct ObjectiveInputs {
         int n_rows = 0;
-        std::vector<double> candidate_tau, integral_weights, expected_leapfrog_steps;   // weights: n_nodes x n_candidates
+        std::vector<double> candidate_tau, integral_weights, expected_leapfrog_steps;   // weights: n_nodes x
+                                                                                         // n_candidates
         int n_nodes = 0;
         double eps_now = 0.0, acceptance_moving_average = 1.0, soft_minimum_power = 8.0, minimum_bin_count = 2.0;
+        // (SpESS_R_linear_ESS_fraction_multiplier and SpESS_R_quadratic_ESS_fraction_multiplier in R: the factors
+        //  on the linear and on the quadratic ESS fractions before the soft minimum; 1 = as built, above 1 weighs
+        //  that part lower, infinity leaves it out)
+        double linear_ESS_fraction_multiplier = 1.0, quadratic_ESS_fraction_multiplier = 1.0;
 };
 
 //// ---- the cosine-mixture fit of the flow bins (fn_spectral_ESS_fit_flow_weights), in two parts: what depends
@@ -977,7 +992,8 @@ std::atomic<uint64_t> number_of_prepared_fits(0);
 
 PreparedFit fn_prepare_fit(const Bins &flow, const ObjectiveInputs &in) {
         PreparedFit prep;
-        for (int bin = 0; bin < flow.n_bins; bin++) if (flow.counts[bin] >= in.minimum_bin_count) prep.usable_bins.push_back(bin);
+        for (int bin = 0; bin < flow.n_bins; bin++)
+                if (flow.counts[bin] >= in.minimum_bin_count) prep.usable_bins.push_back(bin);
         if (prep.usable_bins.size() < 3) return prep;
         double longest = -std::numeric_limits<double>::infinity();
         for (int bin : prep.usable_bins) longest = std::max(longest, flow.largest_length[bin]);
@@ -1008,7 +1024,9 @@ PreparedFit fn_prepare_fit(const Bins &flow, const ObjectiveInputs &in) {
                 sum_of_counts += prep.counts[i];
                 for (int u = 0; u < prep.n_used; u++) {
                         prep.design[i + static_cast<size_t>(u) * prep.n_usable] =
-                              1.0 - flow.cosine_sums[prep.usable_bins[i] + static_cast<size_t>(first + u) * flow.n_bins] / prep.counts[i];
+                              1.0 - flow.cosine_sums[prep.usable_bins[i] +
+                                                     static_cast<size_t>(first + u) * flow.n_bins] /
+                                    prep.counts[i];
                 }
         }
         prep.equality_weight = 1e4 * sum_of_counts;
@@ -1025,7 +1043,7 @@ PreparedFit fn_prepare_fit(const Bins &flow, const ObjectiveInputs &in) {
         }
         const int n_candidates = static_cast<int>(in.candidate_tau.size());
         prep.variance_inflation.resize(static_cast<size_t>(prep.n_used) * n_candidates);
-        // (8 Oct 2026) fn_expected_cosine_under_jitter() for every frequency and candidate, with cos(n x) and
+        // fn_expected_cosine_under_jitter() for every frequency and candidate, with cos(n x) and
         // the cosine sum over k = 1, ..., n - 1 advanced by rotation over n = 1, 2, ... (re-anchored on the exact
         // cosine and sine every 32 steps), in place of the closed forms; the candidates increase, so one pass
         // over n serves them all (beyond 4096 steps, the closed form):
@@ -1063,7 +1081,8 @@ PreparedFit fn_prepare_fit(const Bins &flow, const ObjectiveInputs &in) {
                         }
                         double lag_one = 1.0 - in.acceptance_moving_average * (1.0 - expected_cosine);
                         lag_one = fn_min_na(lag_one, 1.0 - 1e-9);
-                        prep.variance_inflation[u + static_cast<size_t>(c) * prep.n_used] = (1.0 + lag_one) / (1.0 - lag_one);
+                        prep.variance_inflation[u + static_cast<size_t>(c) * prep.n_used] =
+                              (1.0 + lag_one) / (1.0 - lag_one);
                 }
         }
         prep.usable = true;
@@ -1078,7 +1097,7 @@ void fn_fit_weights(const PreparedFit &prep, const std::vector<double> &flow_sum
         const int n_used = prep.n_used;
         std::vector<double> Atb(static_cast<size_t>(n_used) * n_rows);
         double largest_absolute = 0.0;
-        // (8 Oct 2026) each bin's count x mean once per row (the same values, in the same order, as computing
+        // each bin's count x mean once per row (the same values, in the same order, as computing
         // them inside the loop over the frequencies)
         std::vector<double> count_times_bin_mean(prep.n_usable);
         for (int r = 0; r < n_rows; r++) {
@@ -1094,7 +1113,8 @@ void fn_fit_weights(const PreparedFit &prep, const std::vector<double> &flow_sum
                                 t += design_column[i] * count_times_bin_mean[i];
                         }
                         Atb[a + static_cast<size_t>(r) * n_used] = t + prep.equality_weight;
-                        largest_absolute = std::max(largest_absolute, std::fabs(Atb[a + static_cast<size_t>(r) * n_used]));
+                        largest_absolute = std::max(largest_absolute,
+                                                    std::fabs(Atb[a + static_cast<size_t>(r) * n_used]));
                 }
         }
         const double tolerance = 1e-12 * largest_absolute;
@@ -1117,7 +1137,7 @@ void fn_fit_weights(const PreparedFit &prep, const std::vector<double> &flow_sum
 }
 
 /* (the serial version, before the rows were spread over threads:)
-//// (8 Oct 2026) fn_fit_weights() with the workspace buffers (no allocations per row or per bootstrap draw):
+//// fn_fit_weights() with the workspace buffers (no allocations per row or per bootstrap draw):
 struct FitWorkspace {
         std::vector<double> Atb, count_times_bin_mean, column_solution;
         NNLSWorkspace nnls;
@@ -1329,7 +1349,9 @@ void fn_objective_at(const ObjectiveInputs &in, const PreparedFit &prep, const s
 }
 */
 
-void fn_objective_at(const ObjectiveInputs &in, const PreparedFit &prep, const std::vector<double> &quadratic_bin_means,
+void fn_objective_at(const ObjectiveInputs &in,
+                     const PreparedFit &prep,
+                     const std::vector<double> &quadratic_bin_means,
                      const std::vector<double> &weights, const std::vector<int> &which,
                      std::vector<double> &objective, const int n_threads_for_update_loops = 1) {
         const int n_rows = in.n_rows;
@@ -1354,7 +1376,8 @@ void fn_objective_at(const ObjectiveInputs &in, const PreparedFit &prep, const s
                                               weights[u + static_cast<size_t>(r) * n_used] *
                                               prep.variance_inflation[u + static_cast<size_t>(c) * n_used];
                                 }
-                                scores[r] = 1.0 / integrated_autocorrelation_time;
+                                // scores[r] = 1.0 / integrated_autocorrelation_time;
+                                scores[r] = in.linear_ESS_fraction_multiplier / integrated_autocorrelation_time;
                                 // the quadratic lag-one score:
                                 double integral = 0.0;
                                 for (int k = 0; k < in.n_nodes; k++) {
@@ -1363,7 +1386,9 @@ void fn_objective_at(const ObjectiveInputs &in, const PreparedFit &prep, const s
                                 }
                                 double lag_one = 1.0 - integral / (2.0 * in.candidate_tau[c]);
                                 lag_one = fn_min_na(fn_max_na(lag_one, -1.0 + 1e-6), 1.0 - 1e-6);
-                                scores[n_rows + r] = (1.0 - lag_one) / (1.0 + lag_one);
+                                // scores[n_rows + r] = (1.0 - lag_one) / (1.0 + lag_one);
+                                scores[n_rows + r] = in.quadratic_ESS_fraction_multiplier *
+                                                     ((1.0 - lag_one) / (1.0 + lag_one));
                         }
                         // the soft minimum per expected gradient:
                         double smallest = std::numeric_limits<double>::infinity();
@@ -1403,18 +1428,24 @@ const int rows_per_sub_block_of_objective = 256;
 //// std::min(x, high) return x when it is NaN, as fn_max_na() and fn_min_na() do with bounds that are never NaN;
 //// the smallest score is over eight running minima (the minimum does not depend on the order), and the terms are
 //// summed over eight running sums, then the sums in turn:
+//// (linear_multiplier and quadratic_multiplier: the factors on the two ESS fractions, see ObjectiveInputs;
+////  1 = as built, the same numbers as before; the arguments ended
+////  "double *scores, double *terms, double *parts) {")
 void fn_soft_minimum_part_of_sub_block(const double *linear_sum, const double *quadratic_sum,
                                        const int n_sub_rows, const double two_tau, const double power,
-                                       double *scores, double *terms, double *parts) {
+                                       double *scores, double *terms, double *parts,
+                                       const double linear_multiplier, const double quadratic_multiplier) {
         for (int i = 0; i < n_sub_rows; i++) {
                 // the spectral linear score:
-                scores[i] = 1.0 / linear_sum[i];
+                // scores[i] = 1.0 / linear_sum[i];
+                scores[i] = linear_multiplier / linear_sum[i];
         }
         for (int i = 0; i < n_sub_rows; i++) {
                 // the quadratic lag-one score:
                 double lag_one = 1.0 - quadratic_sum[i] / two_tau;
                 lag_one = std::min(std::max(lag_one, -1.0 + 1e-6), 1.0 - 1e-6);
-                scores[n_sub_rows + i] = (1.0 - lag_one) / (1.0 + lag_one);
+                // scores[n_sub_rows + i] = (1.0 - lag_one) / (1.0 + lag_one);
+                scores[n_sub_rows + i] = quadratic_multiplier * ((1.0 - lag_one) / (1.0 + lag_one));
         }
         const int n_scores = 2 * n_sub_rows;
         int n_nan = 0;
@@ -1515,8 +1546,12 @@ void fn_objective_at_in_one_pass(const ObjectiveInputs &in, const PreparedFit &p
                                 }
                                 double *parts = sub_block_parts.data() +
                                                 (static_cast<size_t>(sub_block) * n_which + j) * 3;
+                                // fn_soft_minimum_part_of_sub_block(linear_sum, quadratic_sum, n_sub_rows,
+                                //                                   two_tau, power, scores, terms, parts);
                                 fn_soft_minimum_part_of_sub_block(linear_sum, quadratic_sum, n_sub_rows, two_tau,
-                                                                  power, scores, terms, parts);
+                                                                  power, scores, terms, parts,
+                                                                  in.linear_ESS_fraction_multiplier,
+                                                                  in.quadratic_ESS_fraction_multiplier);
                         }
                 }
         });
@@ -1678,8 +1713,10 @@ Rcpp::List fn_write_bins_without_sums(const Bins &b, const bool flow) {
                       Rcpp::Named("sum_of_chain_counts")             = Rcpp::wrap(b.counts),
                       Rcpp::Named("sum_of_executed_lengths")         = Rcpp::wrap(b.length_sums),
                       Rcpp::Named("largest_executed_length_in_bin")  = Rcpp::wrap(b.largest_length),
-                      Rcpp::Named("sum_of_cosines")                  = fn_matrix(b.cosine_sums, b.n_bins,
-                                                                                 static_cast<int>(b.frequencies.size())),
+                      Rcpp::Named("sum_of_cosines")                  = fn_matrix(
+                            b.cosine_sums,
+                            b.n_bins,
+                            static_cast<int>(b.frequencies.size())),
                       Rcpp::Named("n_updates")                       = b.n_updates);
         }
         return Rcpp::List::create(
@@ -1871,6 +1908,15 @@ double fn_column_sum_in_long_double(const double *column, const int n_rows) {
 //// (largest_number_of_rows_fitted_per_update: 0 = every row; above it, the slowest-moving rows, see
 ////  fn_slowest_moving_rows(), are fitted and scored. bins_decay_lazily: TRUE = the four bin matrices decay
 ////  lazily, see fn_add_sum_of_squares_lazily(). Their defaults leave the update as it was.)
+//// (variance_linear_given and variance_quadratic_given, SpESS_R_normalising_variances_from_last_n_updates > 0
+////  in R: the variances of z_j and z_j^2 that the squared jumps are divided by, given in place of those of the
+////  moving averages; NULL = the moving averages, as built. The arguments ended
+////  "const bool bins_decay_lazily = false) {" before them; no comment may stand inside the argument list,
+////  which Rcpp's attributes copy into the generated declaration.)
+//// (linear_ESS_fraction_multiplier and quadratic_ESS_fraction_multiplier, SpESS_R_linear_ESS_fraction_multiplier
+////  and SpESS_R_quadratic_ESS_fraction_multiplier in R: the factors on the linear and on the quadratic ESS
+////  fractions before the soft minimum, see ObjectiveInputs; 1 = as built. The arguments ended
+////  "variance_quadratic_given = R_NilValue) {" before them.)
 // [[Rcpp::export(rng = false)]]
 Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                                             Rcpp::NumericMatrix linear_jump_squared,
@@ -1896,12 +1942,21 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                                             const int n_bootstrap_draws,
                                             const int n_threads_for_update_loops = 1,
                                             const int largest_number_of_rows_fitted_per_update = 0,
-                                            const bool bins_decay_lazily = false) {
+                                            const bool bins_decay_lazily = false,
+                                            Rcpp::Nullable<Rcpp::NumericVector> variance_linear_given =
+                                                  R_NilValue,
+                                            Rcpp::Nullable<Rcpp::NumericVector> variance_quadratic_given =
+                                                  R_NilValue,
+                                            const double linear_ESS_fraction_multiplier = 1.0,
+                                            const double quadratic_ESS_fraction_multiplier = 1.0) {
 
         const int n_rows = linear_jump_squared.nrow();
         const int n_chains = static_cast<int>(probabilities.size());
-        if (!(std::isfinite(eps_used_for_trajectories) && eps_used_for_trajectories > 0.0)) eps_used_for_trajectories = eps_now;
-        auto at = [n_rows](const Rcpp::NumericMatrix &m, const int r, const int c) { return m[r + static_cast<size_t>(c) * n_rows]; };
+        if (!(std::isfinite(eps_used_for_trajectories) && eps_used_for_trajectories > 0.0))
+                eps_used_for_trajectories = eps_now;
+        auto at = [n_rows](const Rcpp::NumericMatrix &m, const int r, const int c) {
+                return m[r + static_cast<size_t>(c) * n_rows];
+        };
         // ---- which chains contribute:
         std::vector<int> binned(n_chains), valid(n_chains);
         std::vector<double> weights(n_chains), executed_lengths(n_chains);
@@ -1938,13 +1993,15 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                         }
                 }
                 binned[c] = std::isfinite(tau_values[c]) && tau_values[c] > 0.0;
-                valid[c] = finite_statistics && binned[c] && std::isfinite(divergences[c]) && divergences[c] == 0.0;
+                valid[c] = finite_statistics && binned[c] && std::isfinite(divergences[c]) &&
+                           divergences[c] == 0.0;
                 double w = use_proposals ? fn_min_na(1.0, fn_max_na(0.0, probabilities[c])) : 1.0;
                 if (!std::isfinite(w) || !valid[c]) w = 0.0;
                 weights[c] = w;
                 any_binned = any_binned || binned[c];
                 any_valid = any_valid || valid[c];
-                executed_lengths[c] = eps_used_for_trajectories * std::max(1.0, std::ceil(tau_values[c] / eps_used_for_trajectories));
+                executed_lengths[c] = eps_used_for_trajectories *
+                                      std::max(1.0, std::ceil(tau_values[c] / eps_used_for_trajectories));
         }
         Rcpp::List result = Rcpp::List::create(Rcpp::Named("performed") = false, Rcpp::Named("state") = state_in);
         if (!any_binned) return result;
@@ -2029,8 +2086,10 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                         flow = fn_read_bins(Rcpp::as<Rcpp::List>(state["flow_state"]), true,
                                             n_threads_for_update_loops);
                 }
-                if (!Rf_isNull(state["second_moment_moving_average"])) second_ma = fn_as_vector(state["second_moment_moving_average"]);
-                if (!Rf_isNull(state["fourth_moment_moving_average"])) fourth_ma = fn_as_vector(state["fourth_moment_moving_average"]);
+                if (!Rf_isNull(state["second_moment_moving_average"]))
+                        second_ma = fn_as_vector(state["second_moment_moving_average"]);
+                if (!Rf_isNull(state["fourth_moment_moving_average"]))
+                        fourth_ma = fn_as_vector(state["fourth_moment_moving_average"]);
                 if (!Rf_isNull(state["acceptance_moving_average"])) {
                         acceptance_ma = Rcpp::as<double>(state["acceptance_moving_average"]);
                         has_acceptance_ma = true;
@@ -2097,9 +2156,23 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
         for (int r = row_begin; r < row_end; r++) {
                 variance_linear[r] = fn_max_na(second_ma[r], 1e-12);
                 const double v = fourth_ma[r] - second_ma[r] * second_ma[r];
-                variance_quadratic[r] = (std::isfinite(v) && v > 0.0) ? v : 2.0 * variance_linear[r] * variance_linear[r];
+                variance_quadratic[r] = (std::isfinite(v) && v > 0.0) ? v :
+                                        2.0 * variance_linear[r] * variance_linear[r];
         }
         });
+        // ---- (SpESS_R_normalising_variances_from_last_n_updates > 0 in R) the variances given in place of those
+        //      of the moving averages (the moving averages themselves are still kept in the state, as built):
+        if (variance_linear_given.isNotNull() && variance_quadratic_given.isNotNull()) {
+                Rcpp::NumericVector linear_given(variance_linear_given.get());
+                Rcpp::NumericVector quadratic_given(variance_quadratic_given.get());
+                if (linear_given.size() != n_rows || quadratic_given.size() != n_rows) {
+                        Rcpp::stop("the given variances of the SpESS-R update need one value per monitored row.");
+                }
+                for (int r = 0; r < n_rows; r++) {
+                        variance_linear[r] = linear_given[r];
+                        variance_quadratic[r] = quadratic_given[r];
+                }
+        }
         // ---- the bins decaying lazily: one pass over the rows adds each chain's normalised values, divided by
         //      the decay factors, to the bins, their sums of squares and the rows' movement totals (the same
         //      arithmetic as the binning below up to rounding, without its intermediate arrays):
@@ -2224,19 +2297,24 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                 for (int r = row_begin; r < row_end; r++) {
                         double q = at(quadratic_jump_squared, r, c);
                         if (!std::isfinite(q)) q = 0.0;
-                        quadratic_values[r + static_cast<size_t>(c) * n_rows] = (q * weights[c]) / (2.0 * variance_quadratic[r]);
+                        quadratic_values[r + static_cast<size_t>(c) * n_rows] =
+                              (q * weights[c]) / (2.0 * variance_quadratic[r]);
                 }
         }
         });
-        std::vector<int> quadratic_bin_index(n_chains, -1), binned_chains, flow_bin_index(n_chains, -1), valid_chains;
+        std::vector<int> quadratic_bin_index(n_chains, -1), binned_chains,
+                         flow_bin_index(n_chains, -1), valid_chains;
         for (int c = 0; c < n_chains; c++) {
                 if (binned[c]) {
                         binned_chains.push_back(c);
-                        quadratic_bin_index[c] = fn_bin_index(std::log2(tau_values[c] / quadratic.reference_length), quadratic.edges);
+                        quadratic_bin_index[c] = fn_bin_index(std::log2(tau_values[c] /
+                                                                        quadratic.reference_length),
+                                                              quadratic.edges);
                 }
                 if (valid[c]) {
                         valid_chains.push_back(c);
-                        flow_bin_index[c] = fn_bin_index(std::log2(executed_lengths[c] / flow.reference_length), flow.edges);
+                        flow_bin_index[c] = fn_bin_index(std::log2(executed_lengths[c] / flow.reference_length),
+                                                         flow.edges);
                 }
         }
         // for (double &v : quadratic.sums) v *= bin_forgetting_factor;
@@ -2273,7 +2351,8 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                 }
                 quadratic.counts[bin] += 1.0;
                 quadratic.length_sums[bin] += tau_values[c];
-                quadratic.largest_length[bin] = std::max(quadratic.largest_length[bin], static_cast<double>(tau_values[c]));
+                quadratic.largest_length[bin] = std::max(quadratic.largest_length[bin],
+                                                         static_cast<double>(tau_values[c]));
         }
         quadratic.n_updates += 1.0;
         if (expansion_evidence) {
@@ -2282,7 +2361,8 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                         fn_add_sum_of_squares_lazily(quadratic_sum_of_squares, n_rows, quadratic_values,
                                                      quadratic_bin_index, binned_chains, decay_quadratic);
                 } else {
-                fn_add_sum_of_squares(quadratic_sum_of_squares, n_rows, quadratic_values, quadratic_bin_index, binned_chains,
+                fn_add_sum_of_squares(quadratic_sum_of_squares, n_rows, quadratic_values, quadratic_bin_index,
+                                      binned_chains,
                                       bin_forgetting_factor, n_threads_for_update_loops,
                                       &quadratic_counts_before_update);
                 }
@@ -2342,7 +2422,8 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                         flow.length_sums[bin] += executed_lengths[c];
                         flow.largest_length[bin] = std::max(flow.largest_length[bin], executed_lengths[c]);
                         for (int k = 0; k < n_frequencies; k++) {
-                                flow.cosine_sums[bin + static_cast<size_t>(k) * flow.n_bins] += std::cos(flow.frequencies[k] * executed_lengths[c]);
+                                flow.cosine_sums[bin + static_cast<size_t>(k) * flow.n_bins] +=
+                                      std::cos(flow.frequencies[k] * executed_lengths[c]);
                         }
                 }
                 flow.n_updates += 1.0;
@@ -2353,7 +2434,8 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                         fn_add_sum_of_squares_lazily(flow_sum_of_squares, n_rows, linear_values, flow_bin_index,
                                                      valid_chains, decay_flow);
                 } else if (any_valid) {
-                        fn_add_sum_of_squares(flow_sum_of_squares, n_rows, linear_values, flow_bin_index, valid_chains,
+                        fn_add_sum_of_squares(flow_sum_of_squares, n_rows, linear_values, flow_bin_index,
+                                              valid_chains,
                                               bin_forgetting_factor, n_threads_for_update_loops,
                                               &flow_counts_before_update);
                 }
@@ -2435,7 +2517,8 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                                  const std::vector<double> &flow_sum_of_squares) -> Rcpp::List {
         // ---- the candidates and the quadratic bin means:
         std::vector<int> usable;
-        for (int bin = 0; bin < quadratic.n_bins; bin++) if (quadratic.counts[bin] >= minimum_bin_count) usable.push_back(bin);
+        for (int bin = 0; bin < quadratic.n_bins; bin++)
+                if (quadratic.counts[bin] >= minimum_bin_count) usable.push_back(bin);
         if (usable.size() < 3) return result;
         std::vector<double> bin_centres;
         for (int bin : usable) bin_centres.push_back(quadratic.length_sums[bin] / quadratic.counts[bin]);
@@ -2481,8 +2564,12 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
         in.eps_now = eps_now;
         in.acceptance_moving_average = acceptance_ma;
         in.soft_minimum_power = soft_minimum_power;
+        in.linear_ESS_fraction_multiplier = linear_ESS_fraction_multiplier;
+        in.quadratic_ESS_fraction_multiplier = quadratic_ESS_fraction_multiplier;
         in.minimum_bin_count = minimum_bin_count;
-        for (double e : fn_seq_by(std::log2(smallest_candidate), std::log2(largest_candidate), grid_step_in_doublings)) {
+        for (double e : fn_seq_by(std::log2(smallest_candidate),
+                                  std::log2(largest_candidate),
+                                  grid_step_in_doublings)) {
                 in.candidate_tau.push_back(std::pow(2.0, e));
         }
         if (in.candidate_tau.back() < largest_candidate) in.candidate_tau.push_back(largest_candidate);
@@ -2499,17 +2586,21 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                         if (upper <= left) break;
                         const double width = right - left;
                         const double covered = std::min(right, upper) - left;
-                        all_weights[segment + static_cast<size_t>(c) * nodes.size()] += covered - covered * covered / (2.0 * width);
-                        all_weights[segment + 1 + static_cast<size_t>(c) * nodes.size()] += covered * covered / (2.0 * width);
+                        all_weights[segment + static_cast<size_t>(c) * nodes.size()] +=
+                              covered - covered * covered / (2.0 * width);
+                        all_weights[segment + 1 + static_cast<size_t>(c) * nodes.size()] +=
+                              covered * covered / (2.0 * width);
                 }
         }
         in.integral_weights.resize(static_cast<size_t>(in.n_nodes) * n_candidates);
         for (int c = 0; c < n_candidates; c++) {
                 for (int k = 0; k < in.n_nodes; k++) {
-                        in.integral_weights[k + static_cast<size_t>(c) * in.n_nodes] = all_weights[k + 1 + static_cast<size_t>(c) * nodes.size()];
+                        in.integral_weights[k + static_cast<size_t>(c) * in.n_nodes] =
+                              all_weights[k + 1 + static_cast<size_t>(c) * nodes.size()];
                 }
         }
-        for (double candidate : in.candidate_tau) in.expected_leapfrog_steps.push_back(fn_expected_leapfrog_steps_under_jitter(candidate, eps_now));
+        for (double candidate : in.candidate_tau)
+                in.expected_leapfrog_steps.push_back(fn_expected_leapfrog_steps_under_jitter(candidate, eps_now));
         // ---- the objective, its maximiser and the tau move:
         std::vector<double> objective;
         const PreparedFit prep = fn_prepare_fit(flow, in);
@@ -2570,9 +2661,11 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                                     n_threads_for_update_loops, transposed_weights, sub_block_parts);
         const int best = fn_which_max(objective);
         if (best < 0) return result;
-        const bool maximum_is_at_upper_end = in.candidate_tau[best] >= largest_candidate * std::pow(2.0, -upper_end_zone_in_doublings);
+        const bool maximum_is_at_upper_end = in.candidate_tau[best] >=
+                                             largest_candidate * std::pow(2.0, -upper_end_zone_in_doublings);
         const double progress = schedule_length <= 1.0 ? 0.0 :
-                                std::min(1.0, std::max(0.0, (schedule_iteration - 1.0) / (schedule_length - 1.0)));
+                                std::min(1.0, std::max(0.0, (schedule_iteration - 1.0) /
+                                                            (schedule_length - 1.0)));
         const double learning_rate_now = learning_rate * (1.0 - (1.0 - learning_rate) * progress);
         bool expand = maximum_is_at_upper_end;
         double evidence_z = NA_DOUBLE;
@@ -2631,7 +2724,7 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                 std::vector<double> &flow_standard_errors = buffers.flow_standard_errors;
                 std::vector<int> &flow_usable = buffers.flow_usable;
                 flow_usable.clear();
-                // (8 Oct 2026) the test with two exact shortcuts (the block before them is below, commented
+                // the test with two exact shortcuts (the block before them is below, commented
                 // out): with reference == top, or a difference estimate <= 0 (or NaN), z <= 0 whatever the draws,
                 // so there is no expansion and no draw is needed; and once the finite draws so far have a sum of
                 // squared deviations SS_k with SS_k / (B - 1) >= (difference / 1.645)^2, the final standard
@@ -2953,7 +3046,7 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                                 expand = reference < top && evidence_z > z_threshold;
                         }
                 }
-                // // ---- the draws: (8 Oct 2026) from the bootstrap's own generator, seeded from the update
+                // // ---- the draws: from the bootstrap's own generator, seeded from the update
                 // //      count as R's generator was (set.seed(104729 + the quadratic updates so far)); R's
                 // //      stream is not
                 // //      touched:
@@ -3010,7 +3103,8 @@ Rcpp::List fn_spectral_LQ_ESSR_update_cpp(  SEXP state_in,
                 // expand = reference < top && evidence_z > R::qnorm(0.95, 0.0, 1.0, 1, 0);
         }
         const double target_tau = expand ? 2.0 * std::max(tau, largest_candidate) : in.candidate_tau[best];
-        const double new_tau = std::exp(std::log(tau) + learning_rate_now * (std::log(target_tau) - std::log(tau)));
+        const double new_tau = std::exp(std::log(tau) +
+                                        learning_rate_now * (std::log(target_tau) - std::log(tau)));
         result["performed"] = true;
         result.push_back(new_tau, "new_tau");
         result.push_back(std::log(target_tau) - std::log(tau), "gradient");

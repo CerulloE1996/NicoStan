@@ -1,13 +1,14 @@
 //// spectral_ESS_nnls_normal_equations.cpp
 ////
-//// ---- burnin_algorithm = "LQ_ESSR_spectral" (R_fn_spectral_ESS_tau_criterion.R, 6 Oct 2026): non-negative least
-////      squares on the normal equations, one right-hand side per column of Atb (one column per monitored coordinate):
+//// ---- burnin_algorithm = "LQ_ESSR_spectral" (R_fn_spectral_ESS_tau_criterion.R): non-negative least
+////      squares on the normal equations, one right-hand side per column of Atb (one column per monitored
+////      coordinate):
 ////        minimise || A w - b ||^2 subject to w >= 0, given AtA = A^T A (n x n) and Atb = A^T b (n x m).
-////      Lawson-Hanson active set on the normal equations (as Bro and De Jong 1997); the passive-set system is solved by
-////      Cholesky with a tiny ridge (1e-12 x the largest diagonal entry). A column whose passive-set system is not
-////      positive definite drops the entering frequency and does not try it again. R imposes sum(w) = 1 by adding a
-////      heavily weighted row of ones to A (i.e. a large constant to every entry of AtA and Atb) and divides each column
-////      by its sum afterwards.
+////      Lawson-Hanson active set on the normal equations (as Bro and De Jong 1997); the passive-set system is
+////      solved by Cholesky with a tiny ridge (1e-12 x the largest diagonal entry). A column whose passive-set
+////      system is not positive definite drops the entering frequency and does not try it again. R imposes sum(w)
+////      = 1 by adding a heavily weighted row of ones to A (i.e. a large constant to every entry of AtA and Atb)
+////      and divides each column by its sum afterwards.
 ////
 ////      Compiled at first use by Rcpp::sourceCpp() (no rebuild of NicoStan or BayesMVP), as
 ////      tau_initial_nuisance_moments.cpp.

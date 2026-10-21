@@ -41,7 +41,8 @@ fn_burnin_adaptation_schedule <-  function( n_burnin,
 ) {
   
         burnin_schedule <-  match.arg(arg = burnin_schedule, choices = c("automatic", "legacy"))
-        theta_hat_us_rule <-  match.arg(arg = theta_hat_us_rule, choices = c("running_mean_frozen", "zero", "running_mean"))
+        theta_hat_us_rule <-  match.arg( arg = theta_hat_us_rule,
+                                         choices = c("running_mean_frozen", "zero", "running_mean"))
         ##
         fn_check_iteration <-  function(value, 
                                         name, 
@@ -111,9 +112,12 @@ fn_burnin_adaptation_schedule <-  function( n_burnin,
                       
                         if (n_burnin < reference_lengths[1]) return(round(x = n_burnin * reference_iterations[1] / reference_lengths[1]))
                         if (n_burnin > tail(x = reference_lengths, n = 1)) {
-                            return(round(x = n_burnin * tail(x = reference_iterations, n = 1) / tail(x = reference_lengths, n = 1)))
+                            return(round(x = n_burnin * tail( x = reference_iterations,
+                                                              n = 1) / tail(x = reference_lengths, n = 1)))
                         }
-                        round(x = stats::approx(x = reference_lengths, y = reference_iterations, xout = n_burnin)$y)
+                        round(x = stats::approx( x = reference_lengths,
+                                                 y = reference_iterations,
+                                                 xout = n_burnin)$y)
                     
                 }
                 ##
@@ -154,7 +158,10 @@ fn_burnin_adaptation_schedule <-  function( n_burnin,
                 
         }
         phase_table <-  data.frame(
-            phase = c("Final update to centre", "Final update to both metrics", "Adapt epsilon and tau only", "Everything fixed"),
+            phase = c( "Final update to centre",
+                       "Final update to both metrics",
+                       "Adapt epsilon and tau only",
+                       "Everything fixed"),
             iterations = c(as.character(x = centre_adaptation_end_iter),
                            as.character(x = metric_adaptation_end_iter),
                            fn_iteration_range(first = geometry_adaptation_end_iter + 1,
@@ -172,7 +179,14 @@ fn_burnin_adaptation_schedule <-  function( n_burnin,
         ## m = final metric update; c = final centre update. Version 1 also forces the final metric update.
         ##
         schedule_version <-  if (burnin_schedule == "automatic") 1 else 0
-        filename_token <-  paste0("_bs", schedule_version, "a", n_adapt, "m", metric_adaptation_end_iter, "c", centre_adaptation_end_iter)
+        filename_token <-  paste0( "_bs",
+                                   schedule_version,
+                                   "a",
+                                   n_adapt,
+                                   "m",
+                                   metric_adaptation_end_iter,
+                                   "c",
+                                   centre_adaptation_end_iter)
         ##
         return(list( burnin_schedule = burnin_schedule,
                      schedule_version = schedule_version,

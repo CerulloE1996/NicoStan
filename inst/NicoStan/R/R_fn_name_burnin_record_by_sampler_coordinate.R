@@ -51,6 +51,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
         n_leading_coordinates <-  if (isTRUE(n_unconstrained == n_params_main)) 0 else
                                   if (isTRUE(n_unconstrained == n_params_main + n_nuisance)) n_nuisance else NA
         if (!is.na(n_leading_coordinates)) {
+
               index_vector <-  seq_len(n_unconstrained)
               constrained <-  tryCatch(bs_model$param_constrain(index_vector, include_tp = FALSE,
                                                                 include_gq = FALSE),
@@ -58,6 +59,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
               constrained_names <-  bs_model$param_names()
               if (!is.null(constrained) && (length(constrained) == n_unconstrained) &&
                   all(constrained == round(constrained)) && setequal(constrained, index_vector)) {
+
                     name_at_position <-  character(n_unconstrained)
                     name_at_position[constrained] <-  convert_bridgestan_par_names_to_stan(constrained_names)
                     main_names <-  name_at_position[n_leading_coordinates + seq_len(n_params_main)]
@@ -65,7 +67,9 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
                                                  main_names)
                     names_method_main <-  "identity_transform_of_every_main_parameter"
               }
+
         }
+
         ##
         ## ---- test-indexed main parameters of LC_MVP: beta in the ORIGINAL test order (the summary row holding
         ##      the same draws), and the class and tests of each raw correlation parameter:
@@ -76,11 +80,14 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
         if ((names_method_main != "positional") && (Model_type %in% c("LC_MVP", "LC_MVOP")) &&
             !is.null(test_perm)) {
               fn_indices <-  function(name) {
+
                     return(as.integer(strsplit(sub("^[^\\[]*\\[(.*)\\]$", "\\1", name), ",")[[1]]))
               }
+
               pair_first_test  <-  unlist(lapply(2:n_tests, function(i) rep(i, i - 1)))
               pair_second_test <-  unlist(lapply(2:n_tests, function(i) seq_len(i - 1)))
               for (position in seq_len(n_params_main)) {
+
                     name <-  main_names[position]
                     if (grepl("^beta\\[[0-9]+,[0-9]+,[0-9]+\\]$", name)) {
                           index <-  fn_indices(name)
@@ -102,6 +109,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
                                                                  test_perm[j], ")")
                     }
               }
+
         }
         ##
         ## ---- cutpoints of LC_MVOP: C_unc_vec[c, position] of the sampler is the concatenation of the ordinal
@@ -127,6 +135,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
               fitted_ordinal_slot_of_fitted_position <-  rep(seq_along(n_thr_per_ord_test_in_fitted_order),
                                                              times = n_thr_per_ord_test_in_fitted_order)
               for (position in seq_len(n_params_main)) {
+
                     name <-  main_names[position]
                     if (grepl("^C_unc_vec\\[[0-9]+,[0-9]+\\]$", name)) {
                           index <-  as.integer(strsplit(sub("^[^\\[]*\\[(.*)\\]$", "\\1", name), ",")[[1]])
@@ -141,6 +150,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
                                                                  original_test_of_fitted_ordinal_slot[k])
                     }
               }
+
         }
         ##
         ## ---- nuisance block of a built-in model: u_raw[observation, ORIGINAL test] in the burn-in chunk layout:
@@ -203,24 +213,33 @@ fn_burnin_record_with_names_of_sampler_coordinates <-  function( burnin_object,
         n_main     <-  length(main_names)
         n_nuisance <-  length(nuisance_names)
         ##
-        fn_name_vector <-  function(x, coordinate_names_for_x) {
+        fn_name_vector <-  function( x,
+                                     coordinate_names_for_x) {
+
               if (is.numeric(x) && is.null(dim(x)) && (length(x) == length(coordinate_names_for_x))) {
                     names(x) <-  coordinate_names_for_x
               }
               return(x)
         }
-        fn_name_rows <-  function(x, coordinate_names_for_rows) {
+
+        fn_name_rows <-  function( x,
+                                   coordinate_names_for_rows) {
+
               if (is.numeric(x) && (length(dim(x)) == 2) && (nrow(x) == length(coordinate_names_for_rows))) {
                     rownames(x) <-  coordinate_names_for_rows
               }
               return(x)
         }
-        fn_name_rows_and_columns <-  function(x, coordinate_names_for_both) {
+
+        fn_name_rows_and_columns <-  function( x,
+                                               coordinate_names_for_both) {
+
               if (is.numeric(x) && (length(dim(x)) == 2) && all(dim(x) == length(coordinate_names_for_both))) {
                     dimnames(x) <-  list(coordinate_names_for_both, coordinate_names_for_both)
               }
               return(x)
         }
+
         ##
         ## ---- burn-in draws and metric history (iteration x coordinate (x chain)), final states
         ##      (coordinate x chain):
@@ -299,7 +318,6 @@ fn_burnin_record_with_names_of_sampler_coordinates <-  function( burnin_object,
         return(burnin_object)
 
 }
-
 
 
 

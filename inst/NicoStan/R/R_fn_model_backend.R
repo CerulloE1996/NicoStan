@@ -1,7 +1,7 @@
-#### =====================================================================================================================================
+#### =============================================================================================================
 ## R_fn_model_backend.R
 ##
-## ---- Bind the shared R implementation to a package's existing native/model operations ------------------------------------------------
+## ---- Bind the shared R implementation to a package's existing native/model operations -------------------------
 ##
 .nicostan_model_types <-  "Stan"
 .nicostan_provider_package <-  "NicoStan"
@@ -19,7 +19,7 @@
 fn_create_model_backend <-  function( provider,
                                       model_types = "Stan") {
 
-        stopifnot(is.environment(provider), is.character(model_types), length(model_types) > 0L)
+        stopifnot(is.environment(provider), is.character(model_types), length(model_types) > 0)
         core_namespace <-  environment(fn_create_model_backend)
         backend <-  new.env(parent = core_namespace)
         ##
@@ -40,7 +40,8 @@ fn_create_model_backend <-  function( provider,
                 assign(name, value, envir = backend)
         }
         backend$.nicostan_model_types <-  model_types
-        backend$.nicostan_provider_package <-  if (isNamespace(provider)) unname(getNamespaceName(provider)) else NULL
+        backend$.nicostan_provider_package <-  if (isNamespace(provider)) unname(getNamespaceName(provider)) else
+                                               NULL
         ##
         fn_bind_class <-  function( prototype) {
 

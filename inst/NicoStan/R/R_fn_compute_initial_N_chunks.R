@@ -48,7 +48,9 @@ fn_parse_sysfs_CPU_list <-  function( CPU_list_string ) {
         CPU_ids <-  unlist(x = lapply( X   = CPU_list_parts,
                                        FUN = function(CPU_list_part) {
 
-                                             range_ends <-  as.numeric(strsplit(x = trimws(x = CPU_list_part), split = "-", fixed = TRUE)[[1]])
+                                             range_ends <-  as.numeric(strsplit( x = trimws(x = CPU_list_part),
+                                                                                 split = "-",
+                                                                                 fixed = TRUE)[[1]])
                                              ##
                                              if (length(x = range_ends) == 1) {
                                                    return(range_ends)
@@ -78,7 +80,9 @@ fn_parse_sysfs_cache_size_bytes <-  function( cache_size_string ) {
         size_unit <-  sub(pattern = "I?B$", replacement = "", x = size_unit)
         if (!nzchar(x = size_unit)) size_unit <-  "bytes"
         ##
-        size_number <-  suppressWarnings(as.numeric(sub(pattern = "^([0-9.]+).*$", replacement = "\\1", x = cache_size_string)))
+        size_number <-  suppressWarnings(as.numeric(sub( pattern = "^([0-9.]+).*$",
+                                                         replacement = "\\1",
+                                                         x = cache_size_string)))
         ##
         size_multiplier <-  switch( EXPR  = size_unit,
                                     "K"     = 1024,
@@ -130,7 +134,24 @@ fn_most_common_value <-  function( values ) {
 #'   N_hardware_threads, thread_topology_available and topology_notes.
 #' @keywords internal
 #' @noRd
+## (read once per R process: each read walks the cache directories of every CPU of the machine, about 0.1 s on the
+##  192 CPUs of the local-HPC, and Paper 1's pickers read it for every layout's equations; the copy read first is
+##  returned again, for the same sysfs directory)
+environment_of_the_CPU_cache_topology_read_from_sysfs_in_this_R_process <-  new.env()
 fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/devices/system/cpu" ) {
+
+        saved_copy <-  get0(x = sysfs_CPU_directory, inherits = FALSE,
+                            envir = environment_of_the_CPU_cache_topology_read_from_sysfs_in_this_R_process)
+        if (!is.null(saved_copy)) return(saved_copy)
+        CPU_cache_topology <-  fn_read_CPU_cache_topology_from_sysfs_each_time(
+                                     sysfs_CPU_directory = sysfs_CPU_directory)
+        assign(x = sysfs_CPU_directory, value = CPU_cache_topology,
+               envir = environment_of_the_CPU_cache_topology_read_from_sysfs_in_this_R_process)
+        return(CPU_cache_topology)
+
+}
+## (the reading itself, from sysfs, each time it is called)
+fn_read_CPU_cache_topology_from_sysfs_each_time <-  function( sysfs_CPU_directory = "/sys/devices/system/cpu" ) {
 
         if (!identical(x = Sys.info()[["sysname"]], y = "Linux") || !dir.exists(paths = sysfs_CPU_directory)) {
               stop(paste0("fn_read_CPU_cache_topology_from_sysfs: the cache topology is read from Linux sysfs (", sysfs_CPU_directory,
@@ -139,26 +160,34 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
         }
         ##
         fn_read_first_line <-  function(file_path) {
+
               if (!file.exists(file_path)) return(NA_character_)
               first_line <-  tryCatch( expr  = readLines(con = file_path, n = 1, warn = FALSE),
                                        error = function(condition) character(0))
               if (length(x = first_line) == 0) return(NA_character_)
               return(first_line)
         }
+
         ##
         ## ---- online CPUs (hardware threads):
         ##
         online_CPU_list_string <-  fn_read_first_line(file_path = file.path(sysfs_CPU_directory, "online"))
         ##
         if (!is.na(x = online_CPU_list_string)) {
+
               online_CPU_ids <-  fn_parse_sysfs_CPU_list(CPU_list_string = online_CPU_list_string)
         } else {
+
               CPU_directory_names <-  list.files(path = sysfs_CPU_directory, pattern = "^cpu[0-9]+$")
-              online_CPU_ids <-  sort(x = as.numeric(sub(pattern = "^cpu", replacement = "", x = CPU_directory_names)))
+              online_CPU_ids <-  sort(x = as.numeric(sub( pattern = "^cpu",
+                                                          replacement = "",
+                                                          x = CPU_directory_names)))
         }
         ##
         if (length(x = online_CPU_ids) == 0) {
-              stop(paste0("fn_read_CPU_cache_topology_from_sysfs: no CPUs found under ", sysfs_CPU_directory, "."))
+              stop(paste0( "fn_read_CPU_cache_topology_from_sysfs: no CPUs found under ",
+                           sysfs_CPU_directory,
+                           "."))
         }
         ##
         ## ---- one row per (CPU, cache index), and the thread siblings of each CPU:
@@ -171,9 +200,13 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
 
               CPU_directory <-  file.path(sysfs_CPU_directory, paste0("cpu", CPU_id))
               ##
-              thread_siblings_list_string <-  fn_read_first_line(file_path = file.path(CPU_directory, "topology", "thread_siblings_list"))
+              thread_siblings_list_string <-  fn_read_first_line(file_path = file.path( CPU_directory,
+                                                                                        "topology",
+                                                                                        "thread_siblings_list"))
               if (is.na(x = thread_siblings_list_string)) {
-                    thread_siblings_list_string <-  fn_read_first_line(file_path = file.path(CPU_directory, "topology", "core_cpus_list"))
+                    thread_siblings_list_string <-  fn_read_first_line(file_path = file.path( CPU_directory,
+                                                                                              "topology",
+                                                                                              "core_cpus_list"))
               }
               if (is.na(x = thread_siblings_list_string)) {
                     thread_siblings_list_string <-  as.character(CPU_id)
@@ -181,7 +214,9 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
               }
               thread_siblings_list_strings[as.character(CPU_id)] <-  thread_siblings_list_string
               ##
-              cache_index_directories <-  list.files(path = file.path(CPU_directory, "cache"), pattern = "^index[0-9]+$", full.names = TRUE)
+              cache_index_directories <-  list.files( path = file.path(CPU_directory, "cache"),
+                                                      pattern = "^index[0-9]+$",
+                                                      full.names = TRUE)
               ##
               for (cache_index_directory in cache_index_directories) {
 
@@ -212,7 +247,8 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
                                           cache_size_string       = character(0),
                                           shared_CPU_list_string  = character(0),
                                           stringsAsFactors        = FALSE)
-              topology_notes <-  c(topology_notes, paste0("no L2 or L3 cache information was found under ", sysfs_CPU_directory))
+              topology_notes <-  c( topology_notes,
+                                    paste0("no L2 or L3 cache information was found under ", sysfs_CPU_directory))
 
         } else {
 
@@ -239,8 +275,10 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
         ##
         N_threads_per_each_core <-  sapply( X   = core_thread_sibling_sets,
                                             FUN = function(thread_siblings_list_string) {
+
                                                   sum(fn_parse_sysfs_CPU_list(CPU_list_string = thread_siblings_list_string) %in% online_CPU_ids)
                                             })
+
         N_threads_per_core <-  fn_most_common_value(values = N_threads_per_each_core)
         ##
         if (length(x = unique(x = N_threads_per_each_core)) > 1) {
@@ -259,20 +297,25 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
               L3_cache_table <-  L3_cache_table[!duplicated(x = L3_cache_table$shared_CPU_list_string), , drop = FALSE]
               N_L3_caches <-  nrow(x = L3_cache_table)
               ##
-              L3_cache_size_bytes_each_instance <-  sapply(X = L3_cache_table$cache_size_string, FUN = fn_parse_sysfs_cache_size_bytes)
+              L3_cache_size_bytes_each_instance <-  sapply( X = L3_cache_table$cache_size_string,
+                                                            FUN = fn_parse_sysfs_cache_size_bytes)
               L3_cache_size_bytes <-  min(L3_cache_size_bytes_each_instance)
               ##
               if (length(x = unique(x = L3_cache_size_bytes_each_instance)) > 1) {
                     topology_notes <-  c(topology_notes,
-                                         paste0("L3 caches have different sizes; the smallest (", L3_cache_size_bytes / 1024^2, " MiB) is used"))
+                                         paste0( "L3 caches have different sizes; the smallest (",
+                                                 L3_cache_size_bytes / 1024^2,
+                                                 " MiB) is used"))
               }
               ##
               N_cores_per_each_L3 <-  sapply( X   = L3_cache_table$shared_CPU_list_string,
                                               FUN = function(shared_CPU_list_string) {
+
                                                     CPU_ids_sharing_this_L3 <-  fn_parse_sysfs_CPU_list(CPU_list_string = shared_CPU_list_string)
                                                     CPU_ids_sharing_this_L3 <-  CPU_ids_sharing_this_L3[CPU_ids_sharing_this_L3 %in% online_CPU_ids]
                                                     length(x = unique(x = thread_siblings_list_strings[as.character(CPU_ids_sharing_this_L3)]))
                                               })
+
               N_cores_per_L3 <-  fn_most_common_value(values = N_cores_per_each_L3)
               ##
               if (length(x = unique(x = N_cores_per_each_L3)) > 1) {
@@ -299,12 +342,15 @@ fn_read_CPU_cache_topology_from_sysfs <-  function( sysfs_CPU_directory = "/sys/
 
               L2_cache_table <-  L2_cache_table[!duplicated(x = L2_cache_table$shared_CPU_list_string), , drop = FALSE]
               ##
-              L2_cache_size_bytes_each_instance <-  sapply(X = L2_cache_table$cache_size_string, FUN = fn_parse_sysfs_cache_size_bytes)
+              L2_cache_size_bytes_each_instance <-  sapply( X = L2_cache_table$cache_size_string,
+                                                            FUN = fn_parse_sysfs_cache_size_bytes)
               L2_cache_size_bytes <-  min(L2_cache_size_bytes_each_instance)
               ##
               if (length(x = unique(x = L2_cache_size_bytes_each_instance)) > 1) {
                     topology_notes <-  c(topology_notes,
-                                         paste0("L2 caches have different sizes; the smallest (", L2_cache_size_bytes / 1024, " KiB) is used"))
+                                         paste0( "L2 caches have different sizes; the smallest (",
+                                                 L2_cache_size_bytes / 1024,
+                                                 " KiB) is used"))
               }
 
         } else {
@@ -414,6 +460,7 @@ fn_compute_initial_N_chunks <-  function( M_bytes_per_chain,
         }
         ##
         fn_check_positive_number <-  function(value, value_name, whole_number = FALSE) {
+
               if (!is.numeric(value) || length(x = value) != 1 || !is.finite(x = value) || value <= 0 ||
                   (whole_number && value != round(x = value))) {
                     stop(paste0("fn_compute_initial_N_chunks: ", value_name, " must be a single positive ",
@@ -421,10 +468,15 @@ fn_compute_initial_N_chunks <-  function( M_bytes_per_chain,
               }
               invisible(TRUE)
         }
+
         ##
         fn_check_positive_number(value = M_bytes_per_chain,   value_name = "M_bytes_per_chain")
-        fn_check_positive_number(value = N_chains,            value_name = "N_chains",            whole_number = TRUE)
-        fn_check_positive_number(value = N_threads_per_chain, value_name = "N_threads_per_chain", whole_number = TRUE)
+        fn_check_positive_number( value = N_chains,
+                                  value_name = "N_chains",
+                                  whole_number = TRUE)
+        fn_check_positive_number( value = N_threads_per_chain,
+                                  value_name = "N_threads_per_chain",
+                                  whole_number = TRUE)
         ##
         if (!is.character(gradient_type) || length(x = gradient_type) != 1 || !(gradient_type %in% c("autodiff", "manual"))) {
               stop(paste0("fn_compute_initial_N_chunks: gradient_type must be \"autodiff\" (Stan gradients) or \"manual\"; got: ",
@@ -471,7 +523,8 @@ fn_compute_initial_N_chunks <-  function( M_bytes_per_chain,
               if (!isTRUE(CPU_cache_topology$thread_topology_available) && length(x = thread_topology_values_from_sysfs) > 0) {
                     warning(paste0("fn_compute_initial_N_chunks: the thread topology files (thread_siblings_list, core_cpus_list) were not ",
                                    "found under ", sysfs_CPU_directory, ", so each hardware thread was counted as its own core (",
-                                   paste(thread_topology_values_from_sysfs, collapse = " and "), " read as if the CPU had no SMT). ",
+                                   paste( thread_topology_values_from_sysfs,
+                                          collapse = " and "), " read as if the CPU had no SMT). ",
                                    "Give N_threads_per_core and N_cores_per_L3 as arguments if the CPU has SMT."))
               }
 
@@ -513,7 +566,8 @@ fn_compute_initial_N_chunks <-  function( M_bytes_per_chain,
         ##
         N_chunks_for_one_chunk_to_fit_S_target <-  ceiling(M_bytes_per_chain / S_target_bytes)
         ##
-        N_chunks <-  N_threads_per_chain * ceiling(max(N_chunks_for_one_chunk_to_fit_S_target, N_threads_per_chain) / N_threads_per_chain)
+        N_chunks <-  N_threads_per_chain * ceiling(max( N_chunks_for_one_chunk_to_fit_S_target,
+                                                        N_threads_per_chain) / N_threads_per_chain)
         ##
         N_hardware_threads <-  hardware_values$N_L3_caches * N_hardware_threads_per_L3
         ##
@@ -526,22 +580,29 @@ fn_compute_initial_N_chunks <-  function( M_bytes_per_chain,
         ## ---- one-line summary:
         ##
         S_target_description <-  if (gradient_type == "autodiff") {
-              paste0("S_L3 ", formatC(x = hardware_values$L3_cache_size_bytes / 1024^2, format = "f", digits = 2), " MiB / ",
+              paste0("S_L3 ", formatC( x = hardware_values$L3_cache_size_bytes / 1024^2,
+                                       format = "f",
+                                       digits = 2), " MiB / ",
                      N_active_threads_per_L3, " active threads per L3")
         } else {
-              paste0("S_L2 ", formatC(x = hardware_values$L2_cache_size_bytes / 1024, format = "f", digits = 0), " KiB / max(1, ",
+              paste0("S_L2 ", formatC( x = hardware_values$L2_cache_size_bytes / 1024,
+                                       format = "f",
+                                       digits = 0), " KiB / max(1, ",
                      N_active_threads_per_L3, " active threads per L3 / ", hardware_values$N_cores_per_L3, " cores per L3)")
         }
         ##
         message(colourise(paste0("initial N_chunks = ", N_chunks,
                                  " (", gradient_type, " gradient; M_bytes/chain = ", formatC(x = M_bytes_per_chain / 1e6, format = "f", digits = 1),
                                  " MB; N_threads = ", N_threads, " = ", N_chains, " chains x ", N_threads_per_chain,
-                                 " thread(s) per chain; S_target = ", formatC(x = S_target_bytes / 1024^2, format = "f", digits = 3),
+                                 " thread(s) per chain; S_target = ", formatC( x = S_target_bytes / 1024^2,
+                                                                               format = "f",
+                                                                               digits = 3),
                                  " MiB = ", S_target_description, "; ceil(M_bytes/chain / S_target) = ",
                                  N_chunks_for_one_chunk_to_fit_S_target, ")"), "cyan"))
         ##
         if (length(x = topology_notes) > 0) {
-              message(colourise(paste0("CPU cache topology notes: ", paste(topology_notes, collapse = "; ")), "cyan"))
+              message(colourise( paste0("CPU cache topology notes: ", paste(topology_notes, collapse = "; ")),
+                                 "cyan"))
         }
         ##
         return(list( N_chunks                                = N_chunks,
@@ -563,7 +624,6 @@ fn_compute_initial_N_chunks <-  function( M_bytes_per_chain,
                      topology_notes                          = topology_notes))
 
 }
-
 
 
 

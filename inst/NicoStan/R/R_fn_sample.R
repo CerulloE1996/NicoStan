@@ -258,8 +258,15 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   Stan models (Model_type = "Stan") through the BayesMVP provider.
 #'   (Model_type = "LC_MVOP" is supported as well, with binary and ordinal tests in any positions.)
 #' NicoStan alone does not supply model-specific column reordering.
-#'   Default (NULL, or not given): TRUE for Model_type = "LC_MVP" and "LC_MVOP", FALSE for every
-#'   other model.
+#'   Default (NULL, or not given): TRUE for Model_type = "LC_MVP" and "LC_MVOP" and for a Stan model
+#'   whose data has \code{latent_test_order} (see below), FALSE for every other model.
+#'
+#'   For a Stan model whose data has the field \code{latent_test_order} (a permutation of 1:n_tests
+#'   that the model uses as the order in which the tests' latent variables are conditioned on each
+#'   other, e.g. the four-class LC-MVOP model), the chosen order is written into
+#'   \code{latent_test_order} and nothing else is permuted: the data, the per-test entries and the
+#'   outputs all stay in the original test order, so the refusal below does not apply (the model
+#'   must declare \code{latent_test_order}; otherwise sample() stops).
 #'
 #'   For Model_type = "Stan" only \code{y} is permuted - BayesMVP cannot know which of
 #'   an external model's other data objects are test-indexed - so the option is REFUSED
@@ -301,10 +308,15 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #'   compute_tail_category_distance_from_latent_mean_per_test(), from the cutpoints and category probabilities;
 #'   for a binary test it equals the measure of the first rule), and orders the other tests by the greedy rule.
 #'   The first rule is for binary tests only (it stops for LC_MVOP); neither is available for a Stan model.
+#'   \code{"tests_missing_for_most_people_last_then_greedy_correlation_order"} (Stan models; the default for a
+#'   Stan model whose data has \code{latent_test_order}) places last the tests missing for more than half of the
+#'   people (a value of \code{y} that is NA or negative counts as missing, as in the four-class LC-MVOP model),
+#'   and keeps the greedy order of compute_optimal_test_order() within each of the two groups (the tests observed
+#'   for most people first, then the mostly missing ones).
 #' @param n_chunks_multiplier_for_PartialLog_log_scale_evaluation A positive whole number (default 3): every
 #'   PartialLog (log-scale) evaluation of the built-in LC_MVP / MVP and LC_MVOP / MVOP models (the fallback of
 #'   multi_attempts when the standard evaluation fails, and the evaluation forced by force_PartialLog = TRUE)
-#'   uses this many times the number of chunks of the fit (capped at N / SIMD width chunks), so that each
+#'   requests this many times the number of chunks of the fit, without a cap, so that each
 #'   PartialLog chunk, which needs about 3 times more memory per individual than a standard one, stays about the
 #'   same size in memory. The nuisance values and their gradient are re-laid out exactly between the two chunk
 #'   layouts. 1 = the number of chunks of the fit. Returned as
@@ -344,6 +356,8 @@ fn_tau_sampling_scale_gaussian_factor <- function(burnin_algorithm) {
 #' @param metric_pooled_offdiagonal_shrinkage Pooled metric estimator only: s in [0, 1] (NULL = 0, as before this option
 #'   existed), applied once to each pooled covariance proposal of the dense main metric as (1 - s) * cov + s * diag(diag(cov)).
 #'   0 keeps all off-diagonals unshrunk. Applies to the pre-burnin and the main burn-in; the value used is returned.
+#'   "adaptive" (the default of $sample()) estimates s from the pooled burn-in draws of all the chains
+#'   (the diagonal-target shrinkage of Schafer and Strimmer, 2005; R_fn_metric_adaptive_shrinkage.R).
 #' @param time_criterion_settings burnin_algorithm = "CHESSR_time" / "SNAPER_time" only: NULL (default) or a named list of the
 #'   time-to-target-ESS criterion settings (sampling timing probe, previous saved run(s), user-supplied times, ESS target); see
 #'   fn_default_time_criterion_settings() and R_fn_time_criterion.R. The quantities used, their sources, the probe result and
@@ -498,8 +512,22 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## tau_adaptation_block also NULL, LC_MVP / LC_MVOP use
                                         ## parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs(); see
                                         ## tau_adaptation_block):
-                                        ## (6 Oct 2026: every trajectory criterion computes its statistic over these families' main-block rows)
                                         interest_only = NULL,
+                                        ## the parameters of interest (parameter families) over which every
+                                        ## min-ESS-based efficiency measure of the summary is computed, whatever
+                                        ## the burn-in adaptation block; NULL = interest_only, else the built-in
+                                        ## LC_MVP / LC_MVOP set, else every main parameter:
+                                        parameter_families_of_interest_for_min_ESS = NULL,
+                                        ## every position-based trajectory criterion: TRUE = its statistic on
+                                        ## the reported quantities f(theta_main) instead of the main parameters
+                                        ## (main block only, interest_only NULL; see the R6 sample() method), f =
+                                        ## reported_quantities_function, NULL = the built-in one of LC_MVP /
+                                        ## LC_MVOP (fn_reported_quantities_function_for_built_in_LCMs()), each
+                                        ## quantity centred and scaled over the trajectory starts of the last n
+                                        ## burn-in iterations; FALSE (default) = the main parameters, unchanged:
+                                        tau_criteria_monitor_reported_quantities = FALSE,
+                                        reported_quantities_function = NULL,
+                                        reported_quantities_centre_and_scale_from_last_n_iterations = 10,
                                         tau_jitter_burnin,
                                         ##   tau_sampling_scale                   - multiply the adapted tau ONCE at the burn-in -> sampling switch,
                                         ##                                          only when tau was adapted with a fixed length (randomize_tau_burnin
@@ -512,7 +540,6 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          See docs/adaptation-notes.md.
                                         tau_sampling_scale = "none",
                                         ## sampling-phase jitter of the trajectory length: "uniform" (iid U(0, 2 tau)) or "halton" (the base-2
-                                        ## van der Corput sequence of the SNAPER-HMC authors' implementation; EHMC_random_draw_fns.hpp; 5 Oct 2026):
                                         tau_jitter_sampling_type = "uniform",
                                         bulk_local_tuner = NULL,
                                         ##   tau_adaptation_block                 - "main" (default; the behaviour before this option existed): the
@@ -520,11 +547,15 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          main + nuisance concatenated, still adapting the one joint tau.
                                         ##                                          EXPERIMENTAL, for testing only;
                                         ##                                          models without a sampled nuisance block fall back to "main".
-                                        ## tau_adaptation_block NULL (default, not set; 6 Oct 2026): "main"; for
-                                        ## LC_MVP / LC_MVOP with interest_only also NULL and tau adapted,
+                                        ##                                          "interest_only": the criterion uses only the main-block rows of the
+                                        ##                                          parameter families named in interest_only (needs interest_only).
+                                        ## tau_adaptation_block NULL (not set): "interest_only" whenever interest_only
+                                        ## is given; for LC_MVP / LC_MVOP with interest_only also NULL and tau adapted,
                                         ## interest_only = the parameters Se, Sp and prevalence depend on (LC_MVP
-                                        ## beta, p_raw; LC_MVOP beta, p_raw, C_unc_vec). An explicit "main" /
-                                        ## "joint" or interest_only always wins.
+                                        ## beta, p_raw; LC_MVOP beta, p_raw, C_unc_vec), so "interest_only" too;
+                                        ## "main" only for a model with no parameter families of interest at all.
+                                        ## interest_only given with "main" is "interest_only"; "joint" with
+                                        ## interest_only stops.
                                         ## tau_adaptation_block = "main",
                                         tau_adaptation_block = NULL,
                                         ## SpESS-R only (see the R6 sample() method): the largest number
@@ -532,6 +563,48 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ## bins decay lazily:
                                         SpESS_R_max_rows_fitted_per_update = 0,
                                         SpESS_R_bins_decay_lazily = FALSE,
+                                        ## SpESS-R only: the power of the soft minimum over the monitored
+                                        ## rows (see the R6 sample() method; 8 = the default):
+                                        SpESS_R_soft_minimum_power = 8,
+                                        ## SpESS-R only: the tau move (see the R6 sample() method):
+                                        SpESS_R_first_update_jumps_to_the_maximiser = FALSE,
+                                        SpESS_R_doubling_needs_evidence_on_updates_in_a_row = 1,
+                                        ## SpESS-R only, with a dense main metric: its statistics in the main
+                                        ## parameters' own coordinates (see the R6 sample() method):
+                                        SpESS_R_statistics_in_parameter_coordinates = FALSE,
+                                        ## SpESS-R only: the tau handed to sampling (see the R6 sample() method):
+                                        SpESS_R_sampling_tau_from_last_fraction_of_updates = 0,
+                                        ## SpESS-R only: the tau handed to sampling from the lengths that
+                                        ## maximised its criterion at its performed updates (see the R6
+                                        ## sample() method; NULL = off):
+                                        SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates = NULL,
+                                        ## SpESS-R only: the forgetting factor of its length bins (see the R6
+                                        ## sample() method; NULL = its own value):
+                                        SpESS_R_bin_forgetting_factor = NULL,
+                                        ## SpESS-R only: the variances its squared jumps are divided by (see the
+                                        ## R6 sample() method; 0 = the moving averages, as built):
+                                        SpESS_R_normalising_variances_from_last_n_updates = 0,
+                                        ## SpESS-R only: the factors on its linear and quadratic ESS fractions
+                                        ## (see the R6 sample() method; 1 = as built):
+                                        SpESS_R_linear_ESS_fraction_multiplier = 1,
+                                        SpESS_R_quadratic_ESS_fraction_multiplier = 1,
+                                        ## SpESS-R only: its quadratic part from the normal-mode spectral fit of
+                                        ## the squares (see the R6 sample() method; FALSE = as built):
+                                        SpESS_R_quadratic_part_normal_mode_spectral_fit = FALSE,
+                                        ## SpESS-R only (its update in R; needs the option above TRUE): its
+                                        ## quadratic part from the linear part's spectral mixture with the pair
+                                        ## modes (see the R6 sample() method; FALSE = as built):
+                                        SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes = FALSE,
+                                        ## SpESS-R only (its update in R): the target tau of each update, the
+                                        ## shortest candidate within that fraction of the largest objective (see
+                                        ## the R6 sample() method; NULL = off, the maximiser):
+                                        SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective = NULL,
+                                        ## SpESS-R only, with the reported quantities monitored (its update in
+                                        ## R): its linear part corrected by each reported quantity's integrated
+                                        ## autocorrelation time measured over the last that many burn-in
+                                        ## iterations (see the R6 sample() method; NULL = off, as built):
+                                        SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations =
+                                              NULL,
                                         ##   burnin_TBB_pool_equals_n_chains      - NULL defaults to TRUE for built-in models (separate OpenMP WCP teams).
                                         ##                                          Stan models FORCE FALSE, even if TRUE is supplied: nested TBB work
                                         ##                                          shares the n_threads_WCP_burnin * n_chains_burnin thread budget.
@@ -548,6 +621,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##
                                         clip_iter,
                                         clip_iter_tau,
+                                        metric_start_iter,
                                         ##
                                         n_refresh = NULL,
                                         use_proposed = TRUE,
@@ -601,7 +675,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##
                                         max_L,
                                         ##
-                                        n_nuisance_to_track = NULL,
+                                        nuisance_to_track = NULL,
                                         ##
                                         use_disk,
                                         use_disk_path = "/tmp/hmc_traces",
@@ -634,6 +708,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         diffusion_HMC_integrator = "kick_flow_kick",
                                         ##
                                         ## ---- burn-in adaptation settings (documented in $sample()):
+##
                                         tau_initial_moments_window_fraction = 0.5,
                                         tau_initial_moments_window_min_iter = 1,
                                         tau_adam_beta1 = NULL,
@@ -646,18 +721,33 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         tau_learning_rate_restart_at_metric_end = FALSE,
                                         eps_adam_reset_at_metric_end = TRUE,
                                         eps_learning_rate_restart_at_metric_end = TRUE,
+                                        calibrate_eps_on_sampling_chains_before_sampling = TRUE,
+                                        n_transitions_per_eps_calibration_block = 300,
+                                        n_eps_calibration_blocks = 4,
+                                        ## (NULL: never; c(lower, upper): see the documentation)
+                                        repeat_sampling_with_eps_refitted_if_mean_acceptance_outside = NULL,
+                                        n_eps_refits_and_repeated_samplings = 2,
+                                        set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains = FALSE,
+                                        fraction_of_burnin_iterations_at_end_used_for_sampling_eps = 0.5,
+                                        ## choose_threads_and_chunks_not_given_with_Paper_1_functions = TRUE,
+                                        ## time_rule_num_chunks_candidates_for_sampling = TRUE,
+                                        choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm = TRUE,
+                                        budget_of_the_layout_choice_in_lp_grad_calls = 2000,
+                                        fewest_seconds_of_the_budget_of_the_layout_choice = 0.5,
                                         rate_criterion_cost_offset_steps = 0,
                                         pooled_metric_warm_up = 8,
                                         pooled_metric_soft_full_weight_draws = NULL,
                                         pooled_metric_weight_k_draws = 5,
                                         pooled_metric_signal_to_noise_centred = FALSE,
                                         metric_update_rescales_eps_and_tau = TRUE,
+                                        # metric_update_rescales_eps_and_tau = FALSE,
                                         learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                         resident_burnin = TRUE,
                                         resident_burnin_joint_block = TRUE,
                                         tau_initial_resident_moments = TRUE,
                                         record_burnin_metric_nuisance_variance_quantiles_history = TRUE,
                                         burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step = FALSE,
+                                        Hessian_metric_offdiagonal_shrinkage = "adaptive",
                                         ## NULL = TRUE for the latent_trait model, FALSE for the others:
                                         autodiff_fallback = NULL,
                                         ##
@@ -708,6 +798,180 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 if (!is.logical(run_in_fresh_R_process) || length(run_in_fresh_R_process) != 1L || is.na(run_in_fresh_R_process)) {
                     stop("run_in_fresh_R_process must be TRUE or FALSE.")
                 }
+                if (!is.numeric(SpESS_R_soft_minimum_power) || length(SpESS_R_soft_minimum_power) != 1 ||
+                    !is.finite(SpESS_R_soft_minimum_power) || SpESS_R_soft_minimum_power <= 0) {
+                    stop("SpESS_R_soft_minimum_power must be one positive number (8 = the default).")
+                }
+                if (!is.logical(SpESS_R_first_update_jumps_to_the_maximiser) ||
+                    length(SpESS_R_first_update_jumps_to_the_maximiser) != 1 ||
+                    is.na(SpESS_R_first_update_jumps_to_the_maximiser)) {
+                    stop(paste0("SpESS_R_first_update_jumps_to_the_maximiser must be TRUE or FALSE (FALSE = the ",
+                                "default)."))
+                }
+                if (!is.numeric(SpESS_R_doubling_needs_evidence_on_updates_in_a_row) ||
+                    length(SpESS_R_doubling_needs_evidence_on_updates_in_a_row) != 1 ||
+                    !is.finite(SpESS_R_doubling_needs_evidence_on_updates_in_a_row) ||
+                    SpESS_R_doubling_needs_evidence_on_updates_in_a_row < 1 ||
+                    SpESS_R_doubling_needs_evidence_on_updates_in_a_row !=
+                          floor(SpESS_R_doubling_needs_evidence_on_updates_in_a_row)) {
+                    stop(paste0("SpESS_R_doubling_needs_evidence_on_updates_in_a_row must be one whole number ",
+                                "of at least 1 (1 = the default)."))
+                }
+                if (!is.logical(SpESS_R_statistics_in_parameter_coordinates) ||
+                    length(SpESS_R_statistics_in_parameter_coordinates) != 1 ||
+                    is.na(SpESS_R_statistics_in_parameter_coordinates)) {
+                    stop(paste0("SpESS_R_statistics_in_parameter_coordinates must be TRUE or FALSE (FALSE = the ",
+                                "default)."))
+                }
+                if (!is.numeric(SpESS_R_sampling_tau_from_last_fraction_of_updates) ||
+                    length(SpESS_R_sampling_tau_from_last_fraction_of_updates) != 1 ||
+                    !is.finite(SpESS_R_sampling_tau_from_last_fraction_of_updates) ||
+                    SpESS_R_sampling_tau_from_last_fraction_of_updates < 0 ||
+                    SpESS_R_sampling_tau_from_last_fraction_of_updates > 1) {
+                    stop(paste0("SpESS_R_sampling_tau_from_last_fraction_of_updates must be one number from ",
+                                "0 to 1 (0 = the default)."))
+                }
+                if (!is.null(SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates) &&
+                    (!is.numeric(SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates) ||
+                     length(SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates) != 1 ||
+                     !is.finite(SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates) ||
+                     SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates <= 0 ||
+                     SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates > 1)) {
+                    stop(paste0("SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates must be ",
+                                "NULL (the default: off) or one number above 0 and at most 1."))
+                }
+                ## (the two options each set the tau handed to sampling: at most one of them may be set)
+                if (!is.null(SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates) &&
+                    SpESS_R_sampling_tau_from_last_fraction_of_updates > 0) {
+                    stop(paste0("SpESS_R_sampling_tau_from_last_fraction_of_updates and ",
+                                "SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates each set the ",
+                                "tau handed to sampling: set at most one of them (the other at its default, 0 ",
+                                "or NULL respectively)."))
+                }
+                if (!is.null(SpESS_R_bin_forgetting_factor) &&
+                    (!is.numeric(SpESS_R_bin_forgetting_factor) || length(SpESS_R_bin_forgetting_factor) != 1 ||
+                     !is.finite(SpESS_R_bin_forgetting_factor) || SpESS_R_bin_forgetting_factor <= 0 ||
+                     SpESS_R_bin_forgetting_factor > 1)) {
+                    stop(paste0("SpESS_R_bin_forgetting_factor must be NULL (the default: SpESS-R's own 0.99) ",
+                                "or one number above 0 and at most 1."))
+                }
+                if (!is.numeric(SpESS_R_normalising_variances_from_last_n_updates) ||
+                    length(SpESS_R_normalising_variances_from_last_n_updates) != 1 ||
+                    !is.finite(SpESS_R_normalising_variances_from_last_n_updates) ||
+                    SpESS_R_normalising_variances_from_last_n_updates < 0 ||
+                    SpESS_R_normalising_variances_from_last_n_updates !=
+                          round(SpESS_R_normalising_variances_from_last_n_updates)) {
+                    stop(paste0("SpESS_R_normalising_variances_from_last_n_updates must be one whole number ",
+                                ">= 0 (0 = the default: the moving averages of every update)."))
+                }
+                for (multiplier_name in c("SpESS_R_linear_ESS_fraction_multiplier",
+                                          "SpESS_R_quadratic_ESS_fraction_multiplier")) {
+                    multiplier_value <-  get(multiplier_name)
+                    if (!is.numeric(multiplier_value) || length(multiplier_value) != 1 ||
+                        is.na(multiplier_value) || !(multiplier_value > 0)) {
+                        stop(paste0(multiplier_name, " must be one number above 0 (1 = the default; Inf leaves ",
+                                    "that part out of SpESS-R's soft minimum)."))
+                    }
+                }
+                if (!is.logical(SpESS_R_quadratic_part_normal_mode_spectral_fit) ||
+                    length(SpESS_R_quadratic_part_normal_mode_spectral_fit) != 1 ||
+                    is.na(SpESS_R_quadratic_part_normal_mode_spectral_fit)) {
+                    stop(paste0("SpESS_R_quadratic_part_normal_mode_spectral_fit must be TRUE or FALSE (FALSE = ",
+                                "the default)."))
+                }
+                if (!is.logical(SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes) ||
+                    length(SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes) != 1 ||
+                    is.na(SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes)) {
+                    stop(paste0("SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes must be TRUE or ",
+                                "FALSE (FALSE = the default)."))
+                }
+                ## (the pair-mode quadratic part replaces the normal-mode fit of the squares in SpESS-R's
+                ##  update in R, so it needs that option)
+                if (isTRUE(SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes) &&
+                    !isTRUE(SpESS_R_quadratic_part_normal_mode_spectral_fit)) {
+                    stop(paste0("SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes = TRUE needs ",
+                                "SpESS_R_quadratic_part_normal_mode_spectral_fit = TRUE: the pair-mode ",
+                                "quadratic part replaces the normal-mode fit of the squares in SpESS-R's ",
+                                "update in R, which that option selects."))
+                }
+                if (!is.null(SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective) &&
+                    (!is.numeric(SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective) ||
+                     length(SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective) != 1 ||
+                     !is.finite(SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective) ||
+                     SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective <= 0 ||
+                     SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective >= 0.5)) {
+                    stop(paste0("SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective must be NULL ",
+                                "(the default: off) or one number above 0 and below 0.5."))
+                }
+                if (!is.null(SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations) &&
+                    (!is.numeric(SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations) ||
+                     length(SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations) != 1 ||
+                     !is.finite(SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations) ||
+                     SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations < 10 ||
+                     SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations !=
+                           floor(SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations))) {
+                    stop(paste0("SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations must be ",
+                                "NULL (the default: off) or one whole number of burn-in iterations, 10 or more."))
+                }
+                if (is.infinite(SpESS_R_linear_ESS_fraction_multiplier) &&
+                    is.infinite(SpESS_R_quadratic_ESS_fraction_multiplier)) {
+                    stop(paste0("SpESS_R_linear_ESS_fraction_multiplier and ",
+                                "SpESS_R_quadratic_ESS_fraction_multiplier cannot both be Inf (that would leave ",
+                                "both parts out)."))
+                }
+                ## ---- tau_criteria_monitor_reported_quantities: TRUE or FALSE; with TRUE and tau adapted (with
+                ##      manual tau the option is unused), its function (NULL = the built-in one, resolved
+                ##      below once the model is initialised) and its window, and neither the joint block nor
+                ##      interest_only (the reported quantities replace the monitored rows):
+                if (!is.logical(tau_criteria_monitor_reported_quantities) ||
+                    length(tau_criteria_monitor_reported_quantities) != 1 ||
+                    is.na(tau_criteria_monitor_reported_quantities)) {
+                    stop(paste0("tau_criteria_monitor_reported_quantities must be TRUE or FALSE (FALSE = the ",
+                                "default)."))
+                }
+                if (isTRUE(tau_criteria_monitor_reported_quantities) && !isTRUE(manual_tau)) {
+                    if (!is.null(reported_quantities_function) && !is.function(reported_quantities_function)) {
+                        stop(paste0("reported_quantities_function must be NULL (the built-in reported ",
+                                    "quantities of LC_MVP / LC_MVOP) or a function of a matrix of main ",
+                                    "parameters (n_params_main rows x chains) that returns the reported ",
+                                    "quantities (rows, with rownames, x chains)."))
+                    }
+                    if (!is.numeric(reported_quantities_centre_and_scale_from_last_n_iterations) ||
+                        length(reported_quantities_centre_and_scale_from_last_n_iterations) != 1 ||
+                        !is.finite(reported_quantities_centre_and_scale_from_last_n_iterations) ||
+                        reported_quantities_centre_and_scale_from_last_n_iterations < 1 ||
+                        reported_quantities_centre_and_scale_from_last_n_iterations !=
+                              floor(reported_quantities_centre_and_scale_from_last_n_iterations)) {
+                        stop(paste0("reported_quantities_centre_and_scale_from_last_n_iterations must be one ",
+                                    "whole number of at least 1 (10 = the default)."))
+                    }
+                    if (identical(tau_adaptation_block, "joint")) {
+                        stop(paste0("tau_criteria_monitor_reported_quantities = TRUE replaces the parameters ",
+                                    "that the tau criterion monitors by the reported quantities of the main ",
+                                    "block; use it with tau_adaptation_block = \"main\" (or NULL), not ",
+                                    "\"joint\"."))
+                    }
+                    if (!is.null(interest_only)) {
+                        stop(paste0("tau_criteria_monitor_reported_quantities = TRUE replaces the parameters ",
+                                    "that the tau criterion monitors by the reported quantities; use it with ",
+                                    "interest_only = NULL."))
+                    }
+                }
+                ## ---- the retired burnin_algorithm values are no longer selectable (their names normalised as by
+                ##      fn_normalise_burnin_algorithm(); an unknown name still stops there, below, as before):
+                retired_burnin_algorithms_not_selectable <-  c("LQ_ESSR", "L_ESSR_length_response",
+                                                               "LQ_ESSR_length_response", "LQ_ESSR_spectral",
+                                                               "LQ_ESSR_spectral_long_bin_memory")
+                burnin_algorithm_requested_normalised <-  tryCatch(
+                      fn_normalise_burnin_algorithm(if_null_then_set_to(burnin_algorithm, "CHESSR")),
+                      error = function(error_object) NA_character_)
+                if (isTRUE(burnin_algorithm_requested_normalised %in% retired_burnin_algorithms_not_selectable)) {
+                    stop(paste0("burnin_algorithm = \"", burnin_algorithm, "\" is retired and can no longer be ",
+                                "selected (retired: ", paste(retired_burnin_algorithms_not_selectable,
+                                                             collapse = ", "),
+                                "). SpESS-R (\"LQ_ESSR_spec_bins99_evid_expand\", also \"SpESSR\"), its ESJD ",
+                                "blends and \"LQ_ESSR_spec_bins99_evid_expand_jump_accept\" remain."))
+                }
                 ## Pass only supplied arguments, preserving defaults and missing-argument handling in the sampler.
                 if (isTRUE(x = run_in_fresh_R_process)) {
                     argument_names <-  names(as.list(match.call())[-1L])
@@ -740,6 +1004,34 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     ## and for a NULL test_order_rule_for_reorder_cols_MVP (the default, not set):
                     if (is.null(test_order_rule_for_reorder_cols_MVP)) {
                         argument_names <-  setdiff(argument_names, "test_order_rule_for_reorder_cols_MVP")
+                    }
+                    ## and for tau_criteria_monitor_reported_quantities = FALSE (the default), with its two
+                    ## settings, which are then unused:
+                    if (!isTRUE(tau_criteria_monitor_reported_quantities)) {
+                        reported_quantities_argument_names <-  c(
+                              "tau_criteria_monitor_reported_quantities",
+                              "reported_quantities_function",
+                              "reported_quantities_centre_and_scale_from_last_n_iterations")
+                        argument_names <-  setdiff(argument_names, reported_quantities_argument_names)
+                    }
+                    ## and for a NULL SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates (the
+                    ## default, off), so that a child process whose installed build has no such argument still
+                    ## runs:
+                    if (is.null(SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates)) {
+                        argument_names <-  setdiff(
+                              argument_names, "SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates")
+                    }
+                    ## and the same for a NULL SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective
+                    ## (the default, off):
+                    if (is.null(SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective)) {
+                        argument_names <-  setdiff(
+                              argument_names, "SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective")
+                    }
+                    ## and the same for a NULL
+                    ## SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations (the default, off):
+                    if (is.null(SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations)) {
+                        argument_names <-  setdiff(argument_names,
+                              "SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations")
                     }
                     fit_frame <-  environment()
                     fit_arguments <-  setNames(lapply(argument_names, function(argument_name) {
@@ -789,49 +1081,94 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ## unconstrained dimension, not from Model_type, so it stays right if a skeleton
                 ## changes. An explicit n_nuisance_to_track always wins.
                 ##
-                fn_resolve_n_nuisance_to_track <- function(user_value, sample_nuisance, n_nuisance, n_params_main, bs_model) {
-
-                      if (!is.null(user_value)) {
-                            if (!is.numeric(user_value) || length(user_value) != 1L || !is.finite(user_value)) {
-                              stop("'n_nuisance_to_track' must be NULL (automatic), 0 (do not keep the nuisance trace) ",
-                                   "or n_nuisance = ", n_nuisance, " (keep all of it).")
-                            }
-                            user_value <- as.integer(round(user_value))
-                            ##
-                            ## There is no such thing as a PARTIAL nuisance trace: the store grows the buffer to
-                            ## the full length on the first write (so that its one reader, param_constrain, can
-                            ## rebuild the complete vector), which means e.g. n_nuisance_to_track = 1 silently
-                            ## costs exactly as much as tracking all 60,000 coordinates. Refuse it rather than
-                            ## let a value that LOOKS cheap be the most expensive setting there is:
-                            if (user_value != 0L && user_value != n_nuisance) {
-                              stop("'n_nuisance_to_track' = ", user_value, " is not supported: the nuisance trace is ",
-                                   "all-or-nothing (a partial buffer is grown to the full ", n_nuisance, " on the first ",
-                                   "write, so it would cost the same as keeping everything). Use 0 to keep none, ",
-                                   n_nuisance, " (= n_nuisance) to keep all, or NULL to decide automatically.")
-                            }
-                            return(user_value)
+                ## ---- (the nuisance values the caller asked to keep: the BLOCK NAMES become positions into the
+                ##      nuisance vector, 0-based, which is how the sampler stores them) ------------------------
+                fn_positions_of_the_nuisance_values_to_track <- function(nuisance_to_track,
+                                                                         nuisance_blocks,
+                                                                         Stan_data_list,
+                                                                         n_nuisance) {
+                      ## (none: "none" or 0. NULL, the default, keeps every block NicoStan holds, in memory and
+                      ##  never on disk, which is what a fit returns when the user named the nuisance blocks)
+                      if (is.character(nuisance_to_track) && length(nuisance_to_track) == 1 &&
+                          identical(nuisance_to_track, "none")) {
+                            return(integer(0))
                       }
-                      ##
-                      if (!isTRUE(sample_nuisance) || n_nuisance == 0) return(0L)
-                      ##
-                      constrain_unc_num <- tryCatch(bs_model$param_unc_num(), error = function(e) NA_integer_)
-                      ##
-                      ## unknown dimension -> keep the trace (the safe direction); otherwise keep it
-                      ## only when the model contains the nuisance block:
-                      needs_trace <- is.na(constrain_unc_num) || (constrain_unc_num != n_params_main)
-                      ##
-                      if (needs_trace) {
-                            message("n_nuisance_to_track: the model used for param_constrain declares the ",
-                                    n_nuisance, "-coordinate nuisance block - keeping the nuisance trace.")
-                            n_nuisance
-                      } else {
-                            message("n_nuisance_to_track: the model used for param_constrain has ", constrain_unc_num,
-                                    " unconstrained coordinates (main only), so the ", n_nuisance,
-                                    "-coordinate nuisance trace has no consumer - NOT storing it. ",
-                                    "Pass n_nuisance_to_track = n_nuisance to keep it anyway.")
-                            0L
+                      if (is.numeric(nuisance_to_track) && length(nuisance_to_track) == 1 &&
+                          is.finite(nuisance_to_track) && nuisance_to_track == 0) {
+                            return(integer(0))
                       }
-
+                      ## (a count is never a setting the user gives: the blocks are NAMED, never counted)
+                      if (!is.null(nuisance_to_track) && is.numeric(nuisance_to_track)) {
+                            stop(paste0("$sample(nuisance_to_track = ): give the NAMES of the nuisance blocks to ",
+                                        "keep, e.g. c(\"beta_z\", \"C_raw\"), or \"none\"; never a count."))
+                      }
+                      if (!is.null(nuisance_to_track)) {
+                            stopifnot(is.character(nuisance_to_track), length(nuisance_to_track) >= 1)
+                      }
+                      if (is.null(nuisance_blocks) || nrow(nuisance_blocks) == 0) {
+                            if (is.null(nuisance_to_track)) return(integer(0))
+                            stop(paste0("$sample(nuisance_to_track = ): this model has no nuisance blocks held ",
+                                        "by NicoStan, so there is nothing to keep."))
+                      }
+                      if (is.null(nuisance_to_track)) {
+                            message(paste0("nuisance_to_track: keeping all ", n_nuisance, " nuisance values of ",
+                                           "every draw in memory (never on disk), the blocks ",
+                                           paste(nuisance_blocks$name, collapse = ", "), "."))
+                            return(as.integer(seq_len(n_nuisance) - 1L))
+                      }
+                      names_asked_for <- unique(nuisance_to_track)
+                      names_not_held <- setdiff(names_asked_for, nuisance_blocks$name)
+                      if (length(names_not_held) > 0) {
+                            stop(paste0("$sample(nuisance_to_track = ): ", paste(names_not_held, collapse = ", "),
+                                        " are not nuisance blocks held by NicoStan; the blocks are ",
+                                        paste(nuisance_blocks$name, collapse = ", "), "."))
+                      }
+                      ## (every block asked for: the whole nuisance vector in its own order, so that no block size
+                      ##  has to be worked out - a block whose size is set in the transformed data cannot be, as
+                      ##  in the network meta-analysis models, and this is the case that would otherwise stop the
+                      ##  sampler for the one setting that keeps everything)
+                      if (setequal(names_asked_for, nuisance_blocks$name)) {
+                            message(paste0("nuisance_to_track: keeping all ", n_nuisance, " nuisance values of ",
+                                           "every draw in memory (never on disk), the blocks ",
+                                           paste(names_asked_for, collapse = ", "), "."))
+                            return(as.integer(seq_len(n_nuisance) - 1L))
+                      }
+                      ## (a subset: each block's size from the data, exactly as the model's own
+                      ##  nicostan_offset_of_<block> is built - the offsets are the running sum of the sizes in the
+                      ##  declared order. A size that cannot be worked out from the data stops here, naming the
+                      ##  block, as fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_data() does.)
+                      positions_of_every_block <- list()
+                      offset_running <- 0
+                      for (block_index in seq_len(nrow(nuisance_blocks))) {
+                            size_of_the_block <- tryCatch(
+                                  eval(parse(text = nuisance_blocks$terms[block_index]),
+                                       envir = Stan_data_list) *
+                                  eval(parse(text = nuisance_blocks$values_per_term[block_index]),
+                                       envir = Stan_data_list),
+                                  error = function(e) NA_real_)
+                            if (!is.numeric(size_of_the_block) || length(size_of_the_block) != 1 ||
+                                is.na(size_of_the_block) || size_of_the_block != round(size_of_the_block)) {
+                                  stop(paste0("$sample(nuisance_to_track = ): the size of the nuisance block ",
+                                              nuisance_blocks$name[block_index], " (",
+                                              nuisance_blocks$terms[block_index], " x ",
+                                              nuisance_blocks$values_per_term[block_index],
+                                              ") cannot be worked out from the data, so a SUBSET of the blocks ",
+                                              "cannot be given; name every block to keep them all."))
+                            }
+                            positions_of_every_block[[nuisance_blocks$name[block_index]]] <-
+                                  offset_running + seq_len(size_of_the_block) - 1L
+                            offset_running <- offset_running + size_of_the_block
+                      }
+                      positions <- sort(unique(unlist(positions_of_every_block[names_asked_for],
+                                                   use.names = FALSE)))
+                      if (any(positions < 0 | positions >= n_nuisance)) {
+                            stop(paste0("$sample(nuisance_to_track = ): a position lies outside the ", n_nuisance,
+                                        "-value nuisance vector; the blocks and the compiled model disagree."))
+                      }
+                      message(paste0("nuisance_to_track: keeping ", length(positions), " of the ", n_nuisance,
+                                     " nuisance values of every draw in memory (never on disk), the blocks ",
+                                     paste(names_asked_for, collapse = ", "), "."))
+                      return(as.integer(positions))
                 }
                 ##
                 if_null_then_set_to <- function(x, 
@@ -966,6 +1303,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 gap <- if_null_then_set_to(gap, clip_iter + clip_iter_tau)
                 ##
+                ## (whether the sampling chains and superchains were given in $sample(): when they were not, Paper
+                ##  1's check of the sampling layout chooses the chains, and the superchains follow them)
+                n_chains_sampling_given_in_sample <-  !is.null(n_chains_sampling)
+                n_superchains_given_in_sample <-  !is.null(n_superchains)
                 n_chains_sampling <- if_null_then_set_to(n_chains_sampling, parallel::detectCores())
                 ##
                 # ## per-chain jitter of the inherited nuisance init (see cpp_fn_post_burnin_prep_for_sampling);
@@ -998,7 +1339,6 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 n_iter <- if_null_then_set_to(n_iter, 1000)
                 ##
                 ## adapt_delta default 0.80 (Stan's robustness choice; the Paper 2 Stan benchmarks ran at 0.80, so the
-                ## package default stays matched to them, 5 Oct 2026). Between 4 and 5 Oct 2026 the default was 0.70:
                 ## with the step-size ADAM reset and learning-rate restart at the final metric update
                 ## (R_fn_init_and_run_burnin_CHESS.R), 27 seeds on the LC-MVP at N = 10,000 gave at b125 time to the
                 ## target min ESS 0.84 [0.74, 0.95] of the 0.80 default, bulk ESS per gradient 1.23 [1.06, 1.43] and
@@ -1073,7 +1413,6 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 manual_tau <- if_null_then_set_to(manual_tau, FALSE)
                 tau_if_manual <- if_null_then_set_to(tau_if_manual, 3.0)
                 ##
-                ## ---- tau_adaptation_block NULL (not set; 6 Oct 2026): "main". For the built-in latent-class
                 ##      models (LC_MVP, LC_MVOP), with interest_only also NULL and tau adapted (manual_tau =
                 ##      FALSE), the criterion monitors the parameters Se, Sp and prevalence depend on
                 ##      (parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs()), restricted below to the
@@ -1083,11 +1422,57 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 interest_only_from_built_in_default_for_LCMs <-  FALSE
                 if (is.null(tau_adaptation_block)) {
                       tau_adaptation_block <-  "main"
-                      if (is.null(interest_only) && !isTRUE(manual_tau)) {
+                      ## if (is.null(interest_only) && !isTRUE(manual_tau)) {
+                      ## (not with tau_criteria_monitor_reported_quantities = TRUE: the reported quantities
+                      ##  replace the monitored rows)
+                      if (is.null(interest_only) && !isTRUE(manual_tau) &&
+                          !isTRUE(tau_criteria_monitor_reported_quantities)) {
                             interest_only <-  parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs(
                                   Model_type = init_object$Model_type)
                             interest_only_from_built_in_default_for_LCMs <-  !is.null(interest_only)
                       }
+                }
+                ##
+                ## ---- tau_adaptation_block "interest_only": the criterion uses only the main-block rows of the
+                ##      parameter families named in interest_only. It is the block whenever interest_only is given
+                ##      (with "joint" it stops below); it needs interest_only. The interest rows are rows of the main
+                ##      block, so the burn-in runs the main block's route with only those rows in the criterion:
+                if (!is.null(interest_only) && !identical(tau_adaptation_block, "joint")) {
+                      tau_adaptation_block <-  "interest_only"
+                }
+                if (identical(tau_adaptation_block, "interest_only") && is.null(interest_only)) {
+                      stop(paste0("tau_adaptation_block = \"interest_only\" needs interest_only, the parameter ",
+                                  "families of interest (e.g. interest_only = c(\"beta_mu\", \"C_raw_vec\"))."))
+                }
+                tau_adaptation_block_as_given <-  tau_adaptation_block
+                if (identical(tau_adaptation_block, "interest_only")) {
+                      tau_adaptation_block <-  "main"
+                }
+                ##
+                ## ---- the parameters of interest, over which every min-ESS-based efficiency measure of the
+                ##      summary is computed, whatever the burn-in adaptation block (main, joint or
+                ##      interest_only), so that fits with different blocks are compared on the same parameters:
+                ##      as given; NULL = interest_only when it is given; otherwise, for LC_MVP / LC_MVOP, the
+                ##      parameters Se, Sp and prevalence depend on; otherwise NULL (every main parameter). The
+                ##      summary also reports the min ESS over every main parameter (the parameters block except
+                ##      the nuisance parameters):
+                ##
+                if (is.null(parameter_families_of_interest_for_min_ESS)) {
+                      if (!is.null(interest_only)) {
+                            parameter_families_of_interest_for_min_ESS <-  interest_only
+                      } else {
+                            parameter_families_of_interest_for_min_ESS <-
+                                  parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs(
+                                        Model_type = init_object$Model_type)
+                      }
+                }
+                if (!is.null(parameter_families_of_interest_for_min_ESS) &&
+                    (!is.character(parameter_families_of_interest_for_min_ESS) ||
+                     length(parameter_families_of_interest_for_min_ESS) == 0 ||
+                     anyNA(parameter_families_of_interest_for_min_ESS))) {
+                      stop(paste0("parameter_families_of_interest_for_min_ESS must be NULL or a character ",
+                                  "vector of parameter families (the names before \"[\" or \".\"), e.g. ",
+                                  "c(\"beta\", \"p_raw\")."))
                 }
                 ##
                 ## ---- Trajectory-length adaptation selected by burnin_algorithm.
@@ -1198,10 +1583,77 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 # if (!is.character(eps_acceptance_mean) || length(eps_acceptance_mean) != 1 || !eps_acceptance_mean %in% c("harmonic", "arithmetic")) {
                 #     stop(paste0("eps_acceptance_mean must be 'harmonic' or 'arithmetic'; got: ", paste(as.character(eps_acceptance_mean), collapse = ", ")))
                 # }
-                if (!is.character(eps_acceptance_mean) || length(eps_acceptance_mean) != 1 || !eps_acceptance_mean %in% c("harmonic", "arithmetic", "geometric")) {
-                    stop(paste0("eps_acceptance_mean must be 'harmonic', 'arithmetic' or 'geometric'; got: ", paste(as.character(eps_acceptance_mean), collapse = ", ")))
+                # if (!is.character(eps_acceptance_mean) || length(eps_acceptance_mean) != 1 || !eps_acceptance_mean %in% c("harmonic", "arithmetic", "geometric")) {
+                #     stop(paste0("eps_acceptance_mean must be 'harmonic', 'arithmetic' or 'geometric'; got: ", paste(as.character(eps_acceptance_mean), collapse = ", ")))
+                # }
+                ## (the harmonic mean of the chains' acceptance, in the burn-in AND in the step-size calibration on the
+                ##  sampling chains, is the only one allowed: it is the fix that made every check against cmdstanr pass
+                ##  MAKE SURE THATS ENFORCED")
+                if (!is.character(eps_acceptance_mean) || length(eps_acceptance_mean) != 1 || !identical(eps_acceptance_mean, "harmonic")) {
+                    stop(paste0("eps_acceptance_mean must be 'harmonic' (the harmonic mean is enforced everywhere); got: ",
+                                paste(as.character(eps_acceptance_mean), collapse = ", ")))
                 }
                 ##
+                if (!is.logical(calibrate_eps_on_sampling_chains_before_sampling) ||
+                    length(calibrate_eps_on_sampling_chains_before_sampling) != 1 ||
+                    is.na(calibrate_eps_on_sampling_chains_before_sampling)) {
+                    stop("calibrate_eps_on_sampling_chains_before_sampling must be a single TRUE or FALSE.")
+                }
+                if (!is.null(repeat_sampling_with_eps_refitted_if_mean_acceptance_outside)) {
+                    bounds <-  repeat_sampling_with_eps_refitted_if_mean_acceptance_outside
+                    if (!is.numeric(bounds) || (length(bounds) != 2) || any(!is.finite(bounds)) ||
+                        !(bounds[1] > 0) || !(bounds[2] < 1) || !(bounds[1] < bounds[2])) {
+                        stop(paste0("repeat_sampling_with_eps_refitted_if_mean_acceptance_outside must be NULL ",
+                                    "or two numbers, lower < upper, in (0, 1)."))
+                    }
+                    if (!isTRUE(calibrate_eps_on_sampling_chains_before_sampling)) {
+                        stop(paste0("repeat_sampling_with_eps_refitted_if_mean_acceptance_outside needs ",
+                                    "calibrate_eps_on_sampling_chains_before_sampling = TRUE (its last point is ",
+                                    "one of the two points of the refit)."))
+                    }
+                    if (!is.numeric(n_eps_refits_and_repeated_samplings) ||
+                        (length(n_eps_refits_and_repeated_samplings) != 1) ||
+                        !(n_eps_refits_and_repeated_samplings >= 1) ||
+                        (n_eps_refits_and_repeated_samplings != round(n_eps_refits_and_repeated_samplings))) {
+                        stop("n_eps_refits_and_repeated_samplings must be one whole number >= 1.")
+                    }
+                }
+                if (!is.logical(set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains) ||
+                    length(set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains) != 1 ||
+                    is.na(set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains)) {
+                    stop(paste0("set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains must be a ",
+                                "single TRUE or FALSE."))
+                }
+                if (isTRUE(set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains) &&
+                    isTRUE(calibrate_eps_on_sampling_chains_before_sampling)) {
+                    stop(paste0("Set either calibrate_eps_on_sampling_chains_before_sampling or ",
+                                "set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains to TRUE, ",
+                                "not both."))
+                }
+                if (!is.numeric(fraction_of_burnin_iterations_at_end_used_for_sampling_eps) ||
+                    length(fraction_of_burnin_iterations_at_end_used_for_sampling_eps) != 1 ||
+                    !is.finite(fraction_of_burnin_iterations_at_end_used_for_sampling_eps) ||
+                    (fraction_of_burnin_iterations_at_end_used_for_sampling_eps <= 0) ||
+                    (fraction_of_burnin_iterations_at_end_used_for_sampling_eps > 1)) {
+                    stop("fraction_of_burnin_iterations_at_end_used_for_sampling_eps must be in (0, 1].")
+                }
+                ## if (!is.logical(choose_threads_and_chunks_not_given_with_Paper_1_functions) ||
+                ##     length(choose_threads_and_chunks_not_given_with_Paper_1_functions) != 1 ||
+                ##     is.na(choose_threads_and_chunks_not_given_with_Paper_1_functions)) {
+                ##     stop(paste0("choose_threads_and_chunks_not_given_with_Paper_1_functions must be a single ",
+                ##                 "TRUE or FALSE."))
+                ## }
+                ## if (!is.logical(time_rule_num_chunks_candidates_for_sampling) ||
+                ##     length(time_rule_num_chunks_candidates_for_sampling) != 1 ||
+                ##     is.na(time_rule_num_chunks_candidates_for_sampling)) {
+                ##     stop("time_rule_num_chunks_candidates_for_sampling must be a single TRUE or FALSE.")
+                ## }
+                if (!is.logical(choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm) ||
+                    length(choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm) != 1 ||
+                    is.na(choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm)) {
+                    stop(paste0("choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm must be a single ",
+                                "TRUE or FALSE."))
+                }
                 if (!is.logical(tau_weight_by_p_jump) || length(tau_weight_by_p_jump) != 1 || is.na(tau_weight_by_p_jump)) {
                     stop("tau_weight_by_p_jump must be a single TRUE or FALSE.")
                 }
@@ -1288,8 +1740,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 metric_type_main <- if_null_then_set_to(metric_type_main, "Empirical")
                 metric_shape_main <- if_null_then_set_to(metric_shape_main, "diag")
-                ratio_M_main <- if_null_then_set_to(ratio_M_main, 0.25)
-                interval_width_main <- if_null_then_set_to(interval_width_main, 10)
+                ## ratio_M_main <- if_null_then_set_to(ratio_M_main, 0.25)
+                ratio_M_main <- if_null_then_set_to(ratio_M_main, 0.90)
+                ## interval_width_main <- if_null_then_set_to(interval_width_main, 10)
+                interval_width_main <- if_null_then_set_to(interval_width_main, 1)
                 metric_pooled_offdiagonal_shrinkage_resolution <- fn_resolve_metric_pooled_offdiagonal_shrinkage(
                     metric_pooled_offdiagonal_shrinkage = metric_pooled_offdiagonal_shrinkage,
                     metric_estimator = metric_estimator,
@@ -1298,11 +1752,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 metric_type_nuisance <- if_null_then_set_to(metric_type_nuisance, "Empirical")
                 metric_shape_nuisance <- if_null_then_set_to(metric_shape_nuisance, "diag")
-                ratio_M_nuisance <- if_null_then_set_to(ratio_M_nuisance, 0.25)
-                interval_width_nuisance <- if_null_then_set_to(interval_width_nuisance, 10)
+                ## ratio_M_nuisance <- if_null_then_set_to(ratio_M_nuisance, 0.25)
+                ratio_M_nuisance <- if_null_then_set_to(ratio_M_nuisance, 0.90)
+                # interval_width_nuisance <- if_null_then_set_to(interval_width_nuisance, 10)
+                ## (the nuisance metric is updated at every burn-in iteration unless set otherwise)
+                interval_width_nuisance <- if_null_then_set_to(interval_width_nuisance, 1)
                 ##
-                max_eps_main <- if_null_then_set_to(max_eps_main, 0.75)
-                max_eps_nuisance <- if_null_then_set_to(max_eps_nuisance, 0.75)
+                # max_eps_main <- if_null_then_set_to(max_eps_main, 0.75)
+                # max_eps_nuisance <- if_null_then_set_to(max_eps_nuisance, 0.75)
+                max_eps_main <- if_null_then_set_to(max_eps_main, 1.0)
+                max_eps_nuisance <- if_null_then_set_to(max_eps_nuisance, 1.0)
                 ##
                 ## ---- eps warm start (see init_and_run_burnin_ChESSR): hold the HMC step-size at a
                 ## deliberately LARGE 'eps_initial' for the first 'eps_initial_iter' burnin iterations,
@@ -1341,7 +1800,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 #             stop("'learning_rate_initial' must be a single positive finite number, or NULL / NA to disable the learning-rate hold.")
                 #       }
                 # }
-                if (is.null(learning_rate_initial)) { 
+                # if (is.null(learning_rate_initial)) { 
+                #   learning_rate_initial <- learning_rate
+                # }
+                if (is.null(learning_rate_initial) ||
+                    (length(learning_rate_initial) == 1 && is.na(learning_rate_initial))) {
                   learning_rate_initial <- learning_rate
                 }
                 ##
@@ -1378,15 +1841,39 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 #                     if_null_then_set_to(reorder_cols_MVP, FALSE)
                 ## A reorder_cols_MVP that is NULL or not given is TRUE for the latent class probit models
                 ## (LC_MVP, LC_MVOP) and FALSE for every other model (a value given explicitly is used as it is):
-                reorder_cols_MVP_when_not_given <-  Model_type %in% c("LC_MVP", "LC_MVOP")
+                # reorder_cols_MVP_when_not_given <-  Model_type %in% c("LC_MVP", "LC_MVOP")
+                ## (and TRUE for a Stan model whose data has latent_test_order, e.g. the four-class LC-MVOP model:
+                ##  its test order is then set automatically after the pre-burnin, as for the built-in models)
+                reorder_cols_MVP_when_not_given <-  (Model_type %in% c("LC_MVP", "LC_MVOP")) ||
+                                                    ((Model_type == "Stan") &&
+                                                     !is.null(Stan_data_list$latent_test_order))
                 reorder_cols_MVP <-  if (missing(reorder_cols_MVP)) reorder_cols_MVP_when_not_given else
                                      if_null_then_set_to(reorder_cols_MVP, reorder_cols_MVP_when_not_given)
                 ##
                 if (isTRUE(reorder_cols_MVP) && (Model_type == "Stan")) {
-                      if (!exists("check_reorder_cols_MVP_for_Stan", mode = "function")) {
-                          stop("reorder_cols_MVP requires the BayesMVP model interface.")
+                      ## (BayesMVP's functions are called with their package, so that they are found in the
+                      ##  fresh R process the sampler runs in, where BayesMVP is not attached)
+                      if (!requireNamespace("BayesMVP", quietly = TRUE)) {
+                          stop("reorder_cols_MVP requires the BayesMVP package (not installed).")
                       }
-                      reorder_cols_MVP <- check_reorder_cols_MVP_for_Stan(Stan_data_list = Stan_data_list)
+                      reorder_cols_MVP <- BayesMVP::check_reorder_cols_MVP_for_Stan(
+                                              Stan_data_list = Stan_data_list)
+                      ##
+                      ## ---- A Stan data field 'latent_test_order' is what reordering changes for such a model
+                      ##      (see the reorder block), so the model itself must declare it; otherwise the chosen
+                      ##      order would be silently ignored:
+                      ##
+                      if (isTRUE(reorder_cols_MVP) && !is.null(Stan_data_list$latent_test_order)) {
+                            model_code_for_latent_test_order_check <-
+                                  paste(readLines(Stan_model_file_path, warn = FALSE), collapse = "\n")
+                            if (!grepl("latent_test_order", model_code_for_latent_test_order_check,
+                                       fixed = TRUE)) {
+                                  stop(paste0("reorder_cols_MVP: the Stan data has 'latent_test_order', but the ",
+                                              "Stan model (", Stan_model_file_path, ") does not declare it, so ",
+                                              "the chosen test order would be ignored. Use the model's ",
+                                              "latent-order version, or remove latent_test_order from the data."))
+                            }
+                      }
                 }
                 ##
                 ## A fixed test order is only applied inside the reorder_cols_MVP block, so refuse it anywhere
@@ -1417,12 +1904,26 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       c("most_nearly_deterministic_test_last_then_greedy_correlation_order",
                         "greedy_correlation_order",
                         paste0("test_with_largest_tail_category_distance_from_latent_mean_last_then_greedy_",
-                               "correlation_order"))
+                               "correlation_order"),
+                        "tests_missing_for_most_people_last_then_greedy_correlation_order")
                 if (is.null(test_order_rule_for_reorder_cols_MVP)) {
+                    # test_order_rule_for_reorder_cols_MVP <-
+                    #       if (Model_type == "Stan") "greedy_correlation_order" else
+                    #       if (Model_type == "LC_MVOP") test_order_rules_for_reorder_cols_MVP_allowed[3] else
+                    #                                 test_order_rules_for_reorder_cols_MVP_allowed[1]
+                    ## (a Stan model whose data has latent_test_order: the fourth rule)
                     test_order_rule_for_reorder_cols_MVP <-
+                          if ((Model_type == "Stan") && !is.null(Stan_data_list$latent_test_order))
+                                test_order_rules_for_reorder_cols_MVP_allowed[4] else
                           if (Model_type == "Stan") "greedy_correlation_order" else
                           if (Model_type == "LC_MVOP") test_order_rules_for_reorder_cols_MVP_allowed[3] else
                                                     test_order_rules_for_reorder_cols_MVP_allowed[1]
+                } else if ((Model_type != "Stan") &&
+                           identical(test_order_rule_for_reorder_cols_MVP,
+                                     test_order_rules_for_reorder_cols_MVP_allowed[4])) {
+                    stop(paste0("test_order_rule_for_reorder_cols_MVP = \"",
+                                test_order_rules_for_reorder_cols_MVP_allowed[4], "\" reads the missing values ",
+                                "of a Stan model's data y (NA or negative); it is for Model_type = \"Stan\"."))
                 } else if ((Model_type == "LC_MVOP") &&
                            identical(test_order_rule_for_reorder_cols_MVP,
                                      test_order_rules_for_reorder_cols_MVP_allowed[1])) {
@@ -1470,31 +1971,297 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 # if (is.null(Stan_data_list$test_perm))      Stan_data_list$test_perm      <- 1:model_args_list$n_tests
                 # if (is.null(Stan_data_list$n_cat_per_test)) Stan_data_list$n_cat_per_test <- model_args_list$n_cat_per_test
                 ##
-                ## ---- Burn-in within-chain threads and chunks of an external Stan model with the N / chunk_size
-                ##      data contract (reduce_sum_static), when neither n_threads_WCP_burnin nor
-                ##      num_chunks_burnin is given: chosen by fn_compute_burnin_n_threads_WCP_and_num_chunks()
-                ##      (Paper 1's burn-in rule) for the CPUs of this process and the measured M_bytes/chain.
-                ##      A value given is used as given; otherwise (a built-in model, or a Stan model without
-                ##      the contract) n_threads_WCP_burnin = 1, as before:
+                ## (the rule before every model except the binary LC-MVP had to use Paper 1's functions; kept
+                ##  switched off:)
+##              ## ---- Burn-in within-chain threads and chunks of an external Stan model with the N / chunk_size
+##              ##      data contract (reduce_sum_static), when neither n_threads_WCP_burnin nor
+##              ##      num_chunks_burnin is given: chosen by fn_compute_burnin_n_threads_WCP_and_num_chunks()
+##              ##      (Paper 1's burn-in rule) for the CPUs of this process and the measured M_bytes/chain.
+##              ##      A value given is used as given; otherwise (a built-in model, or a Stan model without
+##              ##      the contract) n_threads_WCP_burnin = 1, as before:
+##              ##
+##              burnin_n_threads_WCP_and_num_chunks_rule <-  NULL
+##              if (is.null(n_threads_WCP_burnin)) {
+##                  if (identical(Model_type, "Stan") && is.null(num_chunks_burnin) &&
+##                      fn_Stan_data_has_N_and_chunk_size(Stan_data_list = Stan_data_list)) {
+##                      model_so_file_for_burnin_rule <-
+##                            if (is.character(init_object$model_so_file) &&
+##                                (length(init_object$model_so_file) == 1) &&
+##                                file.exists(init_object$model_so_file)) init_object$model_so_file else
+##                            normalizePath(transform_stan_path(Stan_model_file_path))
+##                      burnin_n_threads_WCP_and_num_chunks_rule <-
+##                            fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model(
+##                                  model_so_file   = model_so_file_for_burnin_rule,
+##                                  Stan_data_list  = Stan_data_list,
+##                                  n_chains_burnin = n_chains_burnin,
+##                                  init_object     = init_object)
+##                      n_threads_WCP_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$n_threads_WCP_burnin
+##                      num_chunks_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$num_chunks_burnin
+##                      M_MiB_per_chain <-  burnin_n_threads_WCP_and_num_chunks_rule$M_bytes_per_chain / 1024^2
+##                      how_chosen <-  if (isTRUE(burnin_n_threads_WCP_and_num_chunks_rule$reused_saved_choice)) {
+##                            "reused: the choice saved for this model, N, burn-in chains and CPUs"
+##                      } else {
+##                            paste0("chosen in ",
+##                                   round(burnin_n_threads_WCP_and_num_chunks_rule$seconds_spent_choosing, 1),
+##                                   " s, not counted in the burn-in time")
+##                      }
+##                      message(paste0("\033[36mBurn-in: ", n_chains_burnin, " chains x ", n_threads_WCP_burnin,
+##                                     " within-chain threads, ", num_chunks_burnin, " chunks (M_bytes/chain = ",
+##                                     round(M_MiB_per_chain, 2), " MiB; ", how_chosen,
+##                                     "; fn_compute_burnin_n_threads_WCP_and_num_chunks())\033[0m"))
+##                  } else {
+##                      n_threads_WCP_burnin <-  1
+##                  }
+##              }
+                ##
+                ## ---- Within-chain threads and chunks. The binary LC-MVP's are given in $sample() (Paper 1's E1
+                ##      results for its N and machine). Every other model's are always chosen with Paper 1's
+                ##      functions, and giving any of them in $sample() stops with an error:
+                ##        - burn-in: fn_compute_burnin_n_threads_WCP_and_num_chunks() (Paper 1's burn-in
+                ##          rule), from the measured M_bytes/chain and the CPUs of this process (a Stan model
+                ##          with the N / chunk_size data contract:
+                ##          fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model(), which also times
+                ##          the rule's configurations; a built-in model:
+                ##          fn_compute_burnin_n_threads_WCP_and_num_chunks_for_built_in_model());
+                ##        - sampling: one thread per chain, and the chunks of fn_compute_initial_N_chunks()
+                ##          for the sampling chains and the CPUs of this process
+                ##          (fn_compute_sampling_num_chunks_for_CPUs_of_this_process());
+                ##        - a Stan model without the N / chunk_size data contract has no within-chain parallelism:
+                ##          one thread per chain in both phases.
+                ##      Now, for every model other than the binary LC-MVP: each of them given in $sample()
+                ##      (n_threads_WCP_burnin and num_chunks_burnin together; n_threads_WCP_sampling;
+                ##      num_chunks_sampling) is used as given; those not given are chosen with Paper 1's functions
+                ##      when choose_threads_and_chunks_not_given_with_Paper_1_functions = TRUE (default), and must
+                ##      all be given when it is FALSE. A Stan model's num_chunks_sampling is chosen with
+                ##      fn_compute_sampling_num_chunks_for_Stan_model(): Paper 1's rule from the model's own
+                ##      measured M_bytes/chain, timed against the powers of two around it with the sampling layout
+                ##      (time_rule_num_chunks_candidates_for_sampling = TRUE, default; FALSE uses the rule's
+                ##      value).
+                ##      The sampling threads not given are 1 per chain.
+                ##
+                threads_and_chunks_given_in_sample <-  identical(Model_type, "LC_MVP")
+                ##
+                if (!threads_and_chunks_given_in_sample) {
+                    settings_given_in_sample <-  c( n_threads_WCP_burnin    = !is.null(n_threads_WCP_burnin),
+                                                    num_chunks_burnin       = !is.null(num_chunks_burnin),
+                                                    n_threads_WCP_sampling  = !is.null(n_threads_WCP_sampling),
+                                                    num_chunks_sampling     = !is.null(num_chunks_sampling))
+                    ## if (any(settings_given_in_sample)) {
+                    ##  stop(paste0("For Model_type = \"", Model_type, "\", the within-chain threads and the ",
+                    ##              "chunks are always chosen with Paper 1's functions and cannot be given in ",
+                    ##              "$sample() (only the binary LC-MVP's are given, from Paper 1's E1 results); ",
+                    ##              "remove: ", paste(names(settings_given_in_sample)[settings_given_in_sample],
+                    ##                                collapse = ", "), "."))
+                    ## }
+                    ## (each one given is used as given; with the automatic choice off, all four must be given)
+                    ## if (!isTRUE(choose_threads_and_chunks_not_given_with_Paper_1_functions) &&
+                    ##     !all(settings_given_in_sample)) {
+                    ##    stop(paste0("choose_threads_and_chunks_not_given_with_Paper_1_functions = FALSE: give ",
+                    ##                 "n_threads_WCP_burnin, num_chunks_burnin, n_threads_WCP_sampling and ",
+                    ##                 "num_chunks_sampling in $sample(); missing: ",
+                    ##                 paste(names(settings_given_in_sample)[!settings_given_in_sample],
+                    ##                       collapse = ", "), "."))
+                    ## }
+                    if (!isTRUE(choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm) &&
+                        !all(settings_given_in_sample)) {
+                        stop(paste0("choose_num_chunks_and_n_threads_WCP_with_Paper_1_algorithm = FALSE: ",
+                                    "give n_threads_WCP_burnin, num_chunks_burnin, ",
+                                    "n_threads_WCP_sampling and ",
+                                    "num_chunks_sampling in $sample() (e.g. from NicoStan's ",
+                                    "fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model() and ",
+                                    "fn_compute_sampling_num_chunks_for_Stan_model(), or BayesMVP's ",
+                                    "fn_compute_burnin_n_threads_WCP_and_num_chunks_for_BayesMVP_model() and ",
+                                    "fn_compute_sampling_num_chunks_for_BayesMVP_model()), or set it to TRUE ",
+                                    "(the default); ",
+                                    "missing: ",
+                                    paste(names(settings_given_in_sample)[!settings_given_in_sample],
+                                          collapse = ", "), "."))
+                    }
+                    if (settings_given_in_sample[["n_threads_WCP_burnin"]] !=
+                        settings_given_in_sample[["num_chunks_burnin"]]) {
+                        stop(paste0("Give both n_threads_WCP_burnin and num_chunks_burnin in $sample(), or ",
+                                    "neither (Paper 1's burn-in rule chooses them together)."))
+                    }
+                }
                 ##
                 burnin_n_threads_WCP_and_num_chunks_rule <-  NULL
-                if (is.null(n_threads_WCP_burnin)) {
-                    if (identical(Model_type, "Stan") && is.null(num_chunks_burnin) &&
-                        fn_Stan_data_has_N_and_chunk_size(Stan_data_list = Stan_data_list)) {
+                sampling_num_chunks_rule <-  NULL
+                ##
+                if (threads_and_chunks_given_in_sample) {
+                    ## (the binary LC-MVP: as given; a thread count not given is 1, as before)
+                    if (is.null(n_threads_WCP_burnin)) n_threads_WCP_burnin <-  1
+                    if (is.null(n_threads_WCP_sampling)) n_threads_WCP_sampling <-  1
+                } else if (identical(Model_type, "Stan") &&
+                           !fn_Stan_data_has_N_and_chunk_size(Stan_data_list = Stan_data_list)) {
+                    ## n_threads_WCP_burnin <-  1
+                    ## n_threads_WCP_sampling <-  1
+                    ## (one thread per chain unless given)
+                    if (is.null(n_threads_WCP_burnin)) n_threads_WCP_burnin <-  1
+                    if (is.null(n_threads_WCP_sampling)) n_threads_WCP_sampling <-  1
+                } else {
+                    ##
+                    ## ---- burn-in (Paper 1's burn-in rule):
+                    ##
+                    burnin_threads_and_chunks_given_in_sample <-  !is.null(n_threads_WCP_burnin) &&
+                                                                  !is.null(num_chunks_burnin)
+                    M_bytes_per_chain_of_model <-  NULL
+                    ##
+                    ## ---- the chains' own starting values, on the unconstrained scale, for the layout timings of
+                    ##      the pickers below (Stan models): every timed chain starts where a chain of the
+                    ##      sampler starts (where the log density is finite), never at the pickers' own small
+                    ##      default values, where some models' log density is -Inf (e.g. the two-class LC-MVOP,
+                    ##      whose small alternating cutpoint values leave an interval empty); built as the
+                    ##      sampler's starting values are built below (R_fn_init_initial_values()), the chains
+                    ##      given used in turn for as many timed chains as there are CPUs:
+                    ##
+                    initial_values_of_the_chains_for_the_layout_timings <-  NULL
+                    if (identical(Model_type, "Stan") && is.list(init_lists_per_chain) &&
+                        (length(init_lists_per_chain) > 0)) {
+                          ## (in a fresh R process the init_object arrives without its BridgeStan model, which
+                          ##  the parent keeps (R_fn_fresh_process.R), and the model is only made below
+                          ##  (initialise_model); so the starting values here use a BridgeStan model made from
+                          ##  the library and data files, as the parent does after the child; without it
+                          ##  R_fn_init_initial_values() stopped with "attempt to apply non-function (in
+                          ##  bs_model$param_names())", the end-to-end check of the two-class LC-MVOP after
+                          bs_model_for_the_starting_values <-  init_object$bs_model
+                          if (!is.function(bs_model_for_the_starting_values$param_names)) {
+                                ## (the child's init_object has no json_file_path field either: the fresh
+                                ##  process is given Model_args_as_Rcpp_List, whose json_file_path
+                                ##  initialise_model() set to the same data file (R_fn_initialise_model.R))
+                                json_file_path_for_the_starting_values <-  init_object$json_file_path
+                                if (is.null(json_file_path_for_the_starting_values)) {
+                                      json_file_path_for_the_starting_values <-
+                                            init_object$Model_args_as_Rcpp_List$json_file_path
+                                }
+                                if (is.null(json_file_path_for_the_starting_values) ||
+                                    !file.exists(json_file_path_for_the_starting_values)) {
+                                      stop(paste0("the starting values of the layout timings need the model's ",
+                                                  "data file, and init_object has no json_file_path (nor ",
+                                                  "Model_args_as_Rcpp_List$json_file_path) that exists"))
+                                }
+                                bs_model_for_the_starting_values <-  R_fn_create_BridgeStan_model(
+                                      lib  = init_object$model_so_file,
+                                      # data = init_object$json_file_path,
+                                      data = json_file_path_for_the_starting_values,
+                                      seed = 123)
+                          }
+                          starting_values_given <-  R_fn_init_initial_values(
+                                Model_type                                 = Model_type,
+                                # bs_model                                   = init_object$bs_model,
+                                bs_model                                   = bs_model_for_the_starting_values,
+                                n_chains_burnin                            = length(init_lists_per_chain),
+                                init_lists_per_chain                       = init_lists_per_chain,
+                                sample_nuisance                            = sample_nuisance,
+                                n_nuisance                                 = init_object$n_nuisance,
+                                n_params_main                              = init_object$n_params_main,
+                                chunk_layout_of_nuisance_vector_in_burnin  = NULL,
+                                nuisance_blocks_held_by_NicoStan           =
+                                      init_object$nuisance_blocks_held_by_NicoStan,
+                                Stan_data_list                             = Stan_data_list)
+                          n_timed_chains_at_most <-  max(n_chains_burnin, length(
+                                fn_read_L3_cache_topology_of_available_CPUs()$CPU_ids_available))
+                          column_of_each_timed_chain <-  ((seq_len(n_timed_chains_at_most) - 1) %%
+                                                          length(init_lists_per_chain)) + 1
+                          main_values_given <-  matrix(
+                                starting_values_given$theta_main_vectors_all_chains_input_from_R,
+                                nrow = init_object$n_params_main)
+                          nuisance_values_given <-  matrix(
+                                starting_values_given$theta_nuisance_vectors_all_chains_input_from_R,
+                                nrow = init_object$n_nuisance)
+                          initial_values_of_the_chains_for_the_layout_timings <-  list(
+                                main      = main_values_given[, column_of_each_timed_chain, drop = FALSE],
+                                nuisance  = nuisance_values_given[, column_of_each_timed_chain, drop = FALSE])
+                    }
+                    ##
+                    ## ---- a Stan model with no layout given (none of the four, nor n_chains_sampling): both
+                    ##      layouts chosen within one budget, budget_of_the_layout_choice_in_lp_grad_calls of the
+                    ##      model's own lp_grad calls (at least fewest_seconds_of_the_budget_of_the_layout_choice),
+                    ##      by fn_compute_burnin_and_sampling_layouts_of_Stan_model_within_a_budget_of_lp_grad_calls();
+                    ##      budget_of_the_layout_choice_in_lp_grad_calls = NULL: each phase chosen as before, without
+                    ##      a budget
+                    ##
+                    ##      from it): "nico_math" when NicoStan compiled its AVX version or the Stan file calls a
+                    ##      nico_ function, "Stan_math" otherwise
+                    ##
+                    kind_of_tape_of_the_model <-  NULL
+                    if (identical(Model_type, "Stan")) {
+                          kind_of_tape_of_the_model <-
+                                fn_kind_of_tape_of_Stan_model_from_the_nico_calls_in_its_Stan_file(
+                                      Stan_model_file_path                = init_object$Stan_model_file_path,
+                                      BayesMVP_AVX_version_of_Stan_model  =
+                                            init_object$BayesMVP_AVX_version_of_Stan_model)
+                    }
+                    ##
+                    layouts_within_a_budget <-  NULL
+                    if (identical(Model_type, "Stan") && !is.null(budget_of_the_layout_choice_in_lp_grad_calls) &&
+                        !burnin_threads_and_chunks_given_in_sample && is.null(n_threads_WCP_sampling) &&
+                        is.null(num_chunks_sampling) && !n_chains_sampling_given_in_sample) {
                         model_so_file_for_burnin_rule <-
                               if (is.character(init_object$model_so_file) &&
                                   (length(init_object$model_so_file) == 1) &&
                                   file.exists(init_object$model_so_file)) init_object$model_so_file else
                               normalizePath(transform_stan_path(Stan_model_file_path))
+                        layouts_within_a_budget <-
+                              fn_compute_burnin_and_sampling_layouts_of_Stan_model_within_a_budget_of_lp_grad_calls(
+                                    model_so_file                               = model_so_file_for_burnin_rule,
+                                    Stan_data_list                              = Stan_data_list,
+                                    init_object                                 = init_object,
+                                    kind_of_tape                                = kind_of_tape_of_the_model,
+                                    initial_values_of_the_chains                =
+                                          initial_values_of_the_chains_for_the_layout_timings,
+                                    ## (the memory measurement starts from the user's starting values of the
+                                    ##  first chain, where the log density is finite)
+                                    init_list                                   =
+                                          if (is.list(init_lists_per_chain) && length(init_lists_per_chain) > 0)
+                                                init_lists_per_chain[[1]] else NULL,
+                                    n_chains_burnin                             = n_chains_burnin,
+                                    budget_of_the_choice_in_lp_grad_calls       =
+                                          budget_of_the_layout_choice_in_lp_grad_calls,
+                                    fewest_seconds_of_the_budget_of_the_choice  =
+                                          fewest_seconds_of_the_budget_of_the_layout_choice,
+                                    reuse_saved_burnin_choice                   = TRUE)
+                        burnin_n_threads_WCP_and_num_chunks_rule <-  layouts_within_a_budget$burnin
+                        n_threads_WCP_burnin <-  layouts_within_a_budget$n_threads_WCP_burnin
+                        num_chunks_burnin <-  layouts_within_a_budget$num_chunks_burnin
+                        n_chains_sampling <-  layouts_within_a_budget$n_chains_sampling
+                        n_threads_WCP_sampling <-  layouts_within_a_budget$n_threads_WCP_sampling
+                        num_chunks_sampling <-  layouts_within_a_budget$num_chunks_sampling
+                        M_bytes_per_chain_of_model <-  layouts_within_a_budget$M_bytes_per_chain
+                        N_units_of_model <-  Stan_data_list$N
+                        if (!n_superchains_given_in_sample) {
+                              n_superchains <-  fn_n_superchains_of_n_chains_sampling(n_chains_sampling)
+                        }
+                        how_chosen <-  paste0(
+                              "burn-in and sampling layouts from Paper 1's check of Paper 1's equations in ",
+                              round(layouts_within_a_budget$seconds_spent_choosing_the_burnin_and_sampling_layouts,
+                                    1), " s (budget ",
+                              round(layouts_within_a_budget$most_seconds_spent_choosing_the_burnin_and_sampling_layouts,
+                                    1), " s), not counted in the burn-in time")
+                        how_chosen_sampling <-  "chosen with the burn-in layout"
+                    }
+                    if (is.null(layouts_within_a_budget)) {
+                    if (identical(Model_type, "Stan")) {
+                        model_so_file_for_burnin_rule <-
+                              if (is.character(init_object$model_so_file) &&
+                                  (length(init_object$model_so_file) == 1) &&
+                                  file.exists(init_object$model_so_file)) init_object$model_so_file else
+                              normalizePath(transform_stan_path(Stan_model_file_path))
+                        if (!burnin_threads_and_chunks_given_in_sample) {
                         burnin_n_threads_WCP_and_num_chunks_rule <-
                               fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model(
                                     model_so_file   = model_so_file_for_burnin_rule,
                                     Stan_data_list  = Stan_data_list,
                                     n_chains_burnin = n_chains_burnin,
-                                    init_object     = init_object)
-                        n_threads_WCP_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$n_threads_WCP_burnin
-                        num_chunks_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$num_chunks_burnin
-                        M_MiB_per_chain <-  burnin_n_threads_WCP_and_num_chunks_rule$M_bytes_per_chain / 1024^2
+                                    init_object     = init_object,
+                                    kind_of_tape    = kind_of_tape_of_the_model,
+                                    initial_values_of_the_chains =
+                                          initial_values_of_the_chains_for_the_layout_timings,
+                                    ## (the memory measurement starts from the user's starting values of the
+                                    ##  first chain, never from a random point)
+                                    init_list       = if (is.list(init_lists_per_chain) &&
+                                                          length(init_lists_per_chain) > 0)
+                                                            init_lists_per_chain[[1]] else NULL,
+                                    time_Paper_1_check_of_num_chunks = TRUE)
                         how_chosen <-  if (isTRUE(burnin_n_threads_WCP_and_num_chunks_rule$reused_saved_choice)) {
                               "reused: the choice saved for this model, N, burn-in chains and CPUs"
                         } else {
@@ -1502,13 +2269,196 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                      round(burnin_n_threads_WCP_and_num_chunks_rule$seconds_spent_choosing, 1),
                                      " s, not counted in the burn-in time")
                         }
-                        message(paste0("\033[36mBurn-in: ", n_chains_burnin, " chains x ", n_threads_WCP_burnin,
-                                       " within-chain threads, ", num_chunks_burnin, " chunks (M_bytes/chain = ",
-                                       round(M_MiB_per_chain, 2), " MiB; ", how_chosen,
-                                       "; fn_compute_burnin_n_threads_WCP_and_num_chunks())\033[0m"))
+                        }  ## end of: if (!burnin_threads_and_chunks_given_in_sample)
+                        N_units_of_model <-  Stan_data_list$N
                     } else {
-                        n_threads_WCP_burnin <-  1
+                        if (!burnin_threads_and_chunks_given_in_sample) {
+                        ## burnin_n_threads_WCP_and_num_chunks_rule <-
+                        ##       fn_compute_burnin_n_threads_WCP_and_num_chunks_for_built_in_model(
+                        ##             Model_type      = Model_type,
+                        ##             init_object     = init_object,
+                        ##             n_chains_burnin = n_chains_burnin)
+                        ## (BayesMVP's models have manual gradients: BayesMVP's function, i.e. Paper 1's equations
+                        ##  for a manual gradient, then Paper 1's check)
+                        burnin_n_threads_WCP_and_num_chunks_rule <-
+                              BayesMVP::fn_compute_burnin_n_threads_WCP_and_num_chunks_for_BayesMVP_model(
+                                    Model_type                        = Model_type,
+                                    init_object                       = init_object,
+                                    n_chains_burnin                   = n_chains_burnin,
+                                    time_Paper_1_check_of_num_chunks  = TRUE)
+                        reused_saved_measurement <-
+                              burnin_n_threads_WCP_and_num_chunks_rule$reused_saved_measurement
+                        how_chosen <-  if (isTRUE(reused_saved_measurement)) {
+                              "M_bytes/chain reused: the measurement saved for this model and data size"
+                        } else {
+                              paste0("M_bytes/chain measured in ",
+                                     round(burnin_n_threads_WCP_and_num_chunks_rule$seconds_spent_choosing, 1),
+                                     " s, not counted in the burn-in time")
+                        }
+                        }  ## end of: if (!burnin_threads_and_chunks_given_in_sample)
+                        N_units_of_model <-  nrow(init_object$model_args_list$y)
                     }
+                    ## n_threads_WCP_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$n_threads_WCP_burnin
+                    ## num_chunks_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$num_chunks_burnin
+                    ## M_bytes_per_chain_of_model <-  burnin_n_threads_WCP_and_num_chunks_rule$M_bytes_per_chain
+                    if (burnin_threads_and_chunks_given_in_sample) {
+                        how_chosen <-  "burn-in threads and chunks given in $sample()"
+                    } else {
+                        n_threads_WCP_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$n_threads_WCP_burnin
+                        num_chunks_burnin <-  burnin_n_threads_WCP_and_num_chunks_rule$num_chunks_burnin
+                        M_bytes_per_chain_of_model <-  burnin_n_threads_WCP_and_num_chunks_rule$M_bytes_per_chain
+                    }
+                    ##
+                    ## ---- sampling (one thread per chain; Paper 1's chunks for the sampling chains and the CPUs
+                    ##      of this process):
+                    ##
+                    ## (the earlier sampling block, before the sampling threads and chunks could be given and the
+                    ##  rule's chunk count of a Stan model was timed:)
+                    ## n_threads_WCP_sampling <-  1
+                    ## sampling_num_chunks_rule <-  fn_compute_sampling_num_chunks_for_CPUs_of_this_process(
+                    ##                                    M_bytes_per_chain       = M_bytes_per_chain_of_model,
+                    ##                                    n_chains_sampling       = n_chains_sampling,
+                    ##                                    n_threads_WCP_sampling  = n_threads_WCP_sampling,
+                    ##                                    gradient_type           =
+                    ##                                          if (identical(Model_type, "Stan")) "autodiff" else
+                    ##                                          "manual")
+                    ## num_chunks_sampling <-  sampling_num_chunks_rule$N_chunks
+                    ## if (identical(Model_type, "Stan")) {
+                    ##     ## (reduce_sum_static halves the range of units until each piece holds at most
+                    ##  ##  chunk_size units, so the data are cut into a power of two of pieces: the chunk count
+                    ##     ##  is rounded up to the next power of two, i.e. to the number of pieces actually used)
+                    ##     num_chunks_sampling <-  min(2^ceiling(log2(num_chunks_sampling)),
+                    ##                                 2^floor(log2(N_units_of_model)))
+                    ## } else {
+                    ##  ## (a built-in model: at most one chunk per SIMD vector of observations, for both phases)
+                    ##     vect_type_of_model <-
+                    ##           as.character(init_object$Model_args_as_Rcpp_List$Model_args_strings[1])
+                    ##     vec_size_of_model <-  if (identical(vect_type_of_model, "AVX512")) 8 else
+                    ##                           if (identical(vect_type_of_model, "AVX2")) 4 else
+                    ##                           if (identical(vect_type_of_model, "AVX")) 2 else 1
+                    ##     most_chunks_of_model <-  max(1, floor(N_units_of_model / vec_size_of_model))
+                    ##     num_chunks_burnin <-  min(num_chunks_burnin, most_chunks_of_model)
+                    ##     num_chunks_sampling <-  min(num_chunks_sampling, most_chunks_of_model)
+                    ## }
+                    ##
+                    ## ---- sampling: the threads given (1 per chain when not given); the chunks given, or
+                    ##      Paper 1's rule from the model's own measured M_bytes/chain (a Stan model: timed
+                    ##      against the powers of two around it with the sampling layout,
+                    ##      fn_compute_sampling_num_chunks_for_Stan_model()):
+                    ##
+                    ## (the sampling threads given in $sample(), before a thread count not given is set to 1)
+                    sampling_threads_given_in_sample <-  !is.null(n_threads_WCP_sampling)
+                    if (is.null(n_threads_WCP_sampling)) n_threads_WCP_sampling <-  1
+                    sampling_num_chunks_given_in_sample <-  !is.null(num_chunks_sampling)
+                    if (sampling_num_chunks_given_in_sample) {
+                        how_chosen_sampling <-  "sampling chunks given in $sample()"
+                    } else if (!sampling_threads_given_in_sample) {
+                        ## (Paper 1's check of the whole sampling layout, WCP and chunking, chunking alone being
+                        ##  its 1 thread per chain; the chains given in $sample() are kept)
+                        n_chains_sampling_of_check <-  NULL
+                        if (n_chains_sampling_given_in_sample) n_chains_sampling_of_check <-  n_chains_sampling
+                        if (identical(Model_type, "Stan")) {
+                              sampling_layout <-
+                              fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model(
+                                    model_so_file      = model_so_file_for_burnin_rule,
+                                    Stan_data_list     = Stan_data_list,
+                                    M_bytes_per_chain  = M_bytes_per_chain_of_model,
+                                    n_chains_sampling  = n_chains_sampling_of_check,
+                                    init_object        = init_object,
+                                    kind_of_tape       = kind_of_tape_of_the_model,
+                                    initial_values_of_the_chains =
+                                          initial_values_of_the_chains_for_the_layout_timings,
+                                    init_list          = if (is.list(init_lists_per_chain) &&
+                                                             length(init_lists_per_chain) > 0)
+                                                               init_lists_per_chain[[1]] else NULL)
+                        } else {
+                        sampling_layout <-
+                        BayesMVP::fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_BayesMVP_model(
+                              Model_type         = Model_type,
+                              init_object        = init_object,
+                              n_chains_sampling  = n_chains_sampling_of_check)
+                        }
+                        n_chains_sampling <-  sampling_layout$n_chains_sampling
+                        n_threads_WCP_sampling <-  sampling_layout$n_threads_WCP_sampling
+                        num_chunks_sampling <-  sampling_layout$num_chunks_sampling
+                        M_bytes_per_chain_of_model <-  sampling_layout$M_bytes_per_chain
+                        if (!n_superchains_given_in_sample) {
+                              n_superchains <-  fn_n_superchains_of_n_chains_sampling(n_chains_sampling)
+                        }
+                        how_chosen_sampling <-  paste0(
+                              "sampling layout from Paper 1's check (WCP and chunking) of Paper 1's equations (",
+                              sampling_layout$n_chains_sampling_from_equations, " chains x ",
+                              sampling_layout$n_threads_WCP_sampling_from_equations, " threads x ",
+                              sampling_layout$num_chunks_sampling_from_equations, " chunks) in ",
+                              round(sampling_layout$seconds_spent_choosing, 1),
+                              " s, not counted in the burn-in time")
+                    } else if (identical(Model_type, "Stan")) {
+                        sampling_num_chunks_rule <-  fn_compute_sampling_num_chunks_for_Stan_model(
+                              model_so_file                     = model_so_file_for_burnin_rule,
+                              Stan_data_list                    = Stan_data_list,
+                              n_chains_sampling                 = n_chains_sampling,
+                              n_threads_WCP_sampling            = n_threads_WCP_sampling,
+                              M_bytes_per_chain                 = M_bytes_per_chain_of_model,
+                              init_object                       = init_object,
+                              kind_of_tape                      = kind_of_tape_of_the_model,
+                              time_Paper_1_check_of_num_chunks  = TRUE)
+                        num_chunks_sampling <-  sampling_num_chunks_rule$num_chunks_sampling
+                        M_bytes_per_chain_of_model <-  sampling_num_chunks_rule$M_bytes_per_chain
+                        how_chosen_sampling <-  if (isTRUE(sampling_num_chunks_rule$reused_saved_choice)) {
+                              paste0("sampling chunks reused: the choice saved for this model, N, chains, ",
+                                     "threads and CPUs")
+                        } else if (is.null(sampling_num_chunks_rule$timings)) {
+                              paste0("sampling chunks from Paper 1's rule (",
+                                     sampling_num_chunks_rule$num_chunks_sampling_from_rule, "), not timed")
+                        } else {
+                              paste0("sampling chunks from Paper 1's check of Paper 1's rule (",
+                                     sampling_num_chunks_rule$num_chunks_sampling_from_rule, ") in ",
+                                     round(sampling_num_chunks_rule$seconds_spent_choosing, 1),
+                                     " s, not counted in the burn-in time; within 1% of the fastest: ",
+                                     paste(sampling_num_chunks_rule$num_chunks_within_tie_of_fastest,
+                                           collapse = ", "))
+                        }
+                    } else {
+                        ## if (is.null(M_bytes_per_chain_of_model)) {
+                        ##     M_bytes_per_chain_of_model <-  fn_M_bytes_per_chain_of_built_in_model(
+                        ##                                          Model_type   = Model_type,
+                        ##                                          init_object  = init_object)$M_bytes_per_chain
+                        ## }
+                        ## sampling_num_chunks_rule <-  fn_compute_sampling_num_chunks_for_CPUs_of_this_process(
+                        ##                                  M_bytes_per_chain       = M_bytes_per_chain_of_model,
+                        ##                                    n_chains_sampling       = n_chains_sampling,
+                        ##                                    n_threads_WCP_sampling  = n_threads_WCP_sampling,
+                        ##                                    gradient_type           = "manual")
+                        ## num_chunks_sampling <-  sampling_num_chunks_rule$N_chunks
+                        ## how_chosen_sampling <-  "sampling chunks from Paper 1's rule"
+                        ## (BayesMVP's models have manual gradients: BayesMVP's function, i.e. Paper 1's equations
+                        ##  for a manual gradient, then Paper 1's check)
+                        sampling_num_chunks_rule <-  BayesMVP::fn_compute_sampling_num_chunks_for_BayesMVP_model(
+                              Model_type                        = Model_type,
+                              init_object                       = init_object,
+                              n_chains_sampling                 = n_chains_sampling,
+                              n_threads_WCP_sampling            = n_threads_WCP_sampling,
+                              time_Paper_1_check_of_num_chunks  = TRUE)
+                        num_chunks_sampling <-  sampling_num_chunks_rule$num_chunks_sampling
+                        M_bytes_per_chain_of_model <-  sampling_num_chunks_rule$M_bytes_per_chain
+                        how_chosen_sampling <-  paste0(
+                              "sampling chunks from Paper 1's check of Paper 1's equations (",
+                              sampling_num_chunks_rule$num_chunks_sampling_from_Paper_1_equations, ") in ",
+                              round(sampling_num_chunks_rule$seconds_spent_choosing, 1),
+                              " s, not counted in the burn-in time")
+                    }
+                    }  ## end of: if (is.null(layouts_within_a_budget))
+                    ##
+                    message(colourise(paste0("Burn-in: ", n_chains_burnin, " chains x ", n_threads_WCP_burnin,
+                                             " within-chain threads, ", num_chunks_burnin, " chunks; sampling: ",
+                                             n_chains_sampling, " chains x ", n_threads_WCP_sampling,
+                                             " thread, ", num_chunks_sampling, " chunks (M_bytes/chain = ",
+                                             if (is.null(M_bytes_per_chain_of_model)) "not measured" else
+                                                   paste0(round(M_bytes_per_chain_of_model / 1024^2, 2), " MiB"),
+                                             "; ", how_chosen, "; ", how_chosen_sampling,
+                                             "; Paper 1's functions: ",
+                                             "fn_compute_burnin_n_threads_WCP_and_num_chunks() and ",
+                                             "fn_compute_initial_N_chunks())"), "cyan"))
                 }
                 ##
                 ## ---- Explicit phase chunk counts for external Stan models use the model's N / chunk_size data contract:
@@ -1522,18 +2472,34 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             stop("Stan phase chunk counts must be NULL or positive integers within Stan's integer range.")
                         }
                     }
-                    for (data_name in c("N", "chunk_size")) {
-                        data_value <- Stan_data_list[[data_name]]
-                        if (!is.numeric(data_value) || length(data_value) != 1L || !is.finite(data_value) ||
-                            data_value < 1 || data_value != floor(data_value) || data_value > .Machine$integer.max) {
-                            stop("Explicit Stan phase chunk counts require positive integer data fields N and chunk_size.")
-                        }
+                    ## (a model without reduce_sum - no data fields N and chunk_size - has nothing to chunk: an
+                    ##  explicit N_chunks = 1 for both phases is that model as it is; any other count stops)
+                    model_has_the_chunk_data <-  all(vapply(c("N", "chunk_size"), function(data_name) {
+                          data_value <-  Stan_data_list[[data_name]]
+                          is.numeric(data_value) && (length(data_value) == 1) && is.finite(data_value) &&
+                                (data_value >= 1) && (data_value == floor(data_value)) &&
+                                (data_value <= .Machine$integer.max)
+                    }, logical(1)))
+                    every_given_chunk_count_is_1 <-  all(unlist(list(num_chunks_burnin, num_chunks_sampling)) == 1)
+                    if (!model_has_the_chunk_data && !every_given_chunk_count_is_1) {
+                        stop(paste0("Explicit Stan phase chunk counts above 1 require positive integer data fields ",
+                                    "N and chunk_size (a model with reduce_sum); this model has none, so only ",
+                                    "num_chunks_burnin = 1 and num_chunks_sampling = 1 (or NULL) are possible."))
                     }
-                    ## NULL retains the supplied data chunk_size independently for that phase.
-                    stan_chunk_size_sampling <- if (is.null(num_chunks_sampling)) Stan_data_list$chunk_size else
-                        as.integer(ceiling(Stan_data_list$N / num_chunks_sampling))
-                    if (!is.null(num_chunks_burnin)) {
-                        Stan_data_list$chunk_size <- as.integer(ceiling(Stan_data_list$N / num_chunks_burnin))
+                    # for (data_name in c("N", "chunk_size")) {
+                    #     data_value <- Stan_data_list[[data_name]]
+                    #     if (!is.numeric(data_value) || length(data_value) != 1L || !is.finite(data_value) ||
+                    #         data_value < 1 || data_value != floor(data_value) || data_value > .Machine$integer.max) {
+                    #         stop("Explicit Stan phase chunk counts require positive integer data fields N and chunk_size.")
+                    #     }
+                    # }
+                    if (model_has_the_chunk_data) {
+                        ## NULL retains the supplied data chunk_size independently for that phase.
+                        stan_chunk_size_sampling <- if (is.null(num_chunks_sampling)) Stan_data_list$chunk_size else
+                            as.integer(ceiling(Stan_data_list$N / num_chunks_sampling))
+                        if (!is.null(num_chunks_burnin)) {
+                            Stan_data_list$chunk_size <- as.integer(ceiling(Stan_data_list$N / num_chunks_burnin))
+                        }
                     }
                 }
                 ##
@@ -1566,6 +2532,26 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##        - Stan models: identical model_args_list and Stan_data_list (after the chunk_size patch above).
                 ##      Any error in these checks means a rebuild. The re-initialisation on column-permuted data after the
                 ##      pre-burn-in test reordering (further below) always rebuilds.
+                ##
+                ## ---- a Stan model whose nuisance blocks are held by NicoStan (nuisance_params,
+                ##      reduce_sum_chunked): its model file is the reduce_sum_chunked version, compiled
+                ##      against NicoStan's private runtime with the chunk-local bookkeeping and the nuisance
+                ##      block (the two options, set here too, as this may be a fresh R process); the size of
+                ##      its nuisance block was worked out at its initialisation (used when n_nuisance_override
+                ##      is not given), and the writer's record of the blocks gives their initial values their
+                ##      order; both are kept through a rebuild:
+                ##
+                nuisance_blocks_held_by_NicoStan_of_the_model <-  NULL
+                if (is.list(init_object)) {
+                      nuisance_blocks_held_by_NicoStan_of_the_model <-
+                            init_object$nuisance_blocks_held_by_NicoStan
+                }
+                if (!is.null(nuisance_blocks_held_by_NicoStan_of_the_model)) {
+                      options(NicoStan.reduce_sum_lean_slicing = TRUE, NicoStan.reduce_sum_nuisance_block = TRUE)
+                      if (is.null(n_nuisance_override)) {
+                            n_nuisance_override <-  init_object$n_nuisance_override
+                      }
+                }
                 ##
                 init_reuse_supplied_object <-  FALSE
                 ##
@@ -1605,7 +2591,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             } else {
 
                                   ## (the same derivation as in initialise_model(), without the BridgeStan step):
-                                  init_reuse_outs <-  init_hard_coded_model( Model_type = Model_type,
+                                  init_reuse_outs <-  BayesMVP::init_hard_coded_model( Model_type = Model_type,
                                                                              model_args_list = model_args_list)
                                   ##
                                   init_reuse_Model_args_as_Rcpp_List <-  init_reuse_outs$Model_args_as_Rcpp_List
@@ -1614,7 +2600,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                   ##
                                   identical(init_reuse_outs$model_args_list, init_object$model_args_list) &&
                                   identical(init_reuse_Model_args_as_Rcpp_List, init_object$Model_args_as_Rcpp_List) &&
-                                  identical(make_Stan_data_list_for_internal_models( Model_type = Model_type,
+                                  identical(BayesMVP::make_Stan_data_list_for_internal_models(
+                                                                                     Model_type = Model_type,
                                                                                      model_args_list = init_reuse_outs$model_args_list),
                                             init_object$Stan_data_list)
 
@@ -1641,8 +2628,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                  ##
                                                  model_args_list = model_args_list,
                                                  ##
-                                                 compile = TRUE,
-                                                 force_recompile = FALSE,
+                                                 compile = init_object$compile,
+                                                 force_recompile = init_object$force_recompile,
                                                  ##
                                                  cmdstanr_model_fit_obj = NULL,
                                                  ##
@@ -1653,6 +2640,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                  Stan_cpp_flags = Stan_cpp_flags,
                                                  stanc_args = stanc_args,
                                                  make_args = make_args)
+                ##
+                ## (the writer's record of the nuisance blocks held by NicoStan, kept through the rebuild)
+                init_object$nuisance_blocks_held_by_NicoStan <-  nuisance_blocks_held_by_NicoStan_of_the_model
                 } ## end of "else" (rebuild) of the "if (init_reuse_supplied_object)"
                 ##
                 ##
@@ -1720,15 +2710,23 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     }
                 }
                 ##
-                ## the caller's choice (NULL = automatic), kept so a re-initialisation below
+                ## the caller's choice (block NAMES or "none"), kept so a re-initialisation below
                 ## re-resolves from the SAME instruction rather than from an already-resolved value:
-                n_nuisance_to_track_user <- n_nuisance_to_track
+                nuisance_to_track_user <- nuisance_to_track
                 ##
-                n_nuisance_to_track <- fn_resolve_n_nuisance_to_track( user_value = n_nuisance_to_track_user,
-                                                                       sample_nuisance = sample_nuisance,
-                                                                       n_nuisance = n_nuisance,
-                                                                       n_params_main = n_params_main,
-                                                                       bs_model = init_object$bs_model)
+                positions_of_the_nuisance_values_to_keep <- fn_positions_of_the_nuisance_values_to_track(
+                      nuisance_to_track = nuisance_to_track_user,
+                      nuisance_blocks   = init_object$nuisance_blocks_held_by_NicoStan,
+                      Stan_data_list    = Stan_data_list,
+                      n_nuisance        = n_nuisance)
+                ##
+                ## (the sampler stores the values at these positions of every draw, in memory, never on disk;
+                ##  its own count is the length of the positions)
+                n_nuisance_to_track <- length(positions_of_the_nuisance_values_to_keep)
+                if (n_nuisance_to_track > 0L) {
+                      Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace(
+                            positions_from_0 = as.integer(positions_of_the_nuisance_values_to_keep))
+                }
                 # ##
                 # if (is.null(n_nuisance_to_track)) {
                 #   if (sample_nuisance == FALSE) {
@@ -1773,7 +2771,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                   n_params_main = n_params_main,
                                                   ##
                                                   chunk_layout_of_nuisance_vector_in_burnin =
-                                                        chunk_layout_of_nuisance_vector_in_burnin)
+                                                        chunk_layout_of_nuisance_vector_in_burnin,
+                                                  ##
+                                                  nuisance_blocks_held_by_NicoStan =
+                                                        init_object$nuisance_blocks_held_by_NicoStan,
+                                                  Stan_data_list = Stan_data_list)
                 ##
                 inits_unconstrained_vec_per_chain <- outs$inits_unconstrained_vec_per_chain
                 ##
@@ -1820,6 +2822,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 time_pre_burnin <- 0.0
                 ##
                 ## ---- Second half of the 'reorder_cols_MVP' gate for external Stan models:
+##
                 ##      the ordering is chosen from the model's estimated correlation
                 ##      matrix, so the model must expose one named "Omega" whose dimension
                 ##      matches the number of columns of 'y'. Checked HERE (before the
@@ -1830,7 +2833,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 if (isTRUE(reorder_cols_MVP) && (Model_type == "Stan")) {
 
-                      Omega_dims <- infer_Omega_dims_from_bs_model(bs_model = bs_model)
+                      Omega_dims <- BayesMVP::infer_Omega_dims_from_bs_model(bs_model = bs_model)
                       n_tests_y  <- ncol(Stan_data_list$y)
                       ##
                       if (Omega_dims$n_found == 0) {
@@ -1896,7 +2899,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           n_tests <- ncol(Stan_data_list$y)
                           ##
                           if (is.null(Omega_dims)) {
-                            Omega_dims <- infer_Omega_dims_from_bs_model(bs_model = bs_model)
+                            Omega_dims <- BayesMVP::infer_Omega_dims_from_bs_model(bs_model = bs_model)
                           }
                           n_class_for_reorder <- if (is.null(Omega_dims$n_class)) 1L else Omega_dims$n_class
                     } else {
@@ -1946,9 +2949,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     pre_burnin_params$clip_iter <- 25
                     pre_burnin_params$clip_iter_tau <- pre_burnin_params$clip_iter + int
                     ##
-                    pre_burnin_params$M_decay_scale <- pre_burnin_params$n_adapt / 100
+                    pre_burnin_params$M_decay_scale <-  pre_burnin_params$n_adapt / 5
                     ##
                     ## ---- shorter pre-burnin (pre_burnin_n_iter): the same schedule, scaled to the new length:
+##
                     if (!is.null(pre_burnin_n_iter)) {
                           pre_burnin_length_scale <- pre_burnin_n_iter / pre_burnin_params$n_burnin
                           pre_burnin_params$n_burnin      <- as.integer(round(pre_burnin_n_iter))
@@ -1956,14 +2960,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           pre_burnin_params$gap           <- round(pre_burnin_params$gap * pre_burnin_length_scale)
                           pre_burnin_params$clip_iter     <- max(5, round(pre_burnin_params$clip_iter * pre_burnin_length_scale))
                           pre_burnin_params$clip_iter_tau <- pre_burnin_params$clip_iter + round(int * pre_burnin_length_scale)
-                          pre_burnin_params$M_decay_scale <- pre_burnin_params$n_adapt / 100
+                          pre_burnin_params$M_decay_scale <-  pre_burnin_params$n_adapt / 5
                           message("pre-burnin shortened to ", pre_burnin_params$n_burnin, " iterations (n_adapt = ", pre_burnin_params$n_adapt,
                                   ", clip_iter = ", pre_burnin_params$clip_iter, ", clip_iter_tau = ", pre_burnin_params$clip_iter_tau, ")")
                     }
                     ##
                     pre_burnin_object <-             fn_burnin(  init_object = init_object,
                                                                  debug_burnin_timing = debug_burnin_timing,
+##
                         ## ---- burn-in adaptation settings:
+##
                         tau_initial_moments_window_fraction = tau_initial_moments_window_fraction,
                         tau_initial_moments_window_min_iter = tau_initial_moments_window_min_iter,
                         tau_adam_beta1 = tau_adam_beta1,
@@ -1991,7 +2997,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                               record_burnin_metric_nuisance_variance_quantiles_history,
                         burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
                               burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step,
-                                                                 ## (7 Oct 2026) n_iter, for the
+                        Hessian_metric_offdiagonal_shrinkage = Hessian_metric_offdiagonal_shrinkage,
                                                                  ## finite-run ESS of a burnin_algorithm:
                                                                  n_iter_sampling_per_chain = n_iter,
                                                                  ##
@@ -2136,7 +3142,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             }
                             ##
                             Omega_hat_list <- tryCatch(
-                                  extract_Omega_via_bridgestan( bs_model = bs_model,
+                                  BayesMVP::extract_Omega_via_bridgestan( bs_model = bs_model,
                                                                 theta_main = theta_full_median,
                                                                 n_tests = n_tests,
                                                                 n_class = n_class_for_reorder),
@@ -2149,7 +3155,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         NULL
                                   })
                       } else {
-                            Omega_hat_list <- extract_Omega_via_bridgestan( bs_model = bs_model,
+                            Omega_hat_list <- BayesMVP::extract_Omega_via_bridgestan( bs_model = bs_model,
                                                                             theta_main = theta_main_median,
                                                                             n_tests = n_tests,
                                                                             n_class = n_class_for_reorder)
@@ -2198,13 +3204,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ##
                         if (identical(test_order_rule_for_reorder_cols_MVP,
                                       "most_nearly_deterministic_test_last_then_greedy_correlation_order")) {
-                              tail_extremeness_per_test <-  compute_tail_extremeness_per_test_LC_MVP(
+                              tail_extremeness_per_test <-  BayesMVP::compute_tail_extremeness_per_test_LC_MVP(
                                     theta_main                   = theta_main_median,
                                     n_tests                      = n_tests,
                                     n_class                      = n_class_for_reorder,
                                     n_covariates_per_outcome_mat = model_args_list$n_covariates_per_outcome_mat,
                                     X                            = model_args_list$X)
-                              test_perm <-  compute_test_order_with_most_nearly_deterministic_test_last(
+                              test_perm <-  BayesMVP::compute_test_order_with_most_nearly_deterministic_test_last(
                                     Omega_hat_list            = Omega_hat_list,
                                     tail_extremeness_per_test = tail_extremeness_per_test)
                               message(colourise(paste0("Test tail extremeness (sum over classes of ",
@@ -2227,7 +3233,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                     as.numeric(model_args_list$n_cat_per_test)
                               }
                               cutpoints_per_class_and_test <-
-                                    extract_cutpoints_per_class_and_test_via_bridgestan(
+                                    BayesMVP::extract_cutpoints_per_class_and_test_via_bridgestan(
                                     bs_model           = bs_model,
                                     theta_main         = theta_main_median,
                                     n_tests            = n_tests,
@@ -2235,14 +3241,14 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                     n_cat_per_test     = n_cat_per_test_for_reorder,
                                     n_thr_per_ord_test = model_args_list$n_thr_per_ord_test)
                               tail_category_distance_per_test <-
-                                    compute_tail_category_distance_from_latent_mean_per_test(
+                                    BayesMVP::compute_tail_category_distance_from_latent_mean_per_test(
                                     theta_main                   = theta_main_median,
                                     n_tests                      = n_tests,
                                     n_class                      = n_class_for_reorder,
                                     n_covariates_per_outcome_mat = model_args_list$n_covariates_per_outcome_mat,
                                     X                            = model_args_list$X,
                                     cutpoints_per_class_and_test = cutpoints_per_class_and_test)
-                              test_perm <-  compute_test_order_with_most_nearly_deterministic_test_last(
+                              test_perm <-  BayesMVP::compute_test_order_with_most_nearly_deterministic_test_last(
                                     Omega_hat_list            = Omega_hat_list,
                                     tail_extremeness_per_test = tail_category_distance_per_test)
                               message(colourise(paste0("Test tail-category distance from the latent mean (sum ",
@@ -2251,8 +3257,31 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                                      format = "f"), collapse = " "),
                                                        "; test with the largest distance placed last: ",
                                                        test_perm[n_tests]), "cyan"))
+                        } else if (identical(test_order_rule_for_reorder_cols_MVP,
+                                             paste0("tests_missing_for_most_people_last_then_greedy_",
+                                                    "correlation_order"))) {
+                              ##
+                              ## ---- the tests missing for more than half of the people (y NA or negative) last;
+                              ##      the greedy order within each group:
+                              ##
+                              greedy_test_order <-  BayesMVP::compute_optimal_test_order(Omega_hat_list)
+                              y_for_missingness <-  as.matrix(Stan_data_list$y)
+                              proportion_missing_per_test <-  colMeans(is.na(y_for_missingness) |
+                                                                       (y_for_missingness < 0))
+                              test_is_missing_for_most_people <-  proportion_missing_per_test > 0.5
+                              missing_for_most_people_in_greedy_order <-
+                                    test_is_missing_for_most_people[greedy_test_order]
+                              test_perm <-  c(greedy_test_order[!missing_for_most_people_in_greedy_order],
+                                              greedy_test_order[missing_for_most_people_in_greedy_order])
+                              message(colourise(paste0("Proportion of people missing each test: ",
+                                                       paste(formatC(proportion_missing_per_test, digits = 3,
+                                                                     format = "f"), collapse = " "),
+                                                       "; greedy order ",
+                                                       paste(greedy_test_order, collapse = " "),
+                                                       "; tests missing for most people placed last: ",
+                                                       paste(test_perm, collapse = " ")), "cyan"))
                         } else {
-                              test_perm <- compute_optimal_test_order(Omega_hat_list)
+                              test_perm <- BayesMVP::compute_optimal_test_order(Omega_hat_list)
                         }
                       }
                       test_inv_perm <- order(test_perm)
@@ -2262,7 +3291,23 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ##
                         n_tests_loc <- n_tests
                         ##
-                      if (Model_type == "Stan") {
+                      if ((Model_type == "Stan") && !is.null(Stan_data_list$latent_test_order)) {
+                        ##
+                        ## ---- USER-SUPPLIED Stan model with the data field 'latent_test_order' (e.g. the
+                        ##      four-class LC-MVOP model): the model sets the order in which the tests' latent
+                        ##      variables are conditioned on each other (the GHK sequence, the LDL order of the
+                        ##      correlation matrices and the nuisance columns) from latent_test_order itself,
+                        ##      whilst its data, its other parameters and its outputs stay in the original test
+                        ##      order. So the chosen order goes into latent_test_order and NOTHING else in the
+                        ##      Stan data is changed (y and every per-test entry stay as supplied):
+                        ##
+                        Stan_data_list$latent_test_order <- as.integer(test_perm)
+                        ##
+                        message("reorder_cols_MVP (Stan, latent_test_order): latent_test_order set to [",
+                                paste(test_perm, collapse = ", "), "] (latent position j = original test ",
+                                "test_perm[j]); the data and the outputs stay in the original test order.")
+                        ##
+                      } else if (Model_type == "Stan") {
                         ##
                         ## ---- USER-SUPPLIED Stan model: the ONLY object permuted is the outcome
                         ##      matrix 'y' of the supplied Stan data - BayesMVP cannot know which of
@@ -2327,7 +3372,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ##      indexed by test pair in the same way. permute_corr_data() reads each matrix
                         ##      through its lower triangle, the triangle the models read:
                         ##
-                        perm_data <-  permute_corr_data( lb_corr = model_args_list$lb_corr,
+                        perm_data <-  BayesMVP::permute_corr_data( lb_corr = model_args_list$lb_corr,
                                                          ub_corr = model_args_list$ub_corr,
                                                          known_values_indicator =
                                                                model_args_list$known_values_indicator_list,
@@ -2373,7 +3418,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         for (kk in 1:n_chains_burnin) {
                           if (!is.null(init_lists_per_chain[[kk]]$u_raw)) {
                             init_lists_per_chain[[kk]]$u_raw <-
-                                  fn_u_raw_initial_values_in_fitted_test_order(
+                                  BayesMVP:::fn_u_raw_initial_values_in_fitted_test_order(
                                         u_raw = init_lists_per_chain[[kk]]$u_raw,
                                         test_perm = test_perm,
                                         N = nrow(y_swapped))
@@ -2395,7 +3440,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         for (kk in 1:n_chains_burnin) {
                           if (!is.null(init_lists_per_chain[[kk]]$Omega_unconstrained_vec)) {
                             init_lists_per_chain[[kk]]$Omega_unconstrained_vec <-
-                                  fn_Omega_unconstrained_vec_initial_values_in_fitted_test_order(
+                                  BayesMVP:::fn_Omega_unconstrained_vec_initial_values_in_fitted_test_order(
                                         Omega_unconstrained_vec =
                                               init_lists_per_chain[[kk]]$Omega_unconstrained_vec,
                                         test_perm = test_perm,
@@ -2691,8 +3736,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              ##
                                                              model_args_list = model_args_list,
                                                              ##
-                                                             compile = TRUE,
-                                                             force_recompile = FALSE,
+                                                             compile = init_object$compile,
+                                                             force_recompile = init_object$force_recompile,
                                                              ##
                                                              cmdstanr_model_fit_obj = NULL,
                                                              ##
@@ -2704,6 +3749,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              stanc_args = stanc_args,
                                                              make_args = make_args)
                             ##
+                            ## (the writer's record of the nuisance blocks held by NicoStan, kept through the
+                            ##  rebuild)
+                            init_object$nuisance_blocks_held_by_NicoStan <-
+                                  nuisance_blocks_held_by_NicoStan_of_the_model
+                            ##
                             Model_args_as_Rcpp_List <- init_object$Model_args_as_Rcpp_List
                             Model_args_as_Rcpp_List$autodiff_fallback <-  autodiff_fallback
                             Model_args_as_Rcpp_List$n_chunks_multiplier_for_PartialLog_log_scale_evaluation <-
@@ -2713,11 +3763,16 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             n_nuisance <- init_object$n_nuisance ; n_nuisance
                             n_params_main <- init_object$n_params_main ; n_params_main
                             ##
-                            n_nuisance_to_track <- fn_resolve_n_nuisance_to_track( user_value = n_nuisance_to_track_user,
-                                                                                   sample_nuisance = sample_nuisance,
-                                                                                   n_nuisance = n_nuisance,
-                                                                                   n_params_main = n_params_main,
-                                                                                   bs_model = init_object$bs_model)
+                            positions_of_the_nuisance_values_to_keep <- fn_positions_of_the_nuisance_values_to_track(
+                                  nuisance_to_track = nuisance_to_track_user,
+                                  nuisance_blocks   = init_object$nuisance_blocks_held_by_NicoStan,
+                                  Stan_data_list    = Stan_data_list,
+                                  n_nuisance        = n_nuisance)
+                            n_nuisance_to_track <- length(positions_of_the_nuisance_values_to_keep)
+                            if (n_nuisance_to_track > 0L) {
+                                  Rcpp_fn_set_the_positions_of_the_nuisance_values_kept_in_the_trace(
+                                        positions_from_0 = as.integer(positions_of_the_nuisance_values_to_keep))
+                            }
                             # ##
                             # if (is.null(n_nuisance_to_track)) {
                             #   if (sample_nuisance == FALSE) {
@@ -2784,7 +3839,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                               n_params_main = n_params_main,
                                                               ##
                                                               chunk_layout_of_nuisance_vector_in_burnin =
-                                                                    chunk_layout_of_nuisance_vector_in_burnin)
+                                                                    chunk_layout_of_nuisance_vector_in_burnin,
+                                                              ##
+                                                              nuisance_blocks_held_by_NicoStan =
+                                                                    init_object$nuisance_blocks_held_by_NicoStan,
+                                                              Stan_data_list = Stan_data_list)
                             ##
                             inits_unconstrained_vec_per_chain <- outs$inits_unconstrained_vec_per_chain
                             ##
@@ -3040,7 +4099,6 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 }
                 ##
                 ##
-                ## ---- interest_only (every tau criterion since 6 Oct 2026; before, burnin_algorithm = "LQ_ESSR" only): the main-block
                 ##      rows of the named parameter families, over which the trajectory criterion computes its statistic. The parameter
                 ##      vector is (nuisance, main), so the main names are the last n_params_main BridgeStan names; a family is the name
                 ##      before its first "." or "[" (e.g. "beta.1.2.1" -> "beta"). NULL = every row of the adapted block:
@@ -3052,7 +4110,12 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       stop("interest_only is its own choice of the criterion's parameters (a subset of the main block); use it with tau_adaptation_block = 'main', not 'joint'.")
                 }
                 if (!is.null(interest_only)) {
-                      main_parameter_names <-  utils::tail(init_object$bs_main_param_names, n_params_main)
+                      ## (the unconstrained names: one per coordinate; the constrained names are longer than the
+                      ##  coordinates for a simplex, which would shift every name after it)
+                      # main_parameter_names <-  utils::tail(init_object$bs_main_param_names, n_params_main)
+                      main_parameter_names <-  utils::tail(if (!is.null(init_object$bs_main_param_unc_names))
+                                                                 init_object$bs_main_param_unc_names else
+                                                                 init_object$bs_main_param_names, n_params_main)
                       main_parameter_families <-  sub(pattern = "[.\\[].*$", replacement = "", x = main_parameter_names)
                       ## a family that matches no main parameter (e.g. a misspelt name) stops for a user-supplied
                       ## interest_only; the built-in LC_MVP / LC_MVOP default keeps the families this model has
@@ -3083,6 +4146,30 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                      "tau_adaptation_block = \"main\" monitors every main ",
                                                      "parameter."),
                                               "cyan"))
+                      }
+                }
+                ##
+                ## ---- tau_criteria_monitor_reported_quantities = TRUE (tau adapted): the function of the
+                ##      reported quantities, f(theta_main), that every position-based trajectory criterion
+                ##      monitors in the main burn-in (init_and_run_burnin_ChESSR): reported_quantities_function,
+                ##      or, when it is NULL, the built-in one of LC_MVP / LC_MVOP
+                ##      (R_fn_reported_quantities_for_tau_criteria.R). It is built here, from the init_object that
+                ##      the main burn-in runs with, i.e. after any test re-ordering of reorder_cols_MVP (the
+                ##      re-initialisation after the pre-burnin, above). A model without built-in reported
+                ##      quantities needs reported_quantities_function:
+                if (isTRUE(tau_criteria_monitor_reported_quantities) && !isTRUE(manual_tau) &&
+                    is.null(reported_quantities_function)) {
+                      reported_quantities_function <-  fn_reported_quantities_function_for_built_in_LCMs(
+                            init_object = init_object,
+                            n_params_main = n_params_main)
+                      if (is.null(reported_quantities_function)) {
+                            stop(paste0("tau_criteria_monitor_reported_quantities = TRUE: Model_type \"",
+                                        init_object$Model_type, "\" has no built-in reported quantities (only ",
+                                        "LC_MVP and LC_MVOP have them). Give reported_quantities_function: a ",
+                                        "function of a numeric matrix of main parameters (n_params_main = ",
+                                        n_params_main, " rows in the sampler's main-block order, unconstrained ",
+                                        "scale, x chains) that returns a numeric matrix of the reported ",
+                                        "quantities (one row per quantity, with rownames, x chains)."))
                       }
                 }
                 bulk_local_tuner_names <-  NULL
@@ -3124,7 +4211,6 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              ## debug = TRUE: the burn-in keeps its debug record
                                                              ## (R_fn_init_and_run_burnin_CHESS.R):
                                                              debug = debug,
-                                                             ## (7 Oct 2026) n_iter, for the finite-run
                                                              ## ESS of a burnin_algorithm:
                                                              n_iter_sampling_per_chain = n_iter,
                                                              bulk_local_tuner = bulk_local_tuner,
@@ -3132,7 +4218,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              bulk_local_tuner_cost_contract =
                                                                    bulk_local_tuner_cost_contract,
                                                              debug_burnin_timing = debug_burnin_timing,
+##
                         ## ---- burn-in adaptation settings:
+##
                         tau_initial_moments_window_fraction = tau_initial_moments_window_fraction,
                         tau_initial_moments_window_min_iter = tau_initial_moments_window_min_iter,
                         tau_adam_beta1 = tau_adam_beta1,
@@ -3160,6 +4248,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                               record_burnin_metric_nuisance_variance_quantiles_history,
                         burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step =
                               burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step,
+                        Hessian_metric_offdiagonal_shrinkage = Hessian_metric_offdiagonal_shrinkage,
                                                              ##
                                                              ## CHESSR_time / SNAPER_time only (NULL otherwise):
                                                              time_criterion_sampling_quantities = time_criterion_sampling_quantities,
@@ -3216,12 +4305,51 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              tau_cost_exponent = tau_cost_exponent,
                                                              esjd_jump_power = esjd_jump_power,
                                                              interest_rows = interest_rows,
+                                                             tau_criteria_monitor_reported_quantities =
+                                                                   tau_criteria_monitor_reported_quantities,
+                                                             reported_quantities_function =
+                                                                   reported_quantities_function,
+                                                ## (indented less: the argument name is long)
+                                                reported_quantities_centre_and_scale_from_last_n_iterations =
+                                                      reported_quantities_centre_and_scale_from_last_n_iterations,
                                                              tau_jitter_burnin = tau_jitter_burnin,
-                                                             tau_adaptation_block = tau_adaptation_block,
+                                                             tau_adaptation_block = tau_adaptation_block_as_given,
                                                              SpESS_R_max_rows_fitted_per_update =
                                                                    SpESS_R_max_rows_fitted_per_update,
                                                              SpESS_R_bins_decay_lazily =
                                                                    SpESS_R_bins_decay_lazily,
+                                                             SpESS_R_soft_minimum_power =
+                                                                   SpESS_R_soft_minimum_power,
+                                                             SpESS_R_first_update_jumps_to_the_maximiser =
+                                                                   SpESS_R_first_update_jumps_to_the_maximiser,
+                                                             SpESS_R_doubling_needs_evidence_on_updates_in_a_row =
+                                                              SpESS_R_doubling_needs_evidence_on_updates_in_a_row,
+                                                             SpESS_R_statistics_in_parameter_coordinates =
+                                                                   SpESS_R_statistics_in_parameter_coordinates,
+                                                             SpESS_R_sampling_tau_from_last_fraction_of_updates =
+                                                              SpESS_R_sampling_tau_from_last_fraction_of_updates,
+                                          ## (indented less: the argument name is long)
+                                          SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates =
+                                                SpESS_R_sampling_tau_from_maximiser_over_last_fraction_of_updates,
+                                                             SpESS_R_bin_forgetting_factor =
+                                                                   SpESS_R_bin_forgetting_factor,
+                                                             SpESS_R_normalising_variances_from_last_n_updates =
+                                                              SpESS_R_normalising_variances_from_last_n_updates,
+                                                             SpESS_R_linear_ESS_fraction_multiplier =
+                                                              SpESS_R_linear_ESS_fraction_multiplier,
+                                                             SpESS_R_quadratic_ESS_fraction_multiplier =
+                                                              SpESS_R_quadratic_ESS_fraction_multiplier,
+                                                             SpESS_R_quadratic_part_normal_mode_spectral_fit =
+                                                              SpESS_R_quadratic_part_normal_mode_spectral_fit,
+                                          ## (indented less: the argument name is long)
+                                          SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes =
+                                                SpESS_R_quadratic_part_from_linear_spectrum_with_pair_modes,
+                                          ## (indented less: the argument name is long)
+                                          SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective =
+                                                SpESS_R_target_tau_is_shortest_within_fraction_of_best_objective,
+                                  ## (indented less: the argument name is long)
+                                  SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations =
+                                        SpESS_R_linear_part_measured_persistence_from_last_n_burnin_iterations,
                                                              ##
                                                              burnin_algorithm = burnin_algorithm,
                                                              diffusion_HMC = diffusion_HMC,
@@ -3274,7 +4402,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              ##
                                                              time_pre_burnin = time_pre_burnin,
                                                              ##
-                                                             metric_start_iter = NULL,
+                                                             metric_start_iter = metric_start_iter,
                                                              ##
                                                              eps_init = NULL,
                                                              ##
@@ -3319,6 +4447,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
         
                           Model_args_as_Rcpp_List <-  burnin_object$Model_args_as_Rcpp_List
                           EHMC_args_as_Rcpp_List  <-  burnin_object$EHMC_args_as_Rcpp_List
+                          EHMC_args_as_Rcpp_List$max_L <-  max_L
                           ## The sampling phase has its own trajectory randomisation setting.
                           EHMC_args_as_Rcpp_List$randomize_tau <-  randomize_tau_sampling
                           EHMC_args_as_Rcpp_List$share_tau_ii_across_chains <-  FALSE
@@ -3497,7 +4626,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                   stop("Cannot re-lay-out the nuisance vector for num_chunks_sampling != num_chunks_burnin: ",
                                        "expected n_nuisance = N * n_tests. Use the same chunk count for burn-in and sampling.")
                                 }
-                                nuisance_chunk_remap_index <- fn_nuisance_chunk_remap_index( N             = N_for_remap,
+                                nuisance_chunk_remap_index <- BayesMVP:::fn_nuisance_chunk_remap_index(
+                                                                                             N             = N_for_remap,
                                                                                              n_tests       = n_tests_for_remap,
                                                                                              n_chunks_from = num_chunks_used_in_burnin,
                                                                                              n_chunks_to   = num_chunks_used_in_sampling,
@@ -3539,6 +4669,26 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                 }
                                 cat("nuisance layout remapped for sampling: num_chunks ", num_chunks_used_in_burnin, " -> ",
                                     num_chunks_used_in_sampling, " (inits + ", paste(names_of_remapped_fields, collapse = ", "), ")\n", sep = "")
+                          }
+                          ##
+                          ## ---- the dense main metric made exactly symmetric before it is frozen: the inverse metric
+                          ##      (the covariance estimate) is averaged with its transpose, and the metric and the
+                          ##      Cholesky factor are rebuilt from it, so that the three agree (the asymmetry it had,
+                          ##      relative to its largest entry, is printed):
+                          ##
+                          if (identical(EHMC_Metric_as_Rcpp_List$metric_shape_main, "dense") &&
+                              is.matrix(EHMC_Metric_as_Rcpp_List$M_inv_dense_main)) {
+                                M_inv_dense_main_as_estimated <-  EHMC_Metric_as_Rcpp_List$M_inv_dense_main
+                                relative_asymmetry <-  max(abs(M_inv_dense_main_as_estimated - t(M_inv_dense_main_as_estimated))) /
+                                                       max(abs(M_inv_dense_main_as_estimated))
+                                M_inv_dense_main_symmetric <-  0.5 * (M_inv_dense_main_as_estimated + t(M_inv_dense_main_as_estimated))
+                                M_dense_main_symmetric <-  solve(M_inv_dense_main_symmetric)
+                                M_dense_main_symmetric <-  0.5 * (M_dense_main_symmetric + t(M_dense_main_symmetric))
+                                EHMC_Metric_as_Rcpp_List$M_inv_dense_main <-  M_inv_dense_main_symmetric
+                                EHMC_Metric_as_Rcpp_List$M_dense_main <-  M_dense_main_symmetric
+                                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <-  t(base::chol(M_inv_dense_main_symmetric))
+                                cat("dense main metric made symmetric before sampling: relative asymmetry it had = ",
+                                    format(relative_asymmetry, digits = 3), "\n", sep = "")
                           }
                           ##
                           ## ---- validate the frozen sampling state and geometry before the timer/native call:
@@ -3625,6 +4775,323 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                 fn_set_sampler_halton_flag(TRUE)
                                 on.exit(fn_set_sampler_halton_flag(FALSE), add = TRUE)
                           }
+                          ##
+                          ## ---- step-size (eps) calibration on the sampling chains
+                          ##      (fn_calibrate_eps_on_sampling_chains_from_one_call_to_adapt_delta in
+                          ##      R_fn_calibrate_eps_on_sampling_chains_to_adapt_delta.R): one sampling call of
+                          ##      every sampling chain, from the initial states of the sampling, at the eps
+                          ##      handed over by the burn-in, without any nuisance trace; its first block of
+                          ##      iterations is discarded and the acceptance of the rest sets the sampling eps
+                          ##      so that the mean acceptance probability over the sampling chains is
+                          ##      adapt_delta. The sampling then starts again from the same initial states (the
+                          ##      sampler copies them). Its time is counted with the burn-in time (below) and its
+                          ##      gradient evaluations with the burn-in's (summary):
+                          ##
+                          eps_calibration_on_sampling_chains <-  NULL
+                          time_eps_calibration_on_sampling_chains <-  0
+                          if (isTRUE(calibrate_eps_on_sampling_chains_before_sampling)) {
+                                time_start_of_eps_calibration <-  Sys.time()
+                                ## ## (every nuisance parameter of the sampler's vector, so that the last draw of
+                                ## ##  the block is the chain's whole nuisance state; 0 without nuisance
+                                ## ##  parameters)
+                                ## n_nuisance_in_last_state_of_calibration_block <-  if (isTRUE(sample_nuisance))
+                                      ## NROW(theta_nuisance_vectors_all_chains_input_from_R) else 0
+                                ## fn_run_sampling_iterations_continuing_the_chains <-  function( n_iter,
+                                                                                               ## eps_main,
+                                                                                               ## eps_us,
+                                                                                               ## seed) {
+                                      ## EHMC_args_of_calibration_block <-  EHMC_args_as_Rcpp_List
+                                      ## EHMC_args_of_calibration_block$eps_main <-  eps_main
+                                      ## EHMC_args_of_calibration_block$eps_us <-  eps_us
+                                      ## if (parallel_method == "OpenMP") {
+                                            ## result_of_block <-  Rcpp_fn_OpenMP_EHMC_sampling(
+                                                  ## n_threads_R = n_chains_sampling,
+                                                  ## sample_nuisance_R = sample_nuisance,
+                                                  ## n_nuisance_to_track =
+                                                        ## n_nuisance_in_last_state_of_calibration_block,
+                                                  ## seed_R = seed,
+                                                  ## iter_one_by_one = FALSE,
+                                                  ## n_iter_R = n_iter,
+                                                  ## partitioned_HMC_R = partitioned_HMC,
+                                                  ## diffusion_HMC_R = diffusion_HMC,
+                                                  ## Model_type_R = Model_type,
+                                                  ## force_autodiff_R = force_autodiff,
+                                                  ## force_PartialLog = force_PartialLog,
+                                                  ## multi_attempts_R = multi_attempts,
+                                                  ## theta_main_vectors_all_chains_input_from_R =
+                                                        ## theta_main_vectors_all_chains_input_from_R,
+                                                  ## theta_us_vectors_all_chains_input_from_R =
+                                                        ## theta_nuisance_vectors_all_chains_input_from_R,
+                                                  ## y = y,
+                                                  ## Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                  ## EHMC_args_as_Rcpp_List = EHMC_args_of_calibration_block,
+                                                  ## EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                  ## n_threads_WCP = n_threads_WCP_sampling)
+                                      ## } else {
+                                            ## EHMC_args_of_calibration_block$store_log_lik_trace <-  FALSE
+                                            ## result_of_block <-  Rcpp_fn_RcppParallel_EHMC_sampling(
+                                                  ## n_threads_R = n_chains_sampling,
+                                                  ## sample_nuisance_R = sample_nuisance,
+                                                  ## n_nuisance_to_track =
+                                                        ## n_nuisance_in_last_state_of_calibration_block,
+                                                  ## seed_R = seed,
+                                                  ## iter_one_by_one = FALSE,
+                                                  ## n_iter_R = n_iter,
+                                                  ## partitioned_HMC_R = partitioned_HMC,
+                                                  ## diffusion_HMC_R = diffusion_HMC,
+                                                  ## Model_type_R = Model_type,
+                                                  ## force_autodiff_R = force_autodiff,
+                                                  ## force_PartialLog = force_PartialLog,
+                                                  ## multi_attempts_R = multi_attempts,
+                                                  ## theta_main_vectors_all_chains_input_from_R =
+                                                        ## theta_main_vectors_all_chains_input_from_R,
+                                                  ## theta_us_vectors_all_chains_input_from_R =
+                                                        ## theta_nuisance_vectors_all_chains_input_from_R,
+                                                  ## y = y,
+                                                  ## Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                  ## EHMC_args_as_Rcpp_List = EHMC_args_of_calibration_block,
+                                                  ## EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                  ## use_disk = FALSE,
+                                                  ## trace_dir = use_disk_path,
+                                                  ## n_threads_WCP = n_threads_WCP_sampling)
+                                      ## }
+                                      ## ## (the last state of every chain becomes the start of the next block and
+                                      ## ##  of the sampling: the last column of each chain's main and nuisance
+                                      ## ##  traces, in the sampler's own layout; fn_sample's variables are
+                                      ## ##  updated)
+                                      ## main_traces_of_block <-  result_of_block[[1]]
+                                      ## for (chain in seq_len(n_chains_sampling)) {
+                                            ## last_iteration <-  ncol(main_traces_of_block[[chain]])
+                                            ## theta_main_vectors_all_chains_input_from_R[, chain] <<-
+                                                  ## main_traces_of_block[[chain]][, last_iteration]
+                                      ## }
+                                      ## if (n_nuisance_in_last_state_of_calibration_block > 0) {
+                                            ## nuisance_traces_of_block <-  result_of_block[[3]]
+                                            ## for (chain in seq_len(n_chains_sampling)) {
+                                                  ## last_iteration <-  ncol(nuisance_traces_of_block[[chain]])
+                                                  ## theta_nuisance_vectors_all_chains_input_from_R[, chain] <<-
+                                                        ## nuisance_traces_of_block[[chain]][, last_iteration]
+                                            ## }
+                                            ## rm(nuisance_traces_of_block)
+                                      ## }
+                                      ## ## (only the acceptance probabilities are returned: no trace is kept)
+                                      ## return(list(sampling_diagnostics = result_of_block$sampling_diagnostics))
+                                ## }
+                             ## ## (the sampling chains in a persistent native worker - the burn-in's own worker
+                             ## ##  type - with the sampling's settings: per-chain trajectory lengths, the
+                             ## ##  sampling metric and nuisance centre; the functions of the package whose worker
+                             ## ##  the burn-in used)
+                             ## worker_api_env_of_calibration <-  environment(fn_create_persistent_burnin_worker)
+                             ## fn_run_one_iteration_of_calibration_worker <-
+                                   ## get(x = "fn_persistent_burnin_run_one_iter_main_only",
+                                       ## envir = worker_api_env_of_calibration, mode = "function")
+                             ## fn_state_of_calibration_worker <-
+                                   ## get(x = "fn_persistent_burnin_get_state",
+                                       ## envir = worker_api_env_of_calibration, mode = "function")
+                             ## calibration_worker <-  fn_create_persistent_burnin_worker(
+                                   ## n_threads_R = n_chains_sampling,
+                                   ## partitioned_HMC_R = partitioned_HMC,
+                                   ## diffusion_HMC_R = diffusion_HMC,
+                                   ## Model_type_R = Model_type,
+                                   ## sample_nuisance_R = sample_nuisance,
+                                   ## force_autodiff_R = force_autodiff,
+                                   ## force_PartialLog_R = force_PartialLog,
+                                   ## multi_attempts_R = multi_attempts,
+                                   ## y_Eigen_R = y,
+                                   ## Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                   ## EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                                   ## EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                   ## n_threads_WCP = n_threads_WCP_sampling)
+                             ## fn_persistent_burnin_set_theta( calibration_worker,
+                                                             ## theta_main_vectors_all_chains_input_from_R,
+                                                             ## theta_nuisance_vectors_all_chains_input_from_R)
+                             ## ## (the iteration counter of the worker's random-number streams, over every block)
+                             ## calibration_iteration <-  0
+                             ## fn_run_sampling_iterations_continuing_the_chains <-  function( n_iter,
+                                                                                            ## eps_main,
+                                                                                            ## eps_us,
+                                                                                            ## seed) {
+                                   ## EHMC_args_of_calibration_block <-  EHMC_args_as_Rcpp_List
+                                   ## EHMC_args_of_calibration_block$eps_main <-  eps_main
+                                   ## EHMC_args_of_calibration_block$eps_us <-  eps_us
+                                   ## fn_persistent_burnin_update_adaptation( calibration_worker,
+                                                                           ## EHMC_args_of_calibration_block,
+                                                                           ## EHMC_Metric_as_Rcpp_List)
+                                   ## p_jump_main <-  matrix(data = NA_real_, nrow = n_iter,
+                                                          ## ncol = n_chains_sampling)
+                                   ## p_jump_nuisance <-  matrix(data = NA_real_, nrow = n_iter,
+                                                              ## ncol = n_chains_sampling)
+                                   ## for (iteration in seq_len(n_iter)) {
+                                         ## calibration_iteration <<-  calibration_iteration + 1
+                                         ## result_of_iteration <-  fn_run_one_iteration_of_calibration_worker(
+                                               ## calibration_worker, seed, calibration_iteration)
+                                         ## ## (the acceptance probability of each chain: row 1 of the main and of
+                                         ## ##  the nuisance outputs, as the burn-in reads them)
+                                         ## main_outputs <-
+                                               ## result_of_iteration$other_main_out_vector_all_chains_output_to_R
+                                         ## nuisance_outputs <-
+                                               ## result_of_iteration$other_us_out_vector_all_chains_output_to_R
+                                         ## p_jump_main[iteration, ] <-  main_outputs[1, ]
+                                         ## p_jump_nuisance[iteration, ] <-  nuisance_outputs[1, ]
+                                   ## }
+                                   ## return(list(sampling_diagnostics = list(p_jump_main = p_jump_main,
+                                                                           ## p_jump_nuisance = p_jump_nuisance)))
+                             ## }
+                                fn_run_sampling_iterations_from_initial_states <-  function( n_iter,
+                                                                                             eps_main,
+                                                                                             eps_us,
+                                                                                             seed) {
+                                      EHMC_args_of_calibration_call <-  EHMC_args_as_Rcpp_List
+                                      EHMC_args_of_calibration_call$eps_main <-  eps_main
+                                      EHMC_args_of_calibration_call$eps_us <-  eps_us
+                                      if (parallel_method == "OpenMP") {
+                                            result_of_call <-  Rcpp_fn_OpenMP_EHMC_sampling(
+                                                  n_threads_R = n_chains_sampling,
+                                                  sample_nuisance_R = sample_nuisance,
+                                                  n_nuisance_to_track = 0,
+                                                  seed_R = seed,
+                                                  iter_one_by_one = FALSE,
+                                                  n_iter_R = n_iter,
+                                                  partitioned_HMC_R = partitioned_HMC,
+                                                  diffusion_HMC_R = diffusion_HMC,
+                                                  Model_type_R = Model_type,
+                                                  force_autodiff_R = force_autodiff,
+                                                  force_PartialLog = force_PartialLog,
+                                                  multi_attempts_R = multi_attempts,
+                                                  theta_main_vectors_all_chains_input_from_R =
+                                                        theta_main_vectors_all_chains_input_from_R,
+                                                  theta_us_vectors_all_chains_input_from_R =
+                                                        theta_nuisance_vectors_all_chains_input_from_R,
+                                                  y = y,
+                                                  Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                  EHMC_args_as_Rcpp_List = EHMC_args_of_calibration_call,
+                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                  n_threads_WCP = n_threads_WCP_sampling)
+                                      } else {
+                                            EHMC_args_of_calibration_call$store_log_lik_trace <-  FALSE
+                                            result_of_call <-  Rcpp_fn_RcppParallel_EHMC_sampling(
+                                                  n_threads_R = n_chains_sampling,
+                                                  sample_nuisance_R = sample_nuisance,
+                                                  n_nuisance_to_track = 0,
+                                                  seed_R = seed,
+                                                  iter_one_by_one = FALSE,
+                                                  n_iter_R = n_iter,
+                                                  partitioned_HMC_R = partitioned_HMC,
+                                                  diffusion_HMC_R = diffusion_HMC,
+                                                  Model_type_R = Model_type,
+                                                  force_autodiff_R = force_autodiff,
+                                                  force_PartialLog = force_PartialLog,
+                                                  multi_attempts_R = multi_attempts,
+                                                  theta_main_vectors_all_chains_input_from_R =
+                                                        theta_main_vectors_all_chains_input_from_R,
+                                                  theta_us_vectors_all_chains_input_from_R =
+                                                        theta_nuisance_vectors_all_chains_input_from_R,
+                                                  y = y,
+                                                  Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                  EHMC_args_as_Rcpp_List = EHMC_args_of_calibration_call,
+                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                  use_disk = FALSE,
+                                                  trace_dir = use_disk_path,
+                                                  n_threads_WCP = n_threads_WCP_sampling)
+                                      }
+                                      ## (only the acceptance probabilities are returned)
+                                      return(list(sampling_diagnostics = result_of_call$sampling_diagnostics))
+                                }
+                                ## eps_calibration_on_sampling_chains <-
+                                ## fn_calibrate_eps_on_sampling_chains_to_adapt_delta( ... )   (chained blocks)
+                                eps_calibration_on_sampling_chains <-
+                                fn_calibrate_eps_on_sampling_chains_from_one_call_to_adapt_delta(
+                                      fn_run_sampling_iterations_from_initial_states =
+                                            fn_run_sampling_iterations_from_initial_states,
+                                      eps_main = EHMC_args_as_Rcpp_List$eps_main,
+                                      eps_us = EHMC_args_as_Rcpp_List$eps_us,
+                                      calibrate_eps_us = isTRUE(partitioned_HMC) && isTRUE(sample_nuisance),
+                                      adapt_delta = adapt_delta,
+                                      n_chains_sampling = n_chains_sampling,
+                                      n_transitions_per_eps_calibration_block =
+                                            n_transitions_per_eps_calibration_block,
+                                      n_eps_calibration_blocks = n_eps_calibration_blocks,
+                                      max_eps_main = max_eps_main,
+                                      max_eps_us = max_eps_us,
+                                      seed = seed)
+                             ## ## (the chains' states after the last block, read once, become the initial states
+                             ## ##  of the sampling; then the worker is released)
+                             ## theta_main_vectors_all_chains_input_from_R <-
+                                   ## fn_state_of_calibration_worker(calibration_worker,
+                                                                  ## "theta_main_vectors_all_chains_output_to_R")
+                             ## if (isTRUE(sample_nuisance) &&
+                                 ## (NROW(theta_nuisance_vectors_all_chains_input_from_R) > 0)) {
+                                   ## theta_nuisance_vectors_all_chains_input_from_R <-
+                                         ## fn_state_of_calibration_worker(
+                                               ## calibration_worker, "theta_us_vectors_all_chains_output_to_R")
+                             ## }
+                             ## rm(calibration_worker)
+                             ## invisible(gc())
+                                ## (also in the burn-in record's EHMC_args_as_Rcpp_List, from which the summary
+                                ##  takes the sampling eps for the sampling gradient evaluations; the record's
+                                ##  eps_main and eps_us keep the eps handed over by the burn-in)
+                                EHMC_args_as_Rcpp_List$eps_main <-  eps_calibration_on_sampling_chains$eps_main
+                                burnin_object$EHMC_args_as_Rcpp_List$eps_main <-
+                                      eps_calibration_on_sampling_chains$eps_main
+                                if (isTRUE(partitioned_HMC) && isTRUE(sample_nuisance)) {
+                                      EHMC_args_as_Rcpp_List$eps_us <-  eps_calibration_on_sampling_chains$eps_us
+                                      burnin_object$EHMC_args_as_Rcpp_List$eps_us <-
+                                            eps_calibration_on_sampling_chains$eps_us
+                                }
+                                ## (the tau of the blocks, for their gradient evaluations in the summary)
+                                eps_calibration_on_sampling_chains$tau_main <-  EHMC_args_as_Rcpp_List$tau_main
+                                eps_calibration_on_sampling_chains$tau_us <-  EHMC_args_as_Rcpp_List$tau_us
+                                time_eps_calibration_on_sampling_chains <-
+                                      as.numeric(difftime( Sys.time(),
+                                                           time_start_of_eps_calibration,
+                                                           units = "secs"))
+                                eps_calibration_on_sampling_chains$time_seconds <-
+                                      time_eps_calibration_on_sampling_chains
+                          }
+                          ##
+                          ## ---- the sampling eps from the acceptance probabilities which the burn-in chains
+                          ##      recorded at each iteration of the last part of the burn-in, so that the ORDINARY
+                          ##      mean acceptance probability is adapt_delta. The burn-in, with its harmonic-mean
+                          ##      eps adaptation, is unchanged, and no iteration is added: the burn-in time and
+                          ##      gradient evaluations are the burn-in's own
+                          ##      (R_fn_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains.R):
+                          ##
+                          sampling_eps_from_acceptance_of_burnin_chains <-  NULL
+                          if (isTRUE(set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains)) {
+                                if (isTRUE(partitioned_HMC) && isTRUE(sample_nuisance)) {
+                                      stop(paste0("set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_",
+                                                  "chains sets the main eps only: it is not available with ",
+                                                  "partitioned HMC."))
+                                }
+                                sampling_eps_from_acceptance_of_burnin_chains <-
+                                      fn_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains(
+                                            eps_main_of_transition_during_burnin_vec =
+                                                  burnin_object$eps_main_of_transition_during_burnin_vec,
+                                            p_jump_main_during_burnin_vec =
+                                                  burnin_object$p_jump_main_during_burnin_vec,
+                                            metric_update_eps_tau_rescale_factor_vec =
+                                                  burnin_object$metric_update_eps_tau_rescale_factor_vec,
+                                            eps_main_handed_over_by_burnin = EHMC_args_as_Rcpp_List$eps_main,
+                                            n_chains_burnin = n_chains_burnin,
+                                            adapt_delta = adapt_delta,
+                                            fraction_of_burnin_iterations_at_end_used =
+                                                  fraction_of_burnin_iterations_at_end_used_for_sampling_eps,
+                                            ## max_eps_main = max_eps_main)
+                                            max_eps_main = max_eps_main,
+                                            ## (the iterations after the final metric update; a burn-in record
+                                            ##  without burnin_schedule$metric_adaptation_end_iter stops there)
+                                            first_burnin_iteration_used_for_sampling_eps =
+                                                  burnin_object$burnin_schedule$metric_adaptation_end_iter + 1)
+                                ## (also in the burn-in record's EHMC_args_as_Rcpp_List, from which the summary
+                                ##  takes the sampling eps for the sampling gradient evaluations; the record's
+                                ##  eps_main keeps the eps handed over by the burn-in)
+                                EHMC_args_as_Rcpp_List$eps_main <-
+                                      sampling_eps_from_acceptance_of_burnin_chains$eps_main
+                                burnin_object$EHMC_args_as_Rcpp_List$eps_main <-
+                                      sampling_eps_from_acceptance_of_burnin_chains$eps_main
+                          }
+                          ## (the start of the sampling call, whose seconds a repeated sampling counts as burn-in)
+                          time_start_of_sampling_call <-  Sys.time()
                           if (parallel_method == "OpenMP") {
                              sampling_object <- Rcpp_fn_OpenMP_EHMC_sampling( n_threads_R = n_chains_sampling,
                                                                                             sample_nuisance_R = sample_nuisance,
@@ -3672,6 +5139,171 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           }
                           print(paste("End of sampling"))
                           if (!is.null(fn_set_sampler_halton_flag)) fn_set_sampler_halton_flag(FALSE)
+                          ##
+                          ## ---- the sampling repeated with a refitted eps, when its mean acceptance probability
+                          ##      (over every sampling chain and iteration) is outside
+                          ##      repeat_sampling_with_eps_refitted_if_mean_acceptance_outside, up to
+                          ##      n_eps_refits_and_repeated_samplings times: the eps is refitted from the two
+                          ##      most recent points (the last calibration point and the sampling), with the
+                          ##      curve alpha(eps) = 2 Phi(-c eps^k) through both (z = -qnorm(alpha / 2) =
+                          ##      c eps^k; the one-call calibration assumes k = 2 through one point; with less
+                          ##      than 5% between the two eps, or k outside [1, 6], k = 2 through the second
+                          ##      point). The sampling starts again from the same initial states, with the same
+                          ##      seed. Each earlier sampling counts as burn-in: it is added to the calibration's
+                          ##      blocks (whose gradient evaluations the summary counts with the burn-in's) and
+                          ##      its seconds to the calibration's time (moved to the burn-in time below):
+                          ##
+                          eps_refits_after_mean_sampling_acceptance_outside_bounds <-  NULL
+                          if (!is.null(repeat_sampling_with_eps_refitted_if_mean_acceptance_outside) &&
+                              !is.null(eps_calibration_on_sampling_chains)) {
+                                bounds <-  repeat_sampling_with_eps_refitted_if_mean_acceptance_outside
+                                for (refit_number in seq_len(n_eps_refits_and_repeated_samplings + 1)) {
+
+                                      seconds_of_sampling_call <-  as.numeric(difftime(
+                                                                             Sys.time(),
+                                                                             time_start_of_sampling_call,
+                                                                             units = "secs"))
+                                      mean_sampling_acceptance <-
+                                            mean(sampling_object$sampling_diagnostics$p_jump_main)
+                                      if ((mean_sampling_acceptance >= bounds[1]) &&
+                                          (mean_sampling_acceptance <= bounds[2])) break
+                                      if (refit_number > n_eps_refits_and_repeated_samplings) {
+                                            warning(paste0("The mean sampling acceptance ",
+                                                           round(mean_sampling_acceptance, 3),
+                                                           " is still outside [", bounds[1], ", ", bounds[2],
+                                                           "] after ", n_eps_refits_and_repeated_samplings,
+                                                           " refits of the sampling eps."))
+                                            break
+                                      }
+                                      ##
+                                      ## ---- the refit from the two most recent points:
+##
+                                      blocks <-  eps_calibration_on_sampling_chains$blocks
+                                      calibration_points <-  blocks[blocks$used_in_fit, , drop = FALSE]
+                                      last_calibration_point <-  calibration_points[nrow(calibration_points), ]
+                                      eps_of_sampling <-  EHMC_args_as_Rcpp_List$eps_main
+                                      acceptance_of_first_point <-  last_calibration_point$mean_acceptance_main
+                                      z_of_first_point <-  -stats::qnorm(acceptance_of_first_point / 2)
+                                      z_of_second_point <-  -stats::qnorm(mean_sampling_acceptance / 2)
+                                      z_of_adapt_delta <-  -stats::qnorm(adapt_delta / 2)
+                                      log_ratio_of_eps <-  log(eps_of_sampling / last_calibration_point$eps_main)
+                                      k <-  log(z_of_second_point / z_of_first_point) / log_ratio_of_eps
+                                      too_little_change_of_eps <-  abs(log_ratio_of_eps) < log(1.05)
+                                      if (!is.finite(k) || too_little_change_of_eps || (k < 1) || (k > 6)) {
+                                            k <-  2
+                                      }
+                                      eps_main_refitted <-  eps_of_sampling *
+                                                            (z_of_adapt_delta / z_of_second_point)^(1 / k)
+                                      eps_main_refitted <-  min(max_eps_main, eps_main_refitted)
+                                      message(colourise(paste0(
+                                            "Mean sampling acceptance ", round(mean_sampling_acceptance, 3),
+                                            " outside [", bounds[1], ", ", bounds[2], "]: refit ", refit_number,
+                                            " of the sampling eps from (",
+                                            signif(last_calibration_point$eps_main, 4), ", ",
+                                            round(acceptance_of_first_point, 3), ") and (",
+                                            signif(eps_of_sampling, 4), ", ", round(mean_sampling_acceptance, 3),
+                                            "): k = ", round(k, 2), ", eps_main = ", signif(eps_main_refitted, 4),
+                                            "; the sampling is repeated"),
+                                            "cyan"))
+                                      ##
+                                      ## ---- the sampling just run, counted as burn-in (one more calibration
+                                      ##      block):
+                                      sampling_as_calibration_block <-  data.frame(
+                                            block = nrow(blocks) + 1,
+                                            n_iter = n_iter,
+                                            n_iter_discarded = 0,
+                                            n_chains = n_chains_sampling,
+                                            eps_main = eps_of_sampling,
+                                            mean_acceptance_main = mean_sampling_acceptance,
+                                            eps_us = EHMC_args_as_Rcpp_List$eps_us,
+                                            mean_acceptance_us = NA_real_,
+                                            used_in_fit = TRUE,
+                                            stringsAsFactors = FALSE)
+                                      eps_calibration_on_sampling_chains$blocks <-
+                                            rbind(blocks, sampling_as_calibration_block)
+                                      eps_calibration_on_sampling_chains$time_seconds <-
+                                            eps_calibration_on_sampling_chains$time_seconds +
+                                            seconds_of_sampling_call
+                                      time_eps_calibration_on_sampling_chains <-
+                                            time_eps_calibration_on_sampling_chains + seconds_of_sampling_call
+                                      eps_refits_after_mean_sampling_acceptance_outside_bounds <-  rbind(
+                                            eps_refits_after_mean_sampling_acceptance_outside_bounds,
+                                            data.frame( refit = refit_number,
+                                                        eps_main_of_last_calibration_point =
+                                                              last_calibration_point$eps_main,
+                                                        mean_acceptance_of_last_calibration_point =
+                                                              last_calibration_point$mean_acceptance_main,
+                                                        eps_main_of_sampling = eps_of_sampling,
+                                                        mean_sampling_acceptance = mean_sampling_acceptance,
+                                                        exponent_k_of_refit = k,
+                                                        eps_main_refitted = eps_main_refitted,
+                                                        seconds_counted_as_burnin = seconds_of_sampling_call,
+                                                        stringsAsFactors = FALSE))
+                                      ##
+                                      ## ---- the sampling again, from the same initial states and seed, with
+                                      ##      the refitted eps (also in the burn-in record, from which the summary
+                                      ##      takes the sampling eps):
+                                      EHMC_args_as_Rcpp_List$eps_main <-  eps_main_refitted
+                                      burnin_object$EHMC_args_as_Rcpp_List$eps_main <-  eps_main_refitted
+                                      eps_calibration_on_sampling_chains$eps_main <-  eps_main_refitted
+                                      rm(sampling_object)
+                                      invisible(gc(verbose = FALSE))
+                                      if (!is.null(fn_set_sampler_halton_flag)) fn_set_sampler_halton_flag(TRUE)
+                                      time_start_of_sampling_call <-  Sys.time()
+                                      if (parallel_method == "OpenMP") {
+                                            sampling_object <-  Rcpp_fn_OpenMP_EHMC_sampling(
+                                                  n_threads_R = n_chains_sampling,
+                                                  sample_nuisance_R = sample_nuisance,
+                                                  n_nuisance_to_track = n_nuisance_to_track,
+                                                  seed_R = seed,
+                                                  iter_one_by_one = FALSE,
+                                                  n_iter_R = n_iter,
+                                                  partitioned_HMC_R = partitioned_HMC,
+                                                  diffusion_HMC_R = diffusion_HMC,
+                                                  Model_type_R = Model_type,
+                                                  force_autodiff_R = force_autodiff,
+                                                  force_PartialLog = force_PartialLog,
+                                                  multi_attempts_R = multi_attempts,
+                                                  theta_main_vectors_all_chains_input_from_R =
+                                                        theta_main_vectors_all_chains_input_from_R,
+                                                  theta_us_vectors_all_chains_input_from_R =
+                                                        theta_nuisance_vectors_all_chains_input_from_R,
+                                                  y = y,
+                                                  Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                  EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                  n_threads_WCP = n_threads_WCP_sampling)
+                                      } else {
+                                            sampling_object <-  Rcpp_fn_RcppParallel_EHMC_sampling(
+                                                  n_threads_R = n_chains_sampling,
+                                                  sample_nuisance_R = sample_nuisance,
+                                                  n_nuisance_to_track = n_nuisance_to_track,
+                                                  seed_R = seed,
+                                                  iter_one_by_one = FALSE,
+                                                  n_iter_R = n_iter,
+                                                  partitioned_HMC_R = partitioned_HMC,
+                                                  diffusion_HMC_R = diffusion_HMC,
+                                                  Model_type_R = Model_type,
+                                                  force_autodiff_R = force_autodiff,
+                                                  force_PartialLog = force_PartialLog,
+                                                  multi_attempts_R = multi_attempts,
+                                                  theta_main_vectors_all_chains_input_from_R =
+                                                        theta_main_vectors_all_chains_input_from_R,
+                                                  theta_us_vectors_all_chains_input_from_R =
+                                                        theta_nuisance_vectors_all_chains_input_from_R,
+                                                  y = y,
+                                                  Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                                  EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List,
+                                                  use_disk = use_disk,
+                                                  trace_dir = use_disk_path,
+                                                  n_threads_WCP = n_threads_WCP_sampling)
+                                      }
+                                      print(paste("End of the repeated sampling"))
+                                      if (!is.null(fn_set_sampler_halton_flag)) fn_set_sampler_halton_flag(FALSE)
+
+                                }
+                          }
                            
                            # str(sampling_object)
                           
@@ -3683,7 +5315,15 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                               ## gave NA whenever the time rounded to a whole second (tictoc then prints e.g. "4 sec elapsed"):
                               time_sampling <- as.numeric(sampling_toc_result$toc - sampling_toc_result$tic)
                           })
-        
+                          ## (the eps calibration on the sampling chains ran inside the post-burnin timer: its
+                          ##  time moves from the sampling time to the burn-in time)
+                          if (time_eps_calibration_on_sampling_chains > 0) {
+                                time_sampling <-  time_sampling - time_eps_calibration_on_sampling_chains
+                                burnin_object$time_burnin <-  burnin_object$time_burnin +
+                                                              time_eps_calibration_on_sampling_chains
+                                time_burnin <-  time_burnin + time_eps_calibration_on_sampling_chains
+                          }
+
                           print(paste("time_sampling = ",  time_sampling))
                           
                           # gc()
@@ -3737,6 +5377,25 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                        pre_burnin = pre_burnin_object$burnin_profile,
                        main_burnin = burnin_object$burnin_profile) else NULL,
                    sampling_object = sampling_object,
+                   ## the eps calibration on the sampling chains
+                   ## (R_fn_calibrate_eps_on_sampling_chains_to_adapt_delta.R; NULL when
+                   ## calibrate_eps_on_sampling_chains_before_sampling = FALSE): the sampling eps, its blocks
+                   ## (counted with the burn-in's gradient evaluations by the summary), the tau of the blocks and
+                   ## the time (counted with the burn-in time):
+                   eps_calibration_on_sampling_chains =
+                         if (exists("eps_calibration_on_sampling_chains", inherits = FALSE))
+                               eps_calibration_on_sampling_chains else NULL,
+                   ## the refits of the sampling eps after a mean sampling acceptance outside
+                   ## repeat_sampling_with_eps_refitted_if_mean_acceptance_outside (NULL when there was none):
+                   eps_refits_after_mean_sampling_acceptance_outside_bounds =
+                         if (exists("eps_refits_after_mean_sampling_acceptance_outside_bounds", inherits = FALSE))
+                               eps_refits_after_mean_sampling_acceptance_outside_bounds else NULL,
+                   ## the sampling eps from the acceptance probabilities which the burn-in chains recorded
+                   ## (R_fn_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains.R; NULL when
+                   ## set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains = FALSE):
+                   sampling_eps_from_acceptance_of_burnin_chains =
+                         if (exists("sampling_eps_from_acceptance_of_burnin_chains", inherits = FALSE))
+                               sampling_eps_from_acceptance_of_burnin_chains else NULL,
                    ##
                    test_perm = test_perm,
                    test_inv_perm = test_inv_perm,
@@ -3752,6 +5411,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    ## cross-chain mean acceptance targeted by the burn-in eps adaptation ("harmonic" | "arithmetic"):
                    eps_acceptance_mean = eps_acceptance_mean,
                    burnin_algorithm = burnin_algorithm,
+                   ## the parameters of interest (parameter families; NULL = every main parameter), over which
+                   ## the summary computes every min-ESS-based efficiency measure, whatever the burn-in
+                   ## adaptation block:
+                   parameter_families_of_interest_for_min_ESS = parameter_families_of_interest_for_min_ESS,
                    trajectory_adaptation_version = "metric_main_v4",
                    ## trajectory_criterion = if (burnin_algorithm == "CHESSR_log") "ema_log_expected_numerator_over_mean_tau" else
                    ##                        if (burnin_algorithm %in% c("CHESSR", "SNAPER")) "expected_per_trajectory_rate" else
@@ -3763,6 +5426,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                           if (burnin_algorithm == "ESJD") "expected_per_trajectory_rate_of_squared_jumped_distance" else
                                           if (burnin_algorithm == "ESJD_CHESSR") "geometric_mean_of_ESJD_and_CHESSR_per_trajectory_rates" else
                                           if (burnin_algorithm == "ESJD_SNAPER") "geometric_mean_of_ESJD_and_SNAPER_per_trajectory_rates" else
+                                          if (burnin_algorithm == "ESJD_CHESSR_SNAPER")
+                                              paste0("geometric_mean_of_ESJD_CHESSR_and_SNAPER_per_trajectory_",
+                                                     "rates_with_equal_weights") else
+                                          if (burnin_algorithm == "ESJD_w50_CHESSR_w25_SNAPER_w25")
+                                              paste0("weighted_geometric_mean_of_ESJD_weight_0.50_",
+                                                     "CHESSR_weight_0.25_and_SNAPER_weight_0.25_",
+                                                     "per_trajectory_rates") else
                                           if (burnin_algorithm == "LQ_ESSR")
                                               "soft_minimum_of_linear_and_quadratic_lag_one_ESS_bounds_per_unit_trajectory_length" else
                                           if (burnin_algorithm == "L_ESSR_length_response")
@@ -3827,8 +5497,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                    trajectory_coordinates = "mass_metric",
                    trajectory_parameter_block = if_null_then_set_to(burnin_object$trajectory_parameter_block, "main"),
                    ## EXPERIMENTAL: block feeding the trajectory-length criterion, as requested and as actually used:
-                   tau_adaptation_block_requested = tau_adaptation_block,
-                   tau_adaptation_block = if_null_then_set_to(burnin_object$tau_adaptation_block, "main"),
+                   tau_adaptation_block_requested = tau_adaptation_block_as_given,
+                   tau_adaptation_block = if (identical(tau_adaptation_block_as_given, "interest_only"))
+                                                "interest_only" else
+                                                if_null_then_set_to(burnin_object$tau_adaptation_block, "main"),
                    tau_adaptation_enabled = !isTRUE(manual_tau),
                    randomize_tau_burnin = randomize_tau_burnin,
                    randomize_tau_sampling = randomize_tau_sampling,
@@ -3924,7 +5596,6 @@ R_fn_sample_model  <-    function(      debug = FALSE,
   return(out_list)
 
 }
-
 
 
 

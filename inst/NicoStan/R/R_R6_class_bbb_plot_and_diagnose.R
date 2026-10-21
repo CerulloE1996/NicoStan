@@ -66,58 +66,76 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                     #'self$summary_object$summaries$divergences contains divergence information (e.g. % of transitions which
                                     #'diverged). 
                                     get_divergences = function() {
+
                                          self$summary_object$summaries$divergences
                                     },
+
                                     
                                     #'@return Returns main parameter summaries as a tibble.
                                     get_summary_main = function() {
+
                                          self$summary_object$summaries$summary_tibbles$summary_tibble_main_params
                                     },
+
                                     
                                     #'@return Returns transformed parameter summaries as a tibble.
                                     get_summary_transformed = function() {
+
                                          self$summary_object$summaries$summary_tibbles$summary_tibble_transformed_parameters
                                     },
+
                                     
                                     #'@return Returns generated quantities as a tibble.
                                     get_summary_generated_quantities = function() {
+
                                          self$summary_object$summaries$summary_tibbles$summary_tibble_generated_quantities
                                     },
+
                                   
                                     #'Convenience method for posterior draws (as 3D arrays)
                                     #'@return Returns posterior draws as a 3D array (iterations, chains, parameters). 
                                     get_posterior_draws = function() {
+
                                       self$summary_object$traces$traces_as_arrays$draws_array
                                     },
+
                                     
                                     #'Convenience method for all traces (as 3D arrays)
                                     #'@return Returns posterior traces as a 3D arrays (iterations, chains, parameters). 
                                     get_all_traces = function() {
+
                                       self$summary_object$traces
                                     },
+
                                     
                                     #'Convenience method for posterior draws for log_lik (as 3D arrays)
                                     #'@return Returns posterior draws for log_lik as a 3D array (iterations, chains, parameters). 
                                     get_log_lik_trace = function() {
+
                                       self$summary_object$traces$log_lik_trace
                                     },
+
                                     
                                     #'Convenience method for posterior draws for nuisance (as 3D arrays)
                                     #'@return Returns posterior draws for nuisance as a 3D array (iterations, chains, parameters). 
                                     get_nuisance_trace = function() {
+
                                       self$summary_object$traces$nuisance_trace
                                     },
+
                                     
                                     #'Convenience method for posterior draws (as tibbles)
                                     #'@return Returns trace as tibbles. The trace gets returned as 3 seperate tibbles (one tibble for the 
                                     #'main parameters, one for the transformed parameters, and one for generated quantities). 
                                     get_posterior_draws_as_tibbles = function() {
+
                                       list(
                                          trace_as_tibble_main_params = self$summary_object$traces$traces_as_tibbles$trace_params_main_tibble,
                                          trace_as_tibble_transformed_params =  self$summary_object$traces$traces_as_tibbles$trace_transformed_params_tibble,
                                          trace_as_tibble_generated_quantities =  self$summary_object$traces$traces_as_tibbles$trace_generated_quantities_tibble
                                       )
                                     },
+
                                     
                                     
                                     ## Convenience methods for efficiency metrics
@@ -132,8 +150,9 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                     #'   \item Min_ESS_per_sec_total: The minimum ESS per second for the total model run time, including any time spent computing
                                     #'   summaries and diagnostics. 
                                     #'   \item Min_ESS_per_grad_sampling:  The minimum ESS per gradient evaluation for the sampling phase. 
-                                    #'   \item Min_ESS_sd_main: The minimum, over the main model parameters, of the ESS of the centred squared draws
-                                    #'   (the ESS for estimating the posterior SD).
+                                    #'   \item Min_ESS_sd_main: The minimum, over the main model parameters, of
+                                    #'   the ESS of the centred squared draws (the ESS for estimating the
+                                    #'   posterior SD).
                                     #'   \item Min_ESS_sd_per_grad_sampling: Min_ESS_sd_main per gradient evaluation for the sampling phase.
                                     #'   \item grad_evals_per_sec: The number of gradient evaluations performed per second. 
                                     #'   \item est_time_to_100_ESS_sampling: The estimated sampling time to reach a minimum ESS of 100.
@@ -168,8 +187,10 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                                         Min_ESS_per_sec_sampling = self$summary_object$summaries$efficiency_info$ESS_per_sec_samp,
                                         Min_ESS_per_sec_total = self$summary_object$summaries$efficiency_info$ESS_per_sec_total,
                                         Min_ESS_per_grad_sampling = self$summary_object$summaries$efficiency_info$Min_ess_per_grad_samp_weighted,
-                                        Min_ESS_sd_main = self$summary_object$summaries$efficiency_info$Min_ESS_sd_main,
-                                        Min_ESS_sd_per_grad_sampling = self$summary_object$summaries$efficiency_info$Min_ess_sd_per_grad_main_samp,
+                                        Min_ESS_sd_main =
+                                            self$summary_object$summaries$efficiency_info$Min_ESS_sd_main,
+                                        Min_ESS_sd_per_grad_sampling =
+                                            self$summary_object$summaries$efficiency_info$Min_ess_sd_per_grad_main_samp,
                                         grad_evals_per_sec = self$summary_object$summaries$efficiency_info$grad_evals_per_sec,
                                         ## extract the "time to X ESS" (for sampling time)
                                         est_time_to_100_ESS_sampling = self$summary_object$summaries$efficiency_info$sampling_time_to_100_ESS,
@@ -450,7 +471,6 @@ MVP_plot_and_diagnose <- R6Class("MVP_plot_and_diagnose",
                         
                       )
 )
-
 
 
 

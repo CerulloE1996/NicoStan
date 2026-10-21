@@ -33,7 +33,6 @@
 
  
 using namespace Rcpp;
-using namespace Eigen;
  
  
 
@@ -98,7 +97,7 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
               current_lp_grad_valid = false;
           }
  
-         //// debug = TRUE, sampling (6 Oct 2026): the buffers of each iteration's own trajectory length and
+ //// debug = TRUE, sampling: the buffers of each iteration's own trajectory length and
          //// main-parameter proposal (empty otherwise):
          const bool debug_record = EHMC_args_as_cpp_struct.debug && !burnin_indicator;
          if (debug_record) {
@@ -110,10 +109,16 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
          ///////////////////////////////////////// perform iterations for adaptation interval
          ////// main iteration loop:
          for (int ii = 0; ii < n_iter; ++ii) {
+                     fn_set_the_chain_and_the_iteration_of_this_thread_for_the_message_of_a_failed_gradient(
+                           chain_id, current_iter + ii);
                      
                      if (burnin_indicator) {
                          fn_seed_burnin_rng(rng_main_i, seed_main_chain_i, chain_id, current_iter + ii, 0);
-                         fn_seed_burnin_rng(rng_nuisance_i, seed_nuisance_chain_i, chain_id, current_iter + ii, 1);
+                         fn_seed_burnin_rng(rng_nuisance_i,
+                                            seed_nuisance_chain_i,
+                                            chain_id,
+                                            current_iter + ii,
+                                            1);
                      } else {
                      // Preserve the existing post-burn-in streams; only the overlapping burn-in seeds change.
                      // #if RNG_TYPE_CPP_STD == 1
@@ -125,7 +130,11 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                      // #endif 
                      // Sampling streams from separate tuple fields (seed + iteration collided across chains and runs):
                          fn_seed_sampling_rng(rng_main_i, seed_main_chain_i, chain_id, current_iter + ii, 0);
-                         fn_seed_sampling_rng(rng_nuisance_i, seed_nuisance_chain_i, chain_id, current_iter + ii, 1);
+                         fn_seed_sampling_rng(rng_nuisance_i,
+                                              seed_nuisance_chain_i,
+                                              chain_id,
+                                              current_iter + ii,
+                                              1);
                      }
                      
                      //// set by the sampler that runs this iteration's main-block trajectory (output only;
@@ -226,7 +235,8 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                                  } else {
                            
                                              //stan::math::start_nested();
-                                             fn_standard_HMC_dual_single_iter_InPlace_process(    result_input,    
+                                             fn_standard_HMC_dual_single_iter_InPlace_process(    result_input,
+                                                                                              
                                                                                                   rng_main_i,
                                                                                                   rng_nuisance_i,
                                                                                                   Model_type, 
@@ -249,7 +259,7 @@ ALWAYS_INLINE  void                    fn_sample_HMC_multi_iter_single_thread(  
                                          
                      }
                      
-                     //// debug = TRUE, sampling (6 Oct 2026): this iteration's jittered main-block length
+ //// debug = TRUE, sampling: this iteration's jittered main-block length
                      //// (the joint trajectory when partitioned_HMC = FALSE), its number of leapfrog steps and
                      //// the main-parameter proposal:
                      if (debug_record) {

@@ -1,7 +1,7 @@
 #### ===========================================================================================================
 ## R_fn_length_response_tau_criterion.R
 ##
-## ---- burnin_algorithm = "L_ESSR_length_response" / "LQ_ESSR_length_response" (6 Oct 2026) -------------------
+## ---- burnin_algorithm = "L_ESSR_length_response" / "LQ_ESSR_length_response" -------------------
 ##
 ##      The soft minimum, over the monitored coordinates j, of the lag-one ESS bounds g(a) = (1 - a) / (1 + a) of
 ##      the linear statistics z_j ("L_ESSR_length_response"), or of the linear statistics and the centred squares
@@ -24,7 +24,7 @@
 ##      upper_end_zone_in_doublings of the longest candidate (the criterion is then still rising at the longest
 ##      length that the data cover).
 ##
-##      Why (phase 1 of the LQ_ESSR redesign, 6 Oct 2026, in
+##      Why (phase 1 of the LQ_ESSR redesign, in
 ##      validation_staging/bulk-local-tuner-y0658d/lq_essr_redesign_2026_10_06): "LQ_ESSR" estimated
 ##      d log(criterion) / d log(tau) from one update's 4-chain product statistics of the slowest coordinates
 ##      divided by small smoothed levels; that gradient was heavy-tailed (max / median 22-122 vs ESJD 3-7), so
@@ -66,6 +66,7 @@ fn_length_response_initialise_state <-  function( n_statistics,
 
 ##
 ## ---- add one update's trajectories to the state:
+##
 ##        squared_jumps      = n_statistics x n_chains, the weighted squared jump of each statistic (zero for a
 ##                             chain that does not contribute: divergent, or non-finite statistics);
 ##        variances          = the variance of each statistic now;
@@ -145,7 +146,7 @@ fn_length_response_piecewise_linear_integral_weights <-  function( node_position
 }
 
 ##
-## ---- the criterion on the grid of candidate tau' and its maximiser (NULL while fewer than 3 bins hold at least
+## ---- the criterion on the grid of candidate tau' and its maximiser (NULL whilst fewer than 3 bins hold at least
 ##      minimum_bin_count forgotten chain counts):
 ##
 fn_length_response_evaluate <-  function( state,
@@ -252,6 +253,7 @@ fn_length_response_soft_minimum_ESS_bound_tau_update <-  function( criterion,
         n_chains <-  length(probabilities)
         ##
         ## ---- which chains contribute (as "LQ_ESSR"), and which are binned (every chain with a usable length):
+##
         statistics_are_finite <-  apply(is.finite(criterion$linear_jump_squared) &
                                         is.finite(criterion$quadratic_jump_squared) &
                                         is.finite(criterion$initial_fourth_moment), 2, all)
@@ -268,6 +270,7 @@ fn_length_response_soft_minimum_ESS_bound_tau_update <-  function( criterion,
         }
         ##
         ## ---- the moving averages (decay 0.9) of the start moments over the valid chains:
+##
         if (any(valid)) {
                 second_moment_now <-  rowMeans(criterion$initial_second_moment[, valid, drop = FALSE])
                 fourth_moment_now <-  rowMeans(criterion$initial_fourth_moment[, valid, drop = FALSE])
@@ -298,6 +301,7 @@ fn_length_response_soft_minimum_ESS_bound_tau_update <-  function( criterion,
         variance_linear <-  pmax(state$second_moment_moving_average, 1e-12)
         ##
         ## ---- the weighted squared jumps (zero for a chain that does not contribute):
+##
         linear_jumps <-  criterion$linear_jump_squared
         linear_jumps[!is.finite(linear_jumps)] <-  0
         squared_jumps <-  sweep(linear_jumps, 2, weights, "*")
@@ -321,6 +325,7 @@ fn_length_response_soft_minimum_ESS_bound_tau_update <-  function( criterion,
                                                  binned_chains      = binned_chains)
         ##
         ## ---- evaluate, and move tau:
+##
         evaluation <-  fn_length_response_evaluate( state             = state,
                                                     tau_cost_offset   = tau_cost_offset,
                                                     tau_cost_exponent = tau_cost_exponent)
@@ -356,8 +361,6 @@ fn_length_response_soft_minimum_ESS_bound_tau_update <-  function( criterion,
                     learning_rate_now          = learning_rate_now))
 
 }
-
-
 
 
 

@@ -32,7 +32,6 @@
 
  
 using namespace Rcpp;
-using namespace Eigen;
  
  
  
@@ -85,7 +84,7 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
                               std::vector<Eigen::Matrix<double, -1, -1>> &trace_output_log_lik,
                               Eigen::Matrix<double, -1, -1> &p_jump_main_output,
                               Eigen::Matrix<double, -1, -1> &p_jump_nuisance_output,
-                              //// debug = TRUE (6 Oct 2026; left empty otherwise): each iteration's own
+ //// debug = TRUE (; left empty otherwise): each iteration's own
                               //// trajectory length (iterations x chains) and each chain's main-parameter
                               //// proposals:
                               Eigen::Matrix<double, -1, -1> &tau_main_ii_output,
@@ -108,7 +107,11 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
         HMC_inputs.reserve(n_threads);
         // Construct the structs:
         for (int i = 0; i < n_threads; ++i) {
-          HMC_outputs.emplace_back(n_iter, n_nuisance_to_track, n_params_main, n_us, N);  // Construct directly in vector
+          HMC_outputs.emplace_back(n_iter,
+                                   n_nuisance_to_track,
+                                   n_params_main,
+                                   n_us,
+                                   N); // Construct directly in vector
           HMC_inputs.emplace_back(n_params_main, n_us, N);  // Construct directly in vector
         }
         
@@ -208,8 +211,12 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
                 // const int seed_main_int_i =     global_seed_main_int +     n_iter*(1 + chain_id_int);
                 // const int seed_nuisance_int_i = global_seed_nuisance_int + n_iter*(1 + chain_id_int);
                 // One hashed seed per (run seed, chain, block): the formula above gave chains of different runs the same seed.
-                const int seed_main_int_i =     fn_chain_seed_int(static_cast<std::uint64_t>(global_seed), chain_id_int, 0);
-                const int seed_nuisance_int_i = fn_chain_seed_int(static_cast<std::uint64_t>(global_seed), chain_id_int, 1);
+                const int seed_main_int_i =     fn_chain_seed_int(static_cast<std::uint64_t>(global_seed),
+                                                                  chain_id_int,
+                                                                  0);
+                const int seed_nuisance_int_i = fn_chain_seed_int(static_cast<std::uint64_t>(global_seed),
+                                                                  chain_id_int,
+                                                                  1);
                
                 #if RNG_TYPE_dqrng_xoshiro256plusplus == 1
                         dqrng::xoshiro256plus rng_main_i; //(global_rng_main);      // make thread local copy of rng 
@@ -349,7 +356,7 @@ void EHMC_sampling_OpenMP(    const int  &n_threads,
               if (sample_nuisance) {
                   p_jump_nuisance_output.col(i) = HMC_outputs[i].diagnostics_p_jump_us();
               }
-              //// debug = TRUE (6 Oct 2026): each iteration's own trajectory length and main-parameter proposal:
+ //// debug = TRUE: each iteration's own trajectory length and main-parameter proposal
               if (EHMC_args_as_cpp_struct_copies[i].debug) {
                   if (i == 0) {
                       tau_main_ii_output.resize(n_iter, n_threads);
