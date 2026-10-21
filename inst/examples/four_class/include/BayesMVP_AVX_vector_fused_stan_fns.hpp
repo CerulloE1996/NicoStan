@@ -4,7 +4,7 @@
 // The existing header, mathematical kernels and AoS overloads remain unchanged.
 // A single vector-valued node owns contiguous values AND adjoints. Keep the caller in this
 // representation across operations; converting back to Matrix<var> at every call defeats it.
-// Plain vector-valued vars are contiguous. Also support strided column views safely.
+// Non-strided vector-valued vars are contiguous. Also support strided column views safely.
 // namespace bmvp_stan_ext
 /*pstream__*/
 // Return N x 2: column 1 is z, column 2 log(probability). One callback; never fake

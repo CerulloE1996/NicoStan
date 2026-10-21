@@ -18,7 +18,7 @@
 //   - b_raw is declared as array[N_subj] row_vector[2] (subject i's b_raw[i, 1] and b_raw[i, 2]; the same
 //     unconstrained parameters, in the same order, as matrix[2, N_subj]), as u_raw in
 //     LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan, so that the sliced argument of reduce_sum_static is the
-//     parameter itself: one plain name holding everything per subject, nothing built on the main tape, in place
+//     parameter itself: one single name holding everything per subject, nothing built on the main tape, in place
 //     of b_raw_by_subject and the loop over the subjects which filled it (the sliced argument is never an
 //     expression: Stan math's reduce_sum holds the result of an expression by value and copies all of it at every
 //     split of the subjects into chunks, i.e. O(N x N_chunks));
@@ -39,7 +39,8 @@
 // joint_longitudinal_survival_chunked.stan
 // Tape-chunked version of joint_longitudinal_survival.stan: the same log density, with both
 // likelihoods summed over the subjects by reduce_sum_static, in chunks of chunk_size subjects (data), so that
-// each chunk's autodiff tape is built, differentiated and released before the next one (Paper 1's tape chunking;
+// each chunk's autodiff tape is built, differentiated and released before the next one (the
+// chunking paper's chunking;
 // N_chunks from NicoStan::fn_compute_initial_N_chunks()). Each chunk computes its subjects' terms with the
 // whole-vector operations of joint_longitudinal_survival.stan (its subjects' observations and quadrature points
 // are contiguous); eta_long and hazard_subj, transformed parameters there, are reported as generated quantities

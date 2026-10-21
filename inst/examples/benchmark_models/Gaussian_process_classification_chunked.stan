@@ -1,6 +1,6 @@
 // Gaussian_process_classification_chunked.stan
 // Tape-chunked version of Gaussian_process_classification.stan: the same log density, with every term per
-// observation inside reduce_sum_static (Paper 1's tape chunking; N_chunks from
+// observation inside reduce_sum_static (the tape-chunking paper's chunking; N_chunks from
 // NicoStan::fn_compute_initial_N_chunks()), so that each chunk's autodiff tape is built, differentiated and
 // released before the next one. As in the reduce_sum_static LC-MVP (LC_MVP_bin_PartialLog_v5_reduce_sum_static
 // .stan), everything per observation that is a parameter is packed into the sliced argument, and the shared

@@ -3,7 +3,7 @@
 // WITHIN-CHAIN PARALLELISM / CHUNKED-TAPE variant (reduce_sum_static) of LC_MVOP_4class_joint_v1.
 // Same model, same log-density. Structural differences only:
 //   (1) u_raw is array[N] row_vector[n_tests] so reduce_sum_static slices the nuisance parameters;
-//   (2) the likelihood is a plain partial-sum function; the u tanh-Jacobian is RETURNED, not jacobian +=;
+//   (2) the likelihood is a hand-written partial-sum function; the u tanh-Jacobian is RETURNED, not jacobian +=;
 //   (3) no log_lik in transformed parameters - target is incremented once, inside reduce_sum_static;
 //   (4) observed / missing index sets are built per slice inside the partial function;
 //   (5) chunk_size (data) bounds the slice size; R defaults to ceil(N / num_chunks). With threads_per_chain = 1 this is "chunking":
@@ -311,7 +311,8 @@ functions {
       }
       ////
       //// Phi_type = 1: log Phi(x), the exact log normal CDF, as the scalar nico_log_Phi() of BayesMVP's C++
-      //// (frozen for Paper 1, general_functions/double_fns.hpp): for x < -2.5 (NORMAL_TAIL_THRESH), the
+      //// (frozen for the chunking paper, general_functions/double_fns.hpp): for x < -2.5
+      //// (NORMAL_TAIL_THRESH), the
       //// Mills ratio Phi(x) / phi(x) by the backward recurrence of its continued fraction, of depth 40
       //// (MILLS_CF_DEPTH; t = -x, f = t, then f = t + k / f for k = 40, ..., 1, Mills ratio = 1 / f):
       ////      log Phi(x) = -x^2 / 2 - log(2 pi) / 2 + log(1 / f);
@@ -343,7 +344,8 @@ functions {
       }
       ////
       //// ---- The three rational approximations of Phi^{-1} of AS241 (Wichura 1988), as BayesMVP's C++
-      //// nico_inv_Phi_case_1, _case_2a and _case_2b (frozen for Paper 1, double_fns.hpp), on whole vectors:
+      //// nico_inv_Phi_case_1, _case_2a and _case_2b (frozen for the chunking paper,
+      //// double_fns.hpp), on whole vectors:
       //// the central case of q = p - 1/2 (|q| <= 0.425), and the tail cases of r = sqrt(-log(min(p, 1 - p)))
       //// for r <= 5 and r > 5 (each the positive value, Phi^{-1}(1 - min(p, 1 - p))).
       ////
@@ -392,7 +394,8 @@ functions {
       }
       ////
       //// Phi_type = 1: Z = Phi^{-1}(p) from log p and log(1 - p), as the scalar nico_inv_Phi_from_log_p() of
-      //// BayesMVP's C++ (frozen for Paper 1): with q = exp(log p) - 1/2, the central case of AS241 for
+      //// BayesMVP's C++ (frozen for the chunking paper): with q = exp(log p) - 1/2, the central
+      //// case of AS241 for
       //// |q| <= 0.425; otherwise r = sqrt(-min(log p, log(1 - p))), the tail case for r <= 5 or r > 5, and
       //// Z = -value for p < 1/2 (log p < log(1 - p)), +value otherwise; no refinement. (no loop over the
       //// elements: the elements with q < -0.425, |q| <= 0.425 and q > 0.425, and then those with r <= 5, are
@@ -997,7 +1000,7 @@ functions {
             real out = 0.0;
 
             ////
-            //// ---- u transform + Jacobian (plain-function equivalent of lb_ub_jacobian(u_raw, 0, 1)):
+            //// ---- u transform + Jacobian (hand-written equivalent of lb_ub_jacobian(u_raw, 0, 1)):
             ////
             //// (no loop over the subjects: the slice's u_raw as one matrix, and as one vector for the Jacobian)
             matrix[M, n_tests] u_raw_s = to_matrix(u_raw_slice);

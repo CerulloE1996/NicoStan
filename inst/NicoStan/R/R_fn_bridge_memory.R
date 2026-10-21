@@ -1676,11 +1676,11 @@ R_fn_bridge_memory_prepare_runtime <-  function(
                             "preserved; automatic map calls require verified observation-partition metadata."))
       }
       ## (chunk-local bookkeeping on its own is switched off: its gain was within the noise; it is used only
-      ##  inside reduce_sum_chunked, i.e. together with NicoStan.reduce_sum_nuisance_block = TRUE)
+      ##  inside nico_reduce_sum, i.e. together with NicoStan.reduce_sum_nuisance_block = TRUE)
       if (apply_lean_slicing_patch && !apply_nuisance_block_patch) {
             stop(paste0("NicoStan.reduce_sum_lean_slicing on its own is switched off (its gain was within the ",
                         "noise); it is used only with NicoStan.reduce_sum_nuisance_block = TRUE ",
-                        "(reduce_sum_chunked)."))
+                        "(nico_reduce_sum)."))
       }
       nuisance_block_patch_lines <-  if (apply_nuisance_block_patch) {
             if (isTRUE(unit_upstream_proof$proven)) {

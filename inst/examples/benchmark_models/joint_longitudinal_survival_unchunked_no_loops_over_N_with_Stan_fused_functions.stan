@@ -1,5 +1,5 @@
 // joint_longitudinal_survival_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of the joint longitudinal-survival model of Paper 1's layout timings
+// Unchunked Stan::math version of the joint longitudinal-survival model of the chunking paper's layout timings
 // (joint_longitudinal_survival_chunked_no_loops_over_N_v5_automatic_reduce_sum_chunked, from its source
 // joint_longitudinal_survival_chunked_no_loops_over_N_v5): the same log density as that source at N_chunks = 1,
 // and as joint_longitudinal_survival.stan, as one pass over all N_subj subjects, without reduce_sum_static. The

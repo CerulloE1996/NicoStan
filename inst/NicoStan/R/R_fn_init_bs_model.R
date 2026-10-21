@@ -211,7 +211,7 @@ init_bs_model_external <- function( stream = NULL,
         model_so_file <-  normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
         model_library_needs_build <-  !file.exists(model_so_file)
         ## (a library older than its Stan file was not built from that file: it was reused before, whatever its
-        ##  Stan file, e.g. a reduce_sum_chunked version written again after its library was built; now the fit stops,
+        ##  Stan file, e.g. a nico_reduce_sum version written again after its library was built; now the fit stops,
         ##  naming both files and their times, so that the library is built once beforehand, never inside a fit:
         ##  models already built are never built again)
         if (!model_library_needs_build && file.exists(Stan_model_file_path) &&

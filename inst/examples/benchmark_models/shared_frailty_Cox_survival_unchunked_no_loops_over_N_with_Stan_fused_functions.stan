@@ -1,6 +1,7 @@
 // shared_frailty_Cox_survival_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of shared_frailty_Cox_survival_direct_sliced_shared_offsets_one_fused_node_with_
-// indexed_frailties_when_unchunked (the Stan math file of Paper 1's layout timings): the same log density as that
+// Unchunked Stan::math version of shared_frailty_Cox_survival_direct_sliced_shared_offsets_one_fused_node_with_
+// indexed_frailties_when_unchunked (the Stan math file of the chunking paper's layout timings):
+// the same log density as that
 // file at N_chunks = 1 (one block, no map_rect job), and as shared_frailty_Cox_survival.stan, as one pass over
 // all N observations, without reduce_sum_static or map_rect. The same data (chunk_size, when it is in the data,
 // is not read) and the same unconstrained parameters, in the same order and with the same names

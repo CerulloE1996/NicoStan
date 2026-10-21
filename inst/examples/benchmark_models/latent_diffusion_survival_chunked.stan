@@ -19,7 +19,7 @@
 // Tape-chunked version of latent_diffusion_survival.stan: the same log density, with the subjects' likelihood
 // terms (log h(t) at each observed event time, and -H(t) for every subject) summed over the subjects by
 // reduce_sum_static, in chunks of chunk_size subjects (data), so that each chunk's autodiff tape is built,
-// differentiated and released before the next one (Paper 1's tape chunking; N_chunks from
+// differentiated and released before the next one (the tape-chunking paper's chunking; N_chunks from
 // NicoStan::fn_compute_initial_N_chunks()). The latent path x_path and the hazard and integrated hazard on the
 // grid, which every subject shares, are computed once, outside reduce_sum_static, and passed to every chunk.
 // Each chunk computes its subjects' terms with the whole-vector operations of latent_diffusion_survival.stan

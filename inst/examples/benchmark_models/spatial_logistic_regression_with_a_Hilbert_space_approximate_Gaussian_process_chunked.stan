@@ -2,7 +2,8 @@
 // Tape-chunked version of spatial_logistic_regression_with_a_Hilbert_space_approximate_Gaussian_process_
 // unchunked_no_loops_over_N_with_Stan_fused_functions.stan (see its header for the model): the same log density,
 // with the likelihood, Stan's fused logistic GLM, summed by reduce_sum_static over the people, in chunks of
-// chunk_size people (Paper 1's tape chunking; N_chunks from NicoStan::fn_compute_initial_N_chunks()), so that
+// chunk_size people (the chunking paper's chunking; N_chunks from
+// NicoStan::fn_compute_initial_N_chunks()), so that
 // each chunk's autodiff tape is built, differentiated and released before the next one.
 // The model has no parameter whose size grows with N: its parameters are the M coefficients z of the basis
 // functions, alpha, beta, sigma_gp and length_scale (M + 6 values), shared by every chunk; what grows with N is

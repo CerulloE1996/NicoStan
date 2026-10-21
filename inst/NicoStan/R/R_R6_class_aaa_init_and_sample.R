@@ -126,7 +126,7 @@ MVP_model <- R6Class("MVP_model",
                           #'@field n_nuisance_override Override for number of nuisance parameters
                           n_nuisance_override = NULL,
                           #'@field nuisance_params The names of the Stan model's nuisance blocks held by NicoStan
-                          #' inside the chunks of its reduce_sum (reduce_sum_chunked); NULL: none
+                          #' inside the chunks of its reduce_sum (nico_reduce_sum); NULL: none
                           nuisance_params = NULL,
                           #'@field stanc_args Arguments for Stan compiler (for BridgeStan)
                           stanc_args = NULL,
@@ -304,8 +304,8 @@ MVP_model <- R6Class("MVP_model",
                           #'@param sample_nuisance Whether to sample nuisance parameters. See class documentation for details.
                           #'@param nuisance_params The names of the Stan model's nuisance blocks, as declared
                           #' in its parameters block (e.g. \code{c("z")}, or \code{c("z", "u")}), held by
-                          #' NicoStan inside the chunks of the model's reduce_sum (reduce_sum_chunked):
-                          #' NicoStan writes the model's reduce_sum_chunked version and compiles it (see
+                          #' NicoStan inside the chunks of the model's reduce_sum (nico_reduce_sum):
+                          #' NicoStan writes the model's nico_reduce_sum version and compiles it (see
                           #' \code{initialise_model}). Only relevant if \code{Model_type = "Stan"}; NULL
                           #' (the default): the model as it is.
                           #'@param Stan_model_file_path The file path to the Stan model, only needed if \code{Model_type = "Stan"}.

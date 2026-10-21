@@ -1,14 +1,15 @@
 // stochastic_volatility_non_centred_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of the NON-CENTRED stochastic volatility model of Paper 1's layout timings
+// Unchunked Stan::math version of the NON-CENTRED stochastic volatility model of the chunking
+// paper's layout timings
 // (stochastic_volatility_direct_sliced_boundary_scan_nuisance_block_owned_by_NicoStan, whose nuisance block h_std
-// is held by NicoStan, written by hand from the plain Stan model stochastic_volatility_direct_sliced_boundary_
-// scan): the same log density as that plain Stan model at N_chunks = 1 (one leaf: no map_rect job, every carry
+// is held by NicoStan, written by hand from the Stan::math model stochastic_volatility_direct_sliced_boundary_
+// scan): the same log density as that Stan::math model at N_chunks = 1 (one leaf: no map_rect job, every carry
 // 0), and as stochastic_volatility.stan, as one pass over all T time points, without reduce_sum_static or
-// map_rect. The version held by NicoStan is not a plain Stan model (its h_std are not Stan parameters); this
-// file is the plain Stan model of the same likelihood, with h_std as its first parameters.
+// map_rect. The version held by NicoStan is not a Stan::math model (its h_std are not Stan parameters); this
+// file is the Stan::math model of the same likelihood, with h_std as its first parameters.
 // The same data (N and chunk_size, when they are in the data, are not read; y is read as a vector, as in
 // stochastic_volatility.stan) and the same unconstrained parameters, in the same order and with the same names
-// (h_std, mu, phi, sigma), as both plain Stan files; h_std is a vector, as in stochastic_volatility.stan (the
+// (h_std, mu, phi, sigma), as both Stan::math files; h_std is a vector, as in stochastic_volatility.stan (the
 // chunked file's array[T] real, the same T values in the same order, exists only so that reduce_sum_static can
 // slice it).
 // The latent path h = mu + d, d[t] = phi d[t - 1] + shocks[t] (d[1] = shocks[1]), with the shocks sigma h_std

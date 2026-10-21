@@ -304,7 +304,7 @@ fn_names_of_structurally_fixed_stan_parameter_values <- function(Stan_model_sour
 #' create_summary_and_traces
 #' @export
 ##
-## ---- The draws of the nuisance blocks held by NicoStan (reduce_sum_chunked) on their own scale: NicoStan holds
+## ---- The draws of the nuisance blocks held by NicoStan (nico_reduce_sum) on their own scale: NicoStan holds
 ##      each block on its unconstrained scale, so the rows of a constrained block (the blocks one after the other,
 ##      each block's size its terms times its values per term, worked out from the data) are put back on its
 ##      constrained scale with Stan's own transforms (lower a: a + exp(u); upper b: b - exp(u); lower a and upper
@@ -1046,7 +1046,7 @@ create_summary_and_traces <- function(    model_results,
              } else if ((n_nuisance_for_constrain == 0) && (n_nuisance > 0) && is.list(nuisance_trace) &&
                         (length(nuisance_trace) > 0) && (NROW(nuisance_trace[[1]]) == n_nuisance)) {
 
-                     ## ---- the nuisance blocks held by NicoStan (reduce_sum_chunked): the model reads them through
+                     ## ---- the nuisance blocks held by NicoStan (nico_reduce_sum): the model reads them through
                      ##      NicoStan's readers, so each draw's nuisance values are set first (the values used
                      ##      outside NicoStan's gradient call), then that draw is constrained, draw by draw:
                      library_name_of_the_model <-  tools::file_path_sans_ext(basename(model_so_file))
@@ -1101,7 +1101,7 @@ create_summary_and_traces <- function(    model_results,
 
              } else {
                      
-                     ## ---- nuisance blocks held by NicoStan (reduce_sum_chunked): the sampler's own constrain
+                     ## ---- nuisance blocks held by NicoStan (nico_reduce_sum): the sampler's own constrain
                      ##      puts the kept values back at their positions, so the transformed parameters and the
                      ##      generated quantities use each draw's own nuisance values. A value that was NOT kept
                      ##      cannot be reconstructed: a quantity computed from it would not be the posterior's,
@@ -2383,7 +2383,7 @@ create_summary_and_traces <- function(    model_results,
                   }
                 } else if (!is.null(nuisance_trace) && is.list(nuisance_trace) && length(nuisance_trace) > 0 &&
                            NROW(nuisance_trace[[1]]) > 0) {
-                  ## (the nuisance blocks held by NicoStan (reduce_sum_chunked) are not in the model's
+                  ## (the nuisance blocks held by NicoStan (nico_reduce_sum) are not in the model's
                   ##  constrained output; they are unconstrained, so NicoStan's own nuisance draws are their
                   ##  values: the blocks in the order of nuisance_params, each in Stan's order of its values)
                   nuisance_draws_of_each_chain <-  nuisance_trace

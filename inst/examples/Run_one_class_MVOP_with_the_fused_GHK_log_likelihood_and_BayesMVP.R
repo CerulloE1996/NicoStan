@@ -16,7 +16,7 @@
 ##        (b) how the nuisance parameters are given;
 ##        (c) the initial values of the burn-in chains;
 ##        (d) how the package finds the optimal within-chain threads (WCP) and N_chunks of the burn-in and of the
-##            sampling by itself, from the L2 and L3 caches of the computer it runs on (Paper 1's equations, then
+##            sampling by itself, from the L2 and L3 caches of the computer it runs on (the tape-chunking paper's equations, then
 ##            a short timed check of the layouts around them), and how they are carried into $sample();
 ##        (e) the fit and its summaries.
 ## ---- The data: the 9575 US adults of NHANES I (the NHANES data of the hexbin package), with 4 outcomes, each
@@ -199,8 +199,8 @@ initial_values_NicoStan <-  rep(list(list(u_raw     = matrix(0, nrow = N, ncol =
                                           C_raw     = C_raw_initial)), n_chains_burnin)
 ##
 ## ---- (1d) The optimal within-chain threads (WCP) and N_chunks of the burn-in and of the sampling, found by
-##      NicoStan from the L2 and L3 caches of this computer (Paper 1's equations), then checked by timing a few
-##      layouts around them (Paper 1's check), within a budget of 2000 of the model's own gradient evaluations:
+##      NicoStan from the L2 and L3 caches of this computer (Cache-aware chunking dramatically improves parallel scaling for HMC: Application to multivariate probit model (in preparation) equations), then checked by timing a few
+##      layouts around them (the tape-chunking paper's check), within a budget of 2000 of the model's own gradient evaluations:
 layouts_NicoStan <-
       NicoStan::fn_compute_burnin_and_sampling_layouts_of_Stan_model_within_a_budget_of_lp_grad_calls(
             model_so_file    = model_NicoStan$init_object$model_so_file,
@@ -275,8 +275,8 @@ if (fit_with_BayesMVP_too) {
                                       n_chains_burnin)
       ##
       ## ---- (2d) The optimal within-chain threads (WCP) and N_chunks of the burn-in and of the sampling,
-      ##      found by BayesMVP from the L2 and L3 caches of this computer (Paper 1's equations for a manual
-      ##      gradient), then checked by timing a few layouts around them (Paper 1's check):
+      ##      found by BayesMVP from the L2 and L3 caches of this computer (the tape-chunking paper's equations for a manual
+      ##      gradient), then checked by timing a few layouts around them (the tape-chunking paper's check):
       burnin_layout_BayesMVP <-  BayesMVP::fn_compute_burnin_n_threads_WCP_and_num_chunks_for_BayesMVP_model(
                                        Model_type       = "MVOP",
                                        init_object      = model_BayesMVP$init_object,

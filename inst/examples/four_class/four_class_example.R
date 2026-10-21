@@ -17,7 +17,7 @@ four_class_example_paths <- function(
             validation_directory = dirname(example_directory),
             fixture_directory = fixture_directory,
             runtime_directory = model_directory,
-            source_plain = file.path(model_directory, "four_class_plain.stan"),
+            source_Stan_math = file.path(model_directory, "four_class_Stan_math.stan"),
             source_avx = file.path(model_directory, "four_class_avx.stan"),
             source_fused = file.path(model_directory, "four_class_avx_fused.stan"),
             fixture_file = file.path(fixture_directory, "fixture.R"),
@@ -36,7 +36,7 @@ four_class_example_paths <- function(
         validation_directory = validation_directory,
         fixture_directory = fixture_directory,
         runtime_directory = runtime_directory,
-        source_plain = file.path(runtime_directory, "four_class_plain.stan"),
+        source_Stan_math = file.path(runtime_directory, "four_class_Stan_math.stan"),
         source_avx = file.path(runtime_directory, "four_class_avx.stan"),
         source_fused = file.path(runtime_directory, "four_class_avx_fused.stan"),
         fixture_file = file.path(fixture_directory, "fixture.R"),
@@ -126,7 +126,7 @@ four_class_external_model_cache <- function(stan_file, paths, output_directory =
     }
     dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
     source_hash <- digest::digest(file = normalizePath(stan_file), algo = "sha256")
-    signature <- if (is.null(build_signature)) "plain" else substr(build_signature, 1, 12)
+    signature <- if (is.null(build_signature)) "Stan_math" else substr(build_signature, 1, 12)
     cached_file <- file.path(output_directory,
                              paste0(tools::file_path_sans_ext(basename(stan_file)),
                                     "_", substr(source_hash, 1L, 12L), "_", signature, ".stan"))
@@ -172,7 +172,7 @@ check_four_class_bridge_parity <- function(
     avx_header = NULL) {
 
     if (!requireNamespace("bridgestan", quietly = TRUE)) stop("bridgestan is required")
-    if (!file.exists(paths$source_plain) || !file.exists(paths$source_avx)) stop("Plain/AVX source missing")
+    if (!file.exists(paths$source_Stan_math) || !file.exists(paths$source_avx)) stop("Stan::math/AVX source missing")
     data_string <- four_class_model_data_string(data_json)
     load_model <- function(stan_file, data_string, stanc_args = NULL, make_args = NULL) {
 
@@ -189,16 +189,16 @@ check_four_class_bridge_parity <- function(
     if (!file.exists(avx_header)) stop("AVX header not found: ", avx_header)
     compare_one_data <- function(data_string, label) {
 
-        plain <- load_model(paths$source_plain, data_string)
+        stan_math <- load_model(paths$source_Stan_math, data_string)
         avx <- load_model(paths$source_avx, data_string, stanc_args = "--allow-undefined",
                           make_args = c("STAN_THREADS=true",
                                         paste0("USER_HEADER=", normalizePath(avx_header))))
         set.seed(2026)
-        points <- c(list(rep(0, plain$param_unc_num())),
-                    lapply(seq_len(3), function(ii) rnorm(plain$param_unc_num(), sd = 0.2)))
+        points <- c(list(rep(0, stan_math$param_unc_num())),
+                    lapply(seq_len(3), function(ii) rnorm(stan_math$param_unc_num(), sd = 0.2)))
         errors <- lapply(points, function(theta) {
 
-            p <- plain$log_density_gradient(theta, propto = FALSE, jacobian = TRUE)
+            p <- stan_math$log_density_gradient(theta, propto = FALSE, jacobian = TRUE)
             a <- avx$log_density_gradient(theta, propto = FALSE, jacobian = TRUE)
             finite <- is.finite(p$val) && is.finite(a$val) && all(is.finite(p$gradient)) &&
                       all(is.finite(a$gradient))
@@ -210,7 +210,7 @@ check_four_class_bridge_parity <- function(
 
         result <- list(
             label = label,
-            unconstrained_dimension = plain$param_unc_num(),
+            unconstrained_dimension = stan_math$param_unc_num(),
             maximum_log_density_absolute_error = max(vapply(errors, `[[`, numeric(1),
                                                           "log_density_absolute_error")),
             maximum_scaled_gradient_error = max(vapply(errors, `[[`, numeric(1),
@@ -235,7 +235,7 @@ check_four_class_bridge_parity <- function(
 run_four_class_nicostan_smoke <- function(
     paths = four_class_example_paths(),
     fixture_file = paths$fixture_file,
-    stan_file = paths$source_plain,
+    stan_file = paths$source_Stan_math,
     math_backend = c("Stan", "AVX512", "AVX2"),
     avx_header = file.path(dirname(dirname(paths$paper3_directory)), "R_packages", "BayesMVP",
                            "inst", "BayesMVP", "inst", "include", "BayesMVP",
@@ -243,7 +243,7 @@ run_four_class_nicostan_smoke <- function(
     chains = 2, warmup = 60, iterations = 80, adapt_delta = 0.9, seed = 2026,
     metric_type_main = "Empirical", metric_shape_main = "diag",
     M_decay_type = "inverse", phi_type = NULL,
-    output_rds = file.path(paths$runtime_directory, "nicostan_plain_smoke.rds")) {
+    output_rds = file.path(paths$runtime_directory, "nicostan_Stan_math_smoke.rds")) {
 
     math_backend <- match.arg(math_backend)
     if (!requireNamespace("NicoStan", quietly = TRUE)) stop("NicoStan is required")
@@ -366,7 +366,7 @@ run_four_class_nicostan_smoke <- function(
 run_four_class_cmdstanr_smoke <- function(
     paths = four_class_example_paths(),
     fixture_file = paths$fixture_file,
-    stan_file = paths$source_plain,
+    stan_file = paths$source_Stan_math,
     chains = 2, warmup = 60, iterations = 80, adapt_delta = 0.9, phi_type = NULL, seed = 2026,
     output_rds = file.path(paths$runtime_directory, "cmdstanr_plain_smoke.rds")) {
 

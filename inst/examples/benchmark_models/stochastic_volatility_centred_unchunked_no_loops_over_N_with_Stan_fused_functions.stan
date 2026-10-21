@@ -1,5 +1,5 @@
 // stochastic_volatility_centred_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of the CENTRED stochastic volatility model of Paper 1's layout timings
+// Unchunked Stan::math version of the CENTRED stochastic volatility model of the chunking paper's layout timings
 // (stochastic_volatility_centred_sliced_latent_path_automatic_reduce_sum_chunked, from its source
 // stochastic_volatility_centred_sliced_latent_path): the same log density as that source at N_chunks = 1 (one
 // leaf: no transition across a chunk boundary), as one pass over all T time points, without reduce_sum_static.

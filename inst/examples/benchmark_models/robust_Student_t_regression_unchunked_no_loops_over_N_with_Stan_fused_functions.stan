@@ -1,6 +1,6 @@
 // robust_Student_t_regression_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of robust_Student_t_regression_chunked_no_loops_over_N_v2 (the Stan math file of
-// Paper 1's layout timings): the same log density as that file at N_chunks = 1, and as
+// Unchunked Stan::math version of robust_Student_t_regression_chunked_no_loops_over_N_v2 (the Stan math file of
+// the tape-chunking paper's layout timings): the same log density as that file at N_chunks = 1, and as
 // robust_Student_t_regression.stan, as one pass over all N observations, without reduce_sum_static. The same
 // data (chunk_size, when it is in the data, is not read) and the same unconstrained parameters, in the same
 // order and with the same names (alpha, beta, sigma), as both files.

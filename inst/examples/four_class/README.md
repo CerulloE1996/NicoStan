@@ -4,13 +4,13 @@ This is a self-contained synthetic example for the four-class joint latent-class
 multivariate ordinal probit model. It contains no clinical data and does not need
 the APMS project at runtime.
 
-- `models/four_class_plain.stan` is the ordinary Stan model.
+- `models/four_class_Stan_math.stan` is the ordinary Stan model.
 - `models/four_class_avx.stan` is the AVX special-function variant.
 - `models/four_class_avx_fused.stan` is the optional fused variant.
 - `fixture/N24`, `fixture/N48`, and `fixture/N96` contain the same synthetic
   model at three editable sample sizes. Each fixture is stored as text in
   `fixture.R`, so the installed example does not depend on RDS files.
-- `run_four_class_example.R` runs CmdStanR plain, NicoStan plain, or NicoStan
+- `run_four_class_example.R` runs CmdStanR Stan::math, NicoStan Stan::math, or NicoStan
   AVX512 for one of those sample sizes.
 - `run_four_class_benchmark_grid.R` runs all three arms at all three sample sizes
   and writes a CSV to a user supplied writable output directory.

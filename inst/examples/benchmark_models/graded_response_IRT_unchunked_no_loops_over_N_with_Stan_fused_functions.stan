@@ -1,5 +1,5 @@
 // graded_response_IRT_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of the graded response model of Paper 1's layout timings
+// Unchunked Stan::math version of the graded response model of the tape-chunking paper's layout timings
 // (graded_response_IRT_chunked_no_loops_over_N_automatic_reduce_sum_chunked, from its source
 // graded_response_IRT_chunked_no_loops_over_N): the same log density as that source at N_chunks = 1, and as
 // graded_response_IRT.stan, as one pass over all N persons, without reduce_sum_static. The same data

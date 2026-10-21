@@ -19,7 +19,7 @@ R_fn_init_initial_values <- function( Model_type,
                                       chunk_layout_of_nuisance_vector_in_burnin = NULL,
                                       ##
                                       ## Stan models whose nuisance blocks are held by NicoStan (nuisance_params,
-                                      ## reduce_sum_chunked): the writer's record of the blocks, and the data,
+                                      ## nico_reduce_sum): the writer's record of the blocks, and the data,
                                       ## which give each block's size:
                                       nuisance_blocks_held_by_NicoStan = NULL,
                                       Stan_data_list = NULL
@@ -57,7 +57,7 @@ R_fn_init_initial_values <- function( Model_type,
               init_list_kk <- init_lists_per_chain[[kk]]
               ##
               ## ---- a Stan model whose nuisance blocks are held by NicoStan (nuisance_params,
-              ##      reduce_sum_chunked): the blocks are not parameters of the compiled model, so their initial
+              ##      nico_reduce_sum): the blocks are not parameters of the compiled model, so their initial
               ##      values are taken out of the init list here, and put in front of the main parameters'
               ##      unconstrained values below, as the split into nuisance and main coordinates expects:
               ##
@@ -275,12 +275,12 @@ R_fn_init_initial_values <- function( Model_type,
 
 
 ##
-## ---- The initial values of the nuisance blocks held by NicoStan (nuisance_params, reduce_sum_chunked): --------
+## ---- The initial values of the nuisance blocks held by NicoStan (nuisance_params, nico_reduce_sum): --------
 ##
 #' The initial values of the nuisance blocks held by NicoStan, taken out of one chain's init list
 #'
 #' The nuisance blocks of nuisance_params are not parameters of the compiled model (NicoStan holds them; see
-#' R_fn_write_reduce_sum_chunked_version_of_Stan_model.R), so their initial values are taken out of the init
+#' R_fn_write_nico_reduce_sum_version_of_Stan_model.R), so their initial values are taken out of the init
 #' list here, in the order NicoStan holds them: the blocks one after the other (in the order of
 #' nuisance_params), each in Stan's own order of its values, i.e. term after term, with the values of each term
 #' together (for array[E] vector[K] and array[E] row_vector[K]: z[1][1:K], then z[2][1:K], ...). Each block is
@@ -296,7 +296,7 @@ R_fn_init_initial_values <- function( Model_type,
 #' on the unconstrained scale.
 #'
 #' @param nuisance_blocks_held_by_NicoStan The nuisance_blocks of
-#'   R_fn_write_reduce_sum_chunked_version_of_Stan_model() (name, shape, terms and values_per_term, the last two
+#'   R_fn_write_nico_reduce_sum_version_of_Stan_model() (name, shape, terms and values_per_term, the last two
 #'   Stan expressions of the data).
 #' @param init_list The initial values of one chain.
 #' @param Stan_data_list The model's data, which give each block's size (its terms times its values per term).

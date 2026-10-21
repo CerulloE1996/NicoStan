@@ -33,7 +33,7 @@ dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
 
 paths <- four_class_example_paths(example_directory = example_directory)
 Ns <- selected_Ns
-arms <- c("cmdstanr_plain", "nicostan_plain", "nicostan_avx512")
+arms <- c("cmdstanr_Stan_math", "nicostan_Stan_math", "nicostan_avx512")
 avx_header <- system.file("include", "BayesMVP", "stan_external_functions.hpp", package = "BayesMVP")
 if (!nzchar(avx_header) || !file.exists(avx_header))
     stop("Install the BayesMVP extension package before running the AVX512 benchmark arm")
@@ -49,7 +49,7 @@ for (N in Ns) {
         result <- if (arm == "cmdstanr_plain") {
             run_four_class_cmdstanr_smoke(
                 paths = arm_paths, fixture_file = fixture_file,
-                stan_file = paths$source_plain,
+                stan_file = paths$source_Stan_math,
                 chains = settings$chains, warmup = settings$warmup,
                 iterations = settings$iterations, adapt_delta = settings$adapt_delta,
                 phi_type = settings$phi_type,
@@ -58,9 +58,9 @@ for (N in Ns) {
         } else {
             run_four_class_nicostan_smoke(
                 paths = arm_paths, fixture_file = fixture_file,
-                stan_file = if (arm == "nicostan_plain") paths$source_plain else paths$source_avx,
-                math_backend = if (arm == "nicostan_plain") "Stan" else "AVX512",
-                avx_header = if (arm == "nicostan_plain") NULL else avx_header,
+                stan_file = if (arm == "nicostan_Stan_math") paths$source_Stan_math else paths$source_avx,
+                math_backend = if (arm == "nicostan_Stan_math") "Stan" else "AVX512",
+                avx_header = if (arm == "nicostan_Stan_math") NULL else avx_header,
                 chains = settings$chains, warmup = settings$warmup,
                 iterations = settings$iterations, adapt_delta = settings$adapt_delta,
                 phi_type = settings$phi_type,

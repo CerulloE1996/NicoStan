@@ -34,7 +34,8 @@
 // hierarchical_logistic_regression_chunked.stan
 // Tape-chunked version of hierarchical_logistic_regression.stan: the same log density, with the
 // likelihood summed over the observations by reduce_sum_static, in chunks of chunk_size observations (data), so
-// that each chunk's autodiff tape is built, differentiated and released before the next one (Paper 1's tape
+// that each chunk's autodiff tape is built, differentiated and released before the next one (the
+// chunking paper's tape
 // chunking; N_chunks from NicoStan::fn_compute_initial_N_chunks()). Each chunk's term is the original
 // likelihood statement restricted to the chunk's observations.
 // The chunking data are NicoStan's for Stan models: N (the observations, the units of the chunks) and

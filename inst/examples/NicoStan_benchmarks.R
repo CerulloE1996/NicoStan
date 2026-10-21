@@ -97,7 +97,7 @@ NicoStan_benchmark_package_fingerprint <- function(package_name) {
 ## The AVX arms APPEND their ISA flags (CXXFLAGS_OPTIM, which Stan math's make/compiler_flags adds after
 ## BridgeStan's make/local CXXFLAGS) instead of passing CXXFLAGS on the make command line. A command-line CXXFLAGS REPLACES
 ## make/local's CXXFLAGS, so both AVX arms were compiled WITHOUT -DNDEBUG -DBOOST_DISABLE_ASSERTS -fno-math-errno
-## -fno-signed-zeros -fno-trapping-math, which the plain Stan arm keeps (checked with make -n). All three arms now share
+## -fno-signed-zeros -fno-trapping-math, which the Stan::math arm keeps (checked with make -n). All three arms now share
 ## make/local's flags. "AVX2" no longer strips AVX-512 from the whole model (-mno-avx512f): it compiles the same model with
 ## -DBAYESMVP_FORCE_AVX2, which makes BayesMVP/stan_external_functions.hpp use its 4-lane AVX2 kernels (bmvp_simd_lanes() = 4)
 ## while everything else is identical to the AVX512 arm, as vect_type = "AVX2" does for the native BayesMVP models.

@@ -1,5 +1,6 @@
 // Gaussian_process_regression_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of Gaussian_process_regression_chunked (the Stan math file of Paper 1's layout
+// Unchunked Stan::math version of Gaussian_process_regression_chunked (the Stan math file of the
+// chunking paper's layout
 // timings): the same log density as that file at N_chunks = 1, and as Gaussian_process_regression.stan, without
 // reduce_sum_static. The same data (chunk_size, when it is in the data, is not read) and the same unconstrained
 // parameters, in the same order and with the same names (lengthscale, sigma_f, sigma_n), as both files.

@@ -1,5 +1,5 @@
 // network_meta_analysis_Xu_fixed_cutpoints_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of network_meta_analysis_Xu_fixed_cutpoints.stan (MetaOrdDTA's
+// Unchunked Stan::math version of network_meta_analysis_Xu_fixed_cutpoints.stan (MetaOrdDTA's
 // DTA_NMA_Nyaga_Xu_FIXEDthr.stan, copied unchanged): the same model, the same log density (with every constant,
 // as the original's binomial and induced-Dirichlet terms keep theirs), and the same parameters, in the same order
 // and with the same names, with no loop over the studies, the study-test pairs or the reported cutpoints.

@@ -3,7 +3,7 @@
 ##
 R_fn_Stan_map_type_in_helper_functions <-  function(code) {
 
-      ## The bracket, block and parameter readers follow the reduce_sum_chunked model writer.
+      ## The bracket, block and parameter readers follow the nico_reduce_sum model writer.
       visible <-  code
       protected_pattern <-  "\"(?:[^\"\\\\]|\\\\.)*\"|/\\*[\\s\\S]*?\\*/|//[^\\n]*"
       protected_matches <-  gregexpr(pattern = protected_pattern, text = code, perl = TRUE)[[1]]

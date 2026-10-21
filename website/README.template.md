@@ -1581,15 +1581,15 @@ NicoStan also offers two three-way blends of ESJD, ChEES-R and SNAPER:
 the equally weighted geometric mean (`"ESJD_CHESSR_SNAPER"`)
 and the weighted one with weights 0.50 / 0.25 / 0.25, i.e., exp(0.5 log C_ESJD + 0.25 log C_ChEESR + 0.25 log C_SNAPER)
 (`"ESJD_w50_CHESSR_w25_SNAPER_w25"`).
-These two are not in the preliminary tables below.
+Both are in the preliminary tables below.
 
 
 The benchmark used the models of the previous section at other N:
 each model at a first N (SV with T = 500; LDS, HLR, RT4 and WEI with N = 500; GP and JLS with N = 50) and at 10 x N,
-with burn-ins of 125 and 250 iterations and 10 seeds per cell (16 cells per N).
+with burn-ins of 125 and 250 iterations and 10 seeds per cell (14 cells per N).
 
 
-For each cell, a criterion's loss is its geometric mean over the seeds relative to the best of the six criteria in that cell
+For each cell, a criterion's loss is its geometric mean over the seeds relative to the best of the eight criteria in that cell
 (1.00 = the best; for the minimum ESS per gradient, the best's value divided by the criterion's, so that above 1 is always worse),
 and its mean loss is the geometric mean of its losses over the cells.
 "Cells OK" counts the cells in which the criterion was the best, or within noise of the best with the 95% interval of
@@ -1597,43 +1597,51 @@ its seed-matched ratio within plus or minus 25%.
 **Bold**: the best of a column (and any mean or worst loss within 1% of it).
 
 
-**Preliminary results, first N of each model (16 cells):**
+**Preliminary results, first N of each model (14 cells):**
 
 | Criterion | Time to min ESS 1,000: mean loss | worst loss | cells OK | Time to min ESS 10,000: mean loss | Gradients to min ESS 1,000: mean loss | Min ESS per 1,000 gradients: mean loss | worst loss | cells OK |
 |---|---|---|---|---|---|---|---|---|
-| ESJD | 1.064 | 1.30 | **13** | 1.161 | 1.159 | 1.189 | 1.87 | 8 |
-| ChEES | 1.104 | 1.76 | 7 | 1.206 | 1.390 | 1.495 | 2.41 | 3 |
-| ChEES-R (default) | 1.078 | 1.36 | 9 | 1.173 | 1.156 | 1.192 | 1.77 | 6 |
-| SNAPER | **1.043** | **1.19** | 12 | **1.105** | **1.096** | **1.125** | **1.39** | 7 |
-| ESJD x ChEES-R | 1.062 | 1.30 | 11 | 1.146 | 1.105 | 1.131 | 1.60 | 8 |
-| ESJD x SNAPER | 1.065 | 1.39 | 6 | 1.127 | **1.098** | **1.118** | 1.88 | **11** |
+| ESJD | 1.073 | 1.30 | **11** | 1.186 | 1.178 | 1.214 | 1.87 | 6 |
+| ChEES | 1.107 | 1.76 | 5 | 1.206 | 1.379 | 1.483 | 2.43 | 3 |
+| ChEES-R (default) | 1.086 | 1.36 | 7 | 1.179 | 1.171 | 1.211 | 1.77 | 5 |
+| SNAPER | **1.045** | **1.19** | 10 | **1.105** | **1.104** | **1.136** | **1.39** | 6 |
+| ESJD x ChEES-R | 1.067 | 1.30 | 10 | 1.151 | 1.123 | 1.154 | 1.60 | 6 |
+| ESJD x SNAPER | 1.068 | 1.39 | 5 | 1.131 | **1.106** | **1.128** | 1.88 | **10** |
+| ESJD x ChEES-R x SNAPER (equal weights) | 1.242 | 1.43 | 1 | 1.230 | 1.120 | 1.145 | 1.70 | 7 |
+| ESJD x ChEES-R x SNAPER (0.50 / 0.25 / 0.25) | 1.242 | 1.45 | 3 | 1.235 | 1.130 | 1.160 | 1.75 | 8 |
 
-**Preliminary results, 10 x N (16 cells):**
+**Preliminary results, 10 x N (14 cells):**
 
 | Criterion | Time to min ESS 1,000: mean loss | worst loss | cells OK | Time to min ESS 10,000: mean loss | Gradients to min ESS 1,000: mean loss | Min ESS per 1,000 gradients: mean loss | worst loss | cells OK |
 |---|---|---|---|---|---|---|---|---|
-| ESJD | 1.098 | 2.32 | 12 | 1.133 | 1.117 | 1.143 | 2.65 | 10 |
-| ChEES | 1.229 | 1.68 | 3 | 1.380 | 1.373 | 1.493 | 2.68 | 2 |
-| ChEES-R (default) | **1.073** | **1.21** | 12 | 1.128 | 1.103 | 1.139 | 1.35 | 9 |
-| SNAPER | 1.084 | 1.43 | 11 | 1.139 | 1.117 | 1.158 | 1.47 | 5 |
-| ESJD x ChEES-R | **1.063** | **1.21** | **14** | **1.103** | **1.078** | **1.104** | **1.31** | **13** |
-| ESJD x SNAPER | **1.068** | 1.48 | 13 | **1.093** | **1.079** | **1.095** | 1.52 | 10 |
+| ESJD | 1.119 | 2.32 | 9 | 1.161 | 1.135 | 1.167 | 2.69 | 8 |
+| ChEES | 1.233 | 1.74 | 3 | 1.379 | 1.361 | 1.489 | 2.72 | 2 |
+| ChEES-R (default) | **1.076** | 1.21 | 9 | 1.125 | 1.095 | 1.130 | 1.35 | 8 |
+| SNAPER | 1.090 | 1.43 | 8 | 1.144 | 1.117 | 1.159 | 1.47 | 4 |
+| ESJD x ChEES-R | **1.069** | 1.21 | 10 | 1.110 | 1.080 | 1.107 | 1.31 | 11 |
+| ESJD x SNAPER | 1.082 | 1.48 | **12** | 1.110 | 1.091 | 1.109 | 1.52 | 9 |
+| ESJD x ChEES-R x SNAPER (equal weights) | 1.096 | 1.21 | 8 | 1.093 | 1.065 | 1.088 | **1.25** | 10 |
+| ESJD x ChEES-R x SNAPER (0.50 / 0.25 / 0.25) | 1.084 | **1.16** | 7 | **1.072** | **1.045** | **1.062** | **1.25** | **12** |
 
 
-At the first N of each model, SNAPER had the smallest mean loss for the time to a minimum ESS of 1,000 (1.043)
-and of 10,000 (1.105), and for the gradient evaluations to a minimum ESS of 1,000 (1.096, with ESJD x SNAPER within 1%: 1.098);
-ESJD x SNAPER had the smallest mean loss for the minimum ESS per gradient (1.118, with SNAPER within 1%: 1.125).
+At the first N of each model, SNAPER had the smallest mean loss for the time to a minimum ESS of 1,000 (1.045)
+and of 10,000 (1.105), and for the gradient evaluations to a minimum ESS of 1,000 (1.104, with ESJD x SNAPER within 1%: 1.106);
+ESJD x SNAPER had the smallest mean loss for the minimum ESS per gradient (1.128, with SNAPER within 1%: 1.136).
+The two three-way blends had the largest mean losses for the time to a minimum ESS of 1,000 (1.242 for both)
+and of 10,000 (1.230 and 1.235).
 
 
 At 10 x N, ESJD x ChEES-R had the smallest mean loss for the time to a minimum ESS of 1,000
-(1.063, with ESJD x SNAPER and ChEES-R within 1%: 1.068 and 1.073) and for the gradient evaluations to a minimum ESS of 1,000
-(1.078, with ESJD x SNAPER within 1%: 1.079); ESJD x SNAPER had the smallest mean loss for the time to a minimum ESS of
-10,000 (1.093) and for the minimum ESS per gradient (1.095), with ESJD x ChEES-R within 1% for both (1.103 and 1.104).
-ESJD x ChEES-R also had the smallest worst losses at 10 x N for the minimum ESS per gradient (1.31) and the most cells OK.
+(1.069, with ChEES-R within 1%: 1.076); the weighted three-way blend (0.50 / 0.25 / 0.25) had the smallest mean loss for
+the time to a minimum ESS of 10,000 (1.072), for the gradient evaluations to a minimum ESS of 1,000 (1.045)
+and for the minimum ESS per gradient (1.062), the smallest worst losses for the time to a minimum ESS of 1,000 (1.16)
+and for the minimum ESS per gradient (1.25, tied with the equally weighted blend),
+and the most cells OK for the minimum ESS per gradient (12 of 14).
 
 
-In short, no single criterion was best everywhere: at 10 x N, both blends were best or within 1% of the best for all four
-endpoints, whilst ChEES had the largest mean loss for every endpoint at both N.
+In short, no single criterion was best everywhere: SNAPER and ESJD x SNAPER led at the first N of each model,
+whilst the weighted three-way blend led for three of the four endpoints at 10 x N;
+ChEES had the largest mean loss for every endpoint at 10 x N.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -2779,43 +2787,51 @@ since the squared radius oscillates twice as fast as the position.
 
 
 **Preliminary results: models with and without a nuisance block.**
-The table below summarises a preliminary benchmark of six criteria within NicoStan on eight models
-(stochastic volatility, shared-frailty Cox survival, latent diffusion survival, joint longitudinal and survival,
+The table below summarises a preliminary benchmark of eight criteria within NicoStan on seven models
+(stochastic volatility, latent diffusion survival, joint longitudinal and survival,
 hierarchical logistic regression, Gaussian process regression, Weibull survival, and robust regression with Student-t errors),
 each at its first $N$ and at $10 \times N$, with burnin lengths of 250 and 125 iterations
-(i.e., 16 cells per $N$; 10 seeds per cell; diffusion HMC for the nuisance blocks).
+(i.e., 14 cells per $N$; 10 seeds per cell; diffusion HMC for the nuisance blocks).
 The loss is the criterion's geometric mean over the seeds relative to the best criterion of the cell
 (1.00 = the best; for the minimum ESS per 1,000 gradients, the best criterion's value divided by the criterion's);
-"average loss" is the geometric mean of the loss over the 16 cells, "worst loss" the largest,
+"average loss" is the geometric mean of the loss over the 14 cells, "worst loss" the largest,
 and "cells OK" the number of cells where the criterion was the best, or within noise of it with the 95% interval within ±25%.
-The three-way blends (`"ESJD_CHESSR_SNAPER"` and `"ESJD_w50_CHESSR_w25_SNAPER_w25"`) are not yet in this table.
+The three-way blends are `"ESJD_CHESSR_SNAPER"` (equal weights) and `"ESJD_w50_CHESSR_w25_SNAPER_w25"` (0.50 / 0.25 / 0.25).
 
 
-| $N$ | Criterion | Time to min ESS of 1,000: average loss | worst loss | cells OK (of 16) | Min ESS per 1,000 gradients: average loss | worst loss | cells OK (of 16) |
+| $N$ | Criterion | Time to min ESS of 1,000: average loss | worst loss | cells OK (of 14) | Min ESS per 1,000 gradients: average loss | worst loss | cells OK (of 14) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| First $N$ | ChEES | 1.104 | 1.76 | 7 | 1.495 | 2.41 | 3 |
-| First $N$ | ChEES-R (default) | 1.078 | 1.36 | 9 | 1.192 | 1.77 | 6 |
-| First $N$ | SNAPER | **1.043** | **1.19** | 12 | 1.125 | **1.39** | 7 |
-| First $N$ | ESJD | 1.064 | 1.30 | **13** | 1.189 | 1.87 | 8 |
-| First $N$ | ESJD × ChEES-R | 1.062 | 1.30 | 11 | 1.131 | 1.60 | 8 |
-| First $N$ | ESJD × SNAPER | 1.065 | 1.39 | 6 | **1.118** | 1.88 | **11** |
-| $10 \times N$ | ChEES | 1.229 | 1.68 | 3 | 1.493 | 2.68 | 2 |
-| $10 \times N$ | ChEES-R (default) | 1.073 | **1.21** | 12 | 1.139 | 1.35 | 9 |
-| $10 \times N$ | SNAPER | 1.084 | 1.43 | 11 | 1.158 | 1.47 | 5 |
-| $10 \times N$ | ESJD | 1.098 | 2.32 | 12 | 1.143 | 2.65 | 10 |
-| $10 \times N$ | ESJD × ChEES-R | **1.063** | **1.21** | **14** | 1.104 | **1.31** | **13** |
-| $10 \times N$ | ESJD × SNAPER | 1.068 | 1.48 | 13 | **1.095** | 1.52 | 10 |
+| First $N$ | ChEES | 1.107 | 1.76 | 5 | 1.483 | 2.43 | 3 |
+| First $N$ | ChEES-R (default) | 1.086 | 1.36 | 7 | 1.211 | 1.77 | 5 |
+| First $N$ | SNAPER | **1.045** | **1.19** | 10 | **1.136** | **1.39** | 6 |
+| First $N$ | ESJD | 1.073 | 1.30 | **11** | 1.214 | 1.87 | 6 |
+| First $N$ | ESJD × ChEES-R | 1.067 | 1.30 | 10 | 1.154 | 1.60 | 6 |
+| First $N$ | ESJD × SNAPER | 1.068 | 1.39 | 5 | **1.128** | 1.88 | **10** |
+| First $N$ | ESJD × ChEES-R × SNAPER (equal weights) | 1.242 | 1.43 | 1 | 1.145 | 1.70 | 7 |
+| First $N$ | ESJD × ChEES-R × SNAPER (0.50 / 0.25 / 0.25) | 1.242 | 1.45 | 3 | 1.160 | 1.75 | 8 |
+| $10 \times N$ | ChEES | 1.233 | 1.74 | 3 | 1.489 | 2.72 | 2 |
+| $10 \times N$ | ChEES-R (default) | **1.076** | 1.21 | 9 | 1.130 | 1.35 | 8 |
+| $10 \times N$ | SNAPER | 1.090 | 1.43 | 8 | 1.159 | 1.47 | 4 |
+| $10 \times N$ | ESJD | 1.119 | 2.32 | 9 | 1.167 | 2.69 | 8 |
+| $10 \times N$ | ESJD × ChEES-R | **1.069** | 1.21 | 10 | 1.107 | 1.31 | 11 |
+| $10 \times N$ | ESJD × SNAPER | 1.082 | 1.48 | **12** | 1.109 | 1.52 | 9 |
+| $10 \times N$ | ESJD × ChEES-R × SNAPER (equal weights) | 1.096 | 1.21 | 8 | 1.088 | **1.25** | 10 |
+| $10 \times N$ | ESJD × ChEES-R × SNAPER (0.50 / 0.25 / 0.25) | 1.084 | **1.16** | 7 | **1.062** | **1.25** | **12** |
 
-(Bold: the best of each column at each $N$. Preliminary.)
+(Bold: the best of each column at each $N$, and any average or worst loss within 1% of it. Preliminary.)
 
 
 In other words (preliminary): no criterion was uniformly best;
-at the first $N$, SNAPER had the smallest average and worst losses for the time to a minimum ESS of 1,000,
-and ESJD × SNAPER the smallest average loss for the minimum ESS per 1,000 gradients;
-at $10 \times N$, ESJD × ChEES-R had the smallest average loss for the time to a minimum ESS of 1,000 (1.063),
-the smallest worst losses for both endpoints, and the most cells OK for both endpoints (14 and 13 of 16),
-whilst ESJD × SNAPER had the smallest average loss for the minimum ESS per 1,000 gradients (1.095).
-ChEES (without the division by the trajectory length) had the largest average loss in every column.
+at the first $N$, SNAPER had the smallest average loss for the time to a minimum ESS of 1,000 (1.045)
+and the smallest worst losses for both endpoints,
+whilst ESJD × SNAPER had the smallest average loss for the minimum ESS per 1,000 gradients (1.128, with SNAPER within 1%: 1.136);
+at $10 \times N$, ESJD × ChEES-R had the smallest average loss for the time to a minimum ESS of 1,000
+(1.069, with ChEES-R within 1%: 1.076),
+whilst the weighted three-way blend (0.50 / 0.25 / 0.25) had the smallest average loss for the minimum ESS per 1,000 gradients
+(1.062), the smallest worst losses for both endpoints (1.16 and 1.25) and the most cells OK for that endpoint (12 of 14).
+ChEES (without the division by the trajectory length) had the largest average loss for the minimum ESS per 1,000 gradients
+at both $N$, and for the time to a minimum ESS of 1,000 at $10 \times N$;
+at the first $N$, the two three-way blends had the largest average loss for the time to a minimum ESS of 1,000 (1.242).
 
 
 **Preliminary results: latent class models (BayesMVP).**

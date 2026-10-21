@@ -54,7 +54,7 @@
 // chunk). The units are the blocks, not the observations, so that each chunk starts at a block, whose offset
 // from (2) below is known (with grainsize chunk_size over the observations, reduce_sum_static's chunks need not
 // start at the blocks).
-// As in LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan: the sliced argument is one plain name holding
+// As in LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan: the sliced argument is one single name holding
 // everything per unit, packed_of_block (one row per block, packed once on the main tape: copies of the
 // parameters' pointers, no autodiff nodes), of N_packed = chunk_size + N_prior_slots + 1 values:
 //   - the raw log frailties of the block's observations, log_frailty_raw[group] in decreasing order of time (the
@@ -64,7 +64,7 @@
 //     that the prior of every group (with observations or not) is in exactly one chunk (padded with
 //     log_frailty_raw[1], not used);
 //   - the block's offset, the log of the sum of exp(eta) over every observation before it (block 1: none);
-// every shared argument is a plain name, data or O(1) parameters (beta and sigma_frailty); nothing is built in
+// every shared argument is a single name, data or O(1) parameters (beta and sigma_frailty); nothing is built in
 // the calls of reduce_sum_static and map_rect; and inside the chunks, whole-vector calls only, with no loop over
 // the observations or the blocks: each chunk computes its observations' log frailties,
 // sigma_frailty * log_frailty_raw, itself. The main tape holds only the priors on beta and sigma_frailty
@@ -159,7 +159,7 @@
 // shared_frailty_Cox_survival.stan; each observation's term of the partial likelihood after the scan,
 // event[n] * (eta[n] - the log of the sum of exp(eta) over its risk set), is summed over the observations by
 // reduce_sum_static, in chunks of chunk_size observations (data), so that each chunk's autodiff tape is built,
-// differentiated and released before the next one (Paper 1's tape chunking; N_chunks from
+// differentiated and released before the next one (the tape-chunking paper's chunking; N_chunks from
 // NicoStan::fn_compute_initial_N_chunks()). The observations' values eta[n] - (the log of the sum over the risk
 // set) are the sliced argument of reduce_sum_static, so that each chunk copies only its own observations' values,
 // and not whole vectors, onto its tape.
@@ -178,7 +178,8 @@
 // lines):
 // Tape-chunked version of Frailty_surv_shared_frailty_Cox.stan: the same log density, with the
 // partial likelihood summed over the events by reduce_sum_static, in chunks of grainsize events (data), so that
-// each chunk's autodiff tape is built, differentiated and released before the next one (Paper 1's tape chunking;
+// each chunk's autodiff tape is built, differentiated and released before the next one (the
+// chunking paper's chunking;
 // N_chunks from NicoStan::fn_compute_initial_N_chunks()). Each event's term is computed exactly as in the
 // original model (the numerator, then log_sum_exp over its risk set, in the order j = 1, ..., N).
 
@@ -897,8 +898,8 @@ model {
 
     // partial likelihood for Cox model with frailties (O(N); see the header): every term, and the prior of
     // log_frailty_raw, inside the chunks, vectorised, with the scan over the risk sets chunked as a two-level
-    // scan, in the pattern of LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan (one plain name as the sliced
-    // argument, plain names as the shared arguments, nothing built in the calls)
+    // scan, in the pattern of LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan (one single name as the sliced
+    // argument, single names as the shared arguments, nothing built in the calls)
     // (the previous version, with more than one block: the raw log frailties of every block gathered on the
     //  main tape, the offsets from a pass over all N observations on the main tape, and reduce_sum_static over
     //  the blocks; kept below, commented out)

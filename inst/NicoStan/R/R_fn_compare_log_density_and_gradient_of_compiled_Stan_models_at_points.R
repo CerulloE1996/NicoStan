@@ -71,14 +71,14 @@ fn_log_density_and_gradient_of_compiled_Stan_model_at_points <-  function( model
         error_message_of_each_point <-  rep("", length(points))
         for (point_index in seq_along(points)) {
               stopifnot(length(points[[point_index]]) == n_unconstrained_parameters)
-              ## (a point of a model whose nuisance blocks NicoStan holds, reduce_sum_chunked, carries the values
+              ## (a point of a model whose nuisance blocks NicoStan holds, nico_reduce_sum, carries the values
               ##  of those blocks: set before the call, as NicoStan's readers use them outside NicoStan's gradient
               ##  call; without them every log density of such a model fails, "no nuisance values")
               nuisance_values_of_the_point <-  attr(points[[point_index]], "nicostan_nuisance_values")
               if (!is.null(nuisance_values_of_the_point) &&
                   is.loaded("nicostan_set_the_nuisance_values_used_outside_NicoStan_R", PACKAGE = library_name)) {
                     ## (the routine of the model library named through do.call(), as in
-                    ##  R_fn_write_reduce_sum_chunked_version_of_Stan_model.R)
+                    ##  R_fn_write_nico_reduce_sum_version_of_Stan_model.R)
                     do.call(".C", list( "nicostan_set_the_nuisance_values_used_outside_NicoStan_R",
                                         as.double(nuisance_values_of_the_point),
                                         as.integer(length(nuisance_values_of_the_point)),
@@ -298,31 +298,31 @@ fn_points_on_the_unconstrained_scale_from_a_short_fit_of_a_Stan_model <-  functi
         ## (the cmdstan executable beside the Stan file, <Stan file without .stan>_cmdstan_STAN_THREADS, as
         ##  run_one_Stan_cmdstanr.R names it, built once beforehand, in its own process, and only loaded here:
         ##  a check never builds a model, and stops when the executable is missing or older than its Stan file;
-        ## (a reference that only NicoStan can build - its reduce_sum_chunked version,
-        ##  "_automatic_reduce_sum_chunked...", or a version whose nuisance block NicoStan owns,
+        ## (a reference that only NicoStan can build - its nico_reduce_sum version,
+        ##  "_automatic_nico_reduce_sum...", or a version whose nuisance block NicoStan owns,
         ##  "_nuisance_block_owned_by_NicoStan..." - is fitted through the version of the same model it was made
         ##  from, which cmdstan builds: the same file name without that part and what follows it, up to the math
         ##  backend's ending; its draws hold the reference's parameters, matched by name below)
-        Stan_file_of_the_short_fit <-  sub(paste0("_(automatic_reduce_sum_chunked|",
+        Stan_file_of_the_short_fit <-  sub(paste0("_(automatic_reduce_sum_chunked|automatic_nico_reduce_sum|",
                                                   "nuisance_block_owned_by_NicoStan)",
                                                   ".*?(_Stan_math_for_layout_timings)?\\.stan$"),
                                            "\\2.stan", Stan_model_file_path, perl = TRUE)
-        ## (the references made from another reduce_sum_chunked version rather than from a version of their own,
+        ## (the references made from another nico_reduce_sum version rather than from a version of their own,
         ##  so that the name rule gives a file that does not exist: the version their build arguments name as
         ##  their origin, with the same data block and the same parameters apart from the nuisance block held by
         start_of_the_names_of_the_chunked_PK_versions <-  paste0("two_compartment_population_pharmacokinetics_",
                                                                  "chunked_no_loops_over_N_")
-        references_made_from_another_reduce_sum_chunked_version <-  data.frame(
+        references_made_from_another_nico_reduce_sum_version <-  data.frame(
               file_by_the_name_rule  = paste0(start_of_the_names_of_the_chunked_PK_versions, c("v3", "v4"),
                                               "_Stan_math_for_layout_timings.stan"),
               file_of_the_short_fit  = paste0(start_of_the_names_of_the_chunked_PK_versions,
                                               "v2_Stan_math_for_layout_timings.stan"),
               stringsAsFactors       = FALSE)
         made_from_another <-  match(basename(Stan_file_of_the_short_fit),
-                                    references_made_from_another_reduce_sum_chunked_version$file_by_the_name_rule)
+                                    references_made_from_another_nico_reduce_sum_version$file_by_the_name_rule)
         if (!is.na(made_from_another)) {
               Stan_file_of_the_short_fit <-  file.path(dirname(Stan_file_of_the_short_fit),
-                                                       references_made_from_another_reduce_sum_chunked_version$
+                                                       references_made_from_another_nico_reduce_sum_version$
                                                              file_of_the_short_fit[made_from_another])
         }
         if (Stan_file_of_the_short_fit != Stan_model_file_path) {
@@ -418,7 +418,7 @@ fn_points_on_the_unconstrained_scale_from_a_short_fit_of_a_Stan_model <-  functi
                                          draws                   = draws,
                                          seed                    = seed))
         ##
-        ## ---- (a reference whose nuisance blocks NicoStan holds, reduce_sum_chunked, as its build arguments say:
+        ## ---- (a reference whose nuisance blocks NicoStan holds, nico_reduce_sum, as its build arguments say:
 ##
         ##      its library has no Stan parameters for them, and outside NicoStan's gradient call it reads the
         ##      values set with nicostan_set_the_nuisance_values_used_outside_NicoStan_R, without which every log

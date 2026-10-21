@@ -1,6 +1,6 @@
 # General Stan examples: models, nuisance blocks and priors
 
-The nine supplied filenames represent seven distinct models. The two Cox-frailty filenames are aliases, as are the two Weibull filenames. A tenth file, `Latent_diffusion_survival.stan`, is included for the example benchmarks. Each filename has a corresponding `_avx.stan` version. The plain and AVX versions use the same data, priors and initial values.
+The nine supplied filenames represent seven distinct models. The two Cox-frailty filenames are aliases, as are the two Weibull filenames. A tenth file, `Latent_diffusion_survival.stan`, is included for the example benchmarks. Each filename has a corresponding `_avx.stan` version. The Stan::math and AVX versions use the same data, priors and initial values.
 
 | Model | First parameter block | Automatically detected nuisance dimension | Main parameters used for ESS |
 | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ The validation harness checks:
 
 - Complete log densities against independent R implementations, including the Jacobians for constrained parameters and the corresponding non-centred representations.
 - BridgeStan gradients against central finite differences, and the native NicoStan evaluator against BridgeStan.
-- Plain/AVX log densities and gradients at the initial state and five perturbed unconstrained states.
+- Stan::math/AVX log densities and gradients at the initial state and five perturbed unconstrained states.
 - The actual SIMD lane count returned by the compiled AVX model.
 - The first parameter declaration, detected nuisance dimension and main-parameter selection.
 - Complete warm-up, sampling and posterior-summary execution.

@@ -22,7 +22,8 @@
 // operations on the subjects (one exp per subject, one log per event), the data weights a_n and b_n and the cells
 // made once in transformed data. (Stan's poisson_log_glm would give the same value with log(H_0(t[n])) as its
 // intercepts, at the cost of one more log per subject, so the direct form is used.)
-// The plain unchunked model, the reference of every other version: one pass over all N subjects. The one loop
+// The Stan::math unchunked model, the reference of every other version: one pass over all N
+// subjects. The one loop
 // left is the Euler-Maruyama recursion of the path over the M grid steps (M = 50, the same for any N).
 // No loop over N anywhere.
 

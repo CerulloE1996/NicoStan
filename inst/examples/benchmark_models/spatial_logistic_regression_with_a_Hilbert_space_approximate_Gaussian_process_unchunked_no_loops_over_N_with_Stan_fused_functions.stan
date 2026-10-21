@@ -15,7 +15,7 @@
 // exp(-length_scale^2 w^2 / 2). The basis functions are data (made once in transformed data, N x M), so the
 // whole likelihood is ONE logistic GLM with the covariates and the basis functions as its columns, and the
 // coefficients beta and sqrt(S) .* z: Stan's fused bernoulli_logit_glm. Its cost grows as N x (3 + M), not N^3.
-// Unchunked plain Stan version (the reference of the chunked version and of its AVX versions). No loop over N
+// Unchunked Stan::math version (the reference of the chunked version and of its AVX versions). No loop over N
 // anywhere (the loop over the M basis functions makes their columns, each a whole-vector operation, once).
 
 

@@ -1,13 +1,13 @@
 
 ##
-## ==== R_fn_write_reduce_sum_chunked_version_of_Stan_model.R ===================================================
+## ==== R_fn_write_nico_reduce_sum_version_of_Stan_model.R ===================================================
 ##
-## ---- reduce_sum_chunked: the version of any Stan model whose nuisance blocks (nuisance_params) are held by
+## ---- nico_reduce_sum: the version of any Stan model whose nuisance blocks (nuisance_params) are held by
 ##      NicoStan inside the chunks of its reduce_sum, written automatically from the model itself ----
 ##
 ## With nuisance_params = c("z", ...) (the names of the model's nuisance blocks, as declared in its parameters
-## block), NicoStan writes the reduce_sum_chunked version of the model next to it
-## (<model>_reduce_sum_chunked.stan) and its user header:
+## block), NicoStan writes the nico_reduce_sum version of the model next to it
+## (<model>_nico_reduce_sum.stan) and its user header:
 ##
 ##   1. each nuisance block is taken out of the parameters block (its declaration is kept as a comment):
 ##      NicoStan samples its values (the blocks one after the other, each in Stan's own order of its values), and
@@ -43,7 +43,7 @@
 ##
 ##
 ##
-#' The reduce_sum_chunked version of a Stan model (its nuisance blocks held by NicoStan inside the chunks)
+#' The nico_reduce_sum version of a Stan model (its nuisance blocks held by NicoStan inside the chunks)
 #'
 #' @param Stan_model_file_path The Stan model, with its nuisance blocks declared in its parameters block.
 #' @param nuisance_params The names of its nuisance blocks (in the order NicoStan holds them).
@@ -51,24 +51,34 @@
 #' @param stanc_include_paths_arguments The --include-paths arguments of the model's stanc arguments (NULL:
 #'   none).
 #' @param Stan_cpp_user_header The model's own user header (NULL: none), included by the new user header.
-#' @param reduce_sum_chunked_Stan_model_file_path Where the version is written (default: next to the model).
+#' @param nico_reduce_sum_Stan_model_file_path Where the version is written (default: next to the model).
 #' @return A list: Stan_model_file_path and Stan_cpp_user_header of the version, and the data frame
 #'   nuisance_blocks (name, shape, the Stan expressions of its terms, values per term and offset).
 #' @noRd
-R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
+R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                     Stan_model_file_path,
                     nuisance_params,
                     stanc_file_path,
                     stanc_include_paths_arguments              = NULL,
                     Stan_cpp_user_header                       = NULL,
-                    reduce_sum_chunked_Stan_model_file_path    = sub("\\.stan$", "_reduce_sum_chunked.stan",
-                                                                     Stan_model_file_path)
+                    nico_reduce_sum_Stan_model_file_path       =
+                          fn_path_of_the_nico_reduce_sum_version_of_a_Stan_model(Stan_model_file_path)
 ) {
 
         stopifnot(is.character(nuisance_params), length(nuisance_params) >= 1, !anyDuplicated(nuisance_params))
         ##
+        ## (a version already written under the former name, <model>_reduce_sum_chunked.stan, keeps that name and
+        ##  the wording of its written comments, so that its compiled library is still the one it was built from)
+        name_of_the_method_in_the_written_comments <-  if (grepl("_reduce_sum_chunked\\.stan$",
+                                                                 nico_reduce_sum_Stan_model_file_path)) {
+              "reduce_sum_chunked"
+        } else {
+              "nico_reduce_sum"
+        }
+        ##
         ## ---- a version already written from these very files, by this very NicoStan install: its record is
-        ##      returned as it is, without the rewrite and the stanc probes (the key holds the md5 of the model, of
+        ##      returned as it is, without the rewrite and the stanc probes (the key holds the md5 of the model,
+        ##      of
         ##      every .stan file of its include folders, of the user header and of NicoStan's own code and
         ##      headers, with the nuisance names; the version and its user header must still be the files whose
         ##      md5 the record holds):
@@ -93,19 +103,19 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                                      package = "NicoStan", mustWork = TRUE))
         files_of_the_key <-  files_of_the_key[file.exists(files_of_the_key)]
         key_of_this_version <-  paste(c(nuisance_params,
-                                        reduce_sum_chunked_Stan_model_file_path,
+                                        nico_reduce_sum_Stan_model_file_path,
                                         files_of_the_key,
                                         unname(tools::md5sum(files = files_of_the_key))), collapse = "|")
         file_of_the_record <-  sub(pattern = "\\.stan$", replacement = "_record_of_the_writer.RDS",
-                                   x = reduce_sum_chunked_Stan_model_file_path)
+                                   x = nico_reduce_sum_Stan_model_file_path)
         user_header_of_the_version <-  sub(pattern = "\\.stan$", replacement = "_user_header.hpp",
-                                           x = reduce_sum_chunked_Stan_model_file_path)
-        if (file.exists(file_of_the_record) && file.exists(reduce_sum_chunked_Stan_model_file_path) &&
+                                           x = nico_reduce_sum_Stan_model_file_path)
+        if (file.exists(file_of_the_record) && file.exists(nico_reduce_sum_Stan_model_file_path) &&
             file.exists(user_header_of_the_version)) {
               record_of_the_writer <-  tryCatch(readRDS(file_of_the_record), error = function(e) NULL)
               if (!is.null(record_of_the_writer) && identical(record_of_the_writer$key, key_of_this_version) &&
                   identical(record_of_the_writer$md5_of_the_version,
-                            unname(tools::md5sum(files = reduce_sum_chunked_Stan_model_file_path))) &&
+                            unname(tools::md5sum(files = nico_reduce_sum_Stan_model_file_path))) &&
                   identical(record_of_the_writer$md5_of_the_user_header,
                             unname(tools::md5sum(files = user_header_of_the_version)))) {
                     return(record_of_the_writer$result)
@@ -150,7 +160,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                     if (characters[k] == closing) depth <-  depth - 1
                     if (depth == 0) return(position + k - 1)
               }
-              stop(paste0("reduce_sum_chunked: no bracket closes the ", opening, " at character ", position))
+              stop(paste0("nico_reduce_sum: no bracket closes the ", opening, " at character ", position))
 
         }
         fn_split_at_top_level <-  function(code, separator) {
@@ -246,7 +256,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               pieces <-  trimws(fn_split_at_top_level(substr(constraint, 2, nchar(constraint) - 1), ","))
               position_of_equals <-  regexpr(pattern = "=", text = pieces, fixed = TRUE)
               if (any(position_of_equals < 1)) {
-                    stop(paste0("reduce_sum_chunked: the constraint ", constraint, " of the nuisance block ",
+                    stop(paste0("nico_reduce_sum: the constraint ", constraint, " of the nuisance block ",
                                 name_of_block, " is not of the form <key = value, ...>"))
               }
               keys <-  trimws(substr(pieces, 1, position_of_equals - 1))
@@ -262,7 +272,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                               "multiplier, offset"  = 4,
                               NA)
               if (is.na(kind)) {
-                    stop(paste0("reduce_sum_chunked: the constraint ", constraint, " of the nuisance block ",
+                    stop(paste0("nico_reduce_sum: the constraint ", constraint, " of the nuisance block ",
                                 name_of_block, " is not one of <lower = a>, <upper = b>, ",
                                 "<lower = a, upper = b>, <offset = a>, <multiplier = b> or ",
                                 "<offset = a, multiplier = b>"))
@@ -277,7 +287,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                                                  gregexpr(pattern = "[A-Za-z_][A-Za-z0-9_]*",
                                                           text = paste(bounds, collapse = " ")))[[1]]
               if (any(names_in_the_bounds %in% nuisance_params)) {
-                    stop(paste0("reduce_sum_chunked: the constraint ", constraint, " of the nuisance block ",
+                    stop(paste0("nico_reduce_sum: the constraint ", constraint, " of the nuisance block ",
                                 name_of_block, " uses the nuisance block(s) ",
                                 paste(intersect(names_in_the_bounds, nuisance_params), collapse = ", "),
                                 ", which is not supported"))
@@ -430,7 +440,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                     }
                     if (grepl(pattern = "^array\\s*\\[[\\s\\S]*\\]\\s*tuple\\s*\\(", x = declaration_text,
                               perl = TRUE)) {
-                          stop(paste0("reduce_sum_chunked: the nuisance block ", name, " is an array of tuples, ",
+                          stop(paste0("nico_reduce_sum: the nuisance block ", name, " is an array of tuples, ",
                                       "which is not supported; declare it as a tuple of arrays instead (e.g. ",
                                       "tuple(array[N] real, array[N] vector[K]) rather than ",
                                       "array[N] tuple(real, vector[K]))"))
@@ -448,7 +458,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                     names_already_used <-  regmatches(text, gregexpr(pattern = "[A-Za-z_][A-Za-z0-9_]*",
                                                                      text = text))[[1]]
                     if (any(tree$leaf_names %in% names_already_used)) {
-                          stop(paste0("reduce_sum_chunked: the model already uses one of the names given to the ",
+                          stop(paste0("nico_reduce_sum: the model already uses one of the names given to the ",
                                       "components of the tuple ", name, ": ",
                                       paste(intersect(tree$leaf_names, names_already_used), collapse = ", ")))
                     }
@@ -473,7 +483,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                                 node <-  tree
                                 for (index in path[!is.na(path)]) {
                                       if (is.null(node$children) || index > length(node$children)) {
-                                            stop(paste0("reduce_sum_chunked: ", use, " is not a component of ",
+                                            stop(paste0("nico_reduce_sum: ", use, " is not a component of ",
                                                         "the tuple ", name))
                                       }
                                       node <-  node$children[[index]]
@@ -485,7 +495,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                     }
                     nuisance_params_with_the_tuple_components <-  c(nuisance_params_with_the_tuple_components,
                                                                     tree$leaf_names)
-                    message(paste0("\033[36mreduce_sum_chunked: the tuple ", name, " is held as the nuisance ",
+                    message(paste0("\033[36mnico_reduce_sum: the tuple ", name, " is held as the nuisance ",
                                    "blocks ", paste(tree$leaf_names, collapse = ", "), "\033[0m"))
               }
               text <-  paste0(substr(text, 1, opening_of_parameters),
@@ -498,7 +508,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
 
 
         blocks <-  fn_blocks(text)
-        if (is.null(blocks[["parameters"]])) stop("reduce_sum_chunked: the model has no parameters block")
+        if (is.null(blocks[["parameters"]])) stop("nico_reduce_sum: the model has no parameters block")
         ##
         ## ---- the model's own data and transformed data (before the rewrite), from which the sizes of the
         ##      nuisance blocks are written in terms of the data in nuisance_blocks (see the end):
@@ -519,7 +529,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
         missing_blocks <-  setdiff(nuisance_params, names_declared)
         if (length(missing_blocks) > 0) {
 
-              stop(paste0("reduce_sum_chunked: nuisance_params not declared in the parameters block: ",
+              stop(paste0("nico_reduce_sum: nuisance_params not declared in the parameters block: ",
                           paste(missing_blocks, collapse = ", ")))
         }
 
@@ -570,7 +580,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                     rows_and_columns_of_each_block[[name]] <-  declaration$sizes
               }
               if (is.na(shape)) {
-                    stop(paste0("reduce_sum_chunked: the nuisance block ", name, " is not one of vector[E], ",
+                    stop(paste0("nico_reduce_sum: the nuisance block ", name, " is not one of vector[E], ",
                                 "row_vector[E], array[E] real, array[E] vector[K], array[E] row_vector[K], ",
                                 "matrix[R, C] or array[A] matrix[R, C]"))
               }
@@ -613,20 +623,20 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                                                          "nicostan_check_that_the_bound_is_a_container = ",
                                                          bound, ";\n"))
                     if (!fn_stanc_accepts(probe)) {
-                          stop(paste0("reduce_sum_chunked: the bound ", bound, " of the constraint ",
+                          stop(paste0("nico_reduce_sum: the bound ", bound, " of the constraint ",
                                       constraint$text, " of the nuisance block ", name, " is neither a real ",
                                       "number nor a ", type_of_the_block, ":\n", last_message_of_stanc))
                     }
                     constraint[[paste0(which_bound, "_bound_is_a_container")]] <-  TRUE
               }
               constraint_of_each_block[[name]] <-  constraint
-              message(colourise(paste0("reduce_sum_chunked: the nuisance block ", name, " has the constraint ",
+              message(colourise(paste0("nico_reduce_sum: the nuisance block ", name, " has the constraint ",
                                        constraint$text, ": NicoStan holds its unconstrained values, and each ",
                                        "value read is constrained with Stan math's own transform"), "cyan"))
         }
         main_declarations <-  declarations[!(names_declared %in% nuisance_params)]
         if (length(main_declarations) == 0) {
-              stop(paste0("reduce_sum_chunked: the model needs at least one main parameter (besides its ",
+              stop(paste0("nico_reduce_sum: the model needs at least one main parameter (besides its ",
                           "nuisance blocks)"))
         }
         ## (the first value of the first main parameter: the type of the readers)
@@ -749,7 +759,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               positions <-  gregexpr(pattern = "(?<![A-Za-z0-9_])return(?![A-Za-z0-9_])",
                                      text = body_of_definition, perl = TRUE)[[1]]
               if (positions[1] == -1) {
-                    stop("reduce_sum_chunked: a partial-sum function with no return statement")
+                    stop("nico_reduce_sum: a partial-sum function with no return statement")
               }
               for (position in rev(positions)) {
                     start_of_value <-  position + nchar("return")
@@ -808,7 +818,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               arguments <-  trimws(fn_split_at_top_level(substr(text, opening + 1, closing - 1), ","))
               block <-  nuisance_blocks[nuisance_blocks$name == arguments[2], ]
               if (block$shape %in% c("vector", "row_vector", "matrix")) {
-                    stop(paste0("reduce_sum_chunked: reduce_sum slices arrays only, not the ", block$shape, " ",
+                    stop(paste0("nico_reduce_sum: reduce_sum slices arrays only, not the ", block$shape, " ",
                                 block$name))
               }
               partial_sum <-  arguments[1]
@@ -829,7 +839,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                     definition <-  regexpr(pattern = paste0("(?<![A-Za-z0-9_])", base_name, definition_suffix,
                                                             "\\s*\\("), text = text, perl = TRUE)
                     if (definition == -1) {
-                          stop(paste0("reduce_sum_chunked: the partial-sum function ", partial_sum, " is not ",
+                          stop(paste0("nico_reduce_sum: the partial-sum function ", partial_sum, " is not ",
                                       "defined in the model"))
                     }
                     start_of_line <-  definition
@@ -1001,7 +1011,8 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
         ##      transformed data block):
         ##
         declarations_of_the_readers <-  paste0(
-              "\n    // (NicoStan's readers of its nuisance block: reduce_sum_chunked)\n",
+              "\n    // (NicoStan's readers of its nuisance block: ",
+              name_of_the_method_in_the_written_comments, ")\n",
               "    real nicostan_nuisance_value(int term, int values_before_the_block, real type);\n",
               "    vector nicostan_nuisance_vector(int first_term, int last_term, int values_before_the_block, ",
               "real type);\n",
@@ -1106,11 +1117,12 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               paste0("    int nicostan_size_of_the_nuisance_block = nicostan_offset_of_", last_block$name,
                      " + nicostan_terms_of_", last_block$name, " * nicostan_values_per_term_of_",
                      last_block$name, ";"))
-        transformed_data <-  paste0("\n    // (the nuisance blocks held by NicoStan: reduce_sum_chunked)\n",
+        transformed_data <-  paste0("\n    // (the nuisance blocks held by NicoStan: ",
+                                    name_of_the_method_in_the_written_comments, ")\n",
                                     paste(transformed_data, collapse = "\n"), "\n")
         if (is.null(fn_blocks(text)[["transformed data"]])) {
               data_block <-  fn_blocks(text)[["data"]]
-              if (is.null(data_block)) stop("reduce_sum_chunked: the model has no data block")
+              if (is.null(data_block)) stop("nico_reduce_sum: the model has no data block")
               text <-  paste0(substr(text, 1, data_block[["closing"]]), "\ntransformed data {\n}",
                               substring(text, data_block[["closing"]] + 1))
         }
@@ -1122,7 +1134,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
         ##      it is used. The probes keep the blocks declared, so that only the use probed changes:
         ##
         if (!fn_stanc_accepts(text)) {
-              stop(paste0("reduce_sum_chunked: stanc rejects the model with NicoStan's readers declared and its ",
+              stop(paste0("nico_reduce_sum: stanc rejects the model with NicoStan's readers declared and its ",
                           "reduce_sum calls rewritten (before the other uses are read): ", Stan_model_file_path,
                           "\n",
                           last_message_of_stanc))
@@ -1390,7 +1402,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               definition <-  regexpr(pattern = paste0("(?<![A-Za-z0-9_])", base_name, definition_suffix,
                                                       "\\s*\\("), text = text, perl = TRUE)
               if (definition == -1) {
-                    stop(paste0("reduce_sum_chunked: the partial-sum function ", partial_sum, " is not defined ",
+                    stop(paste0("nico_reduce_sum: the partial-sum function ", partial_sum, " is not defined ",
                                 "in the model"))
               }
               start_of_line <-  definition
@@ -1446,7 +1458,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               text <-  paste0(substr(text, 1, closing_of_body), copy, substring(text, closing_of_body + 1))
               copies_reading_a_shared_nuisance_block <-  c(copies_reading_a_shared_nuisance_block, copy_name)
               if (!fn_stanc_accepts(text)) {
-                    stop(paste0("reduce_sum_chunked: stanc rejects the copy ", copy_name, " that reads the ",
+                    stop(paste0("nico_reduce_sum: stanc rejects the copy ", copy_name, " that reads the ",
                                 "shared nuisance block ", b, ":\n", last_message_of_stanc))
               }
               ##
@@ -1484,7 +1496,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                           }
                     }
                     if (is.null(chosen)) {
-                          stop(paste0("reduce_sum_chunked: stanc accepts none of NicoStan's readers for the use ",
+                          stop(paste0("nico_reduce_sum: stanc accepts none of NicoStan's readers for the use ",
                                       "of ", parameter_name, " (the nuisance block ", b, ") in ", copy_name, ": ",
                                       fn_restore(substr(text, use, use + nchar(parameter_name) + 40))))
                     }
@@ -1497,7 +1509,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                               substring(text, position_of_the_local + nchar(local_of_the_whole_block)))
               type_of_the_readers <-  type_of_the_readers_outside_the_copy
               constraint_of_each_block[[b]] <-  constraint_outside_the_copy
-              message(colourise(paste0("reduce_sum_chunked: the nuisance block ", b, ", a shared argument of ",
+              message(colourise(paste0("nico_reduce_sum: the nuisance block ", b, ", a shared argument of ",
                                        partial_sum, ", is read inside the chunks by ", copy_name), "cyan"))
         }
         ## (a constrained block that no reduce_sum slices: its uses in the model block read one local of the
@@ -1569,7 +1581,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                           }
                     }
                     if (is.na(chosen)) {
-                          stop(paste0("reduce_sum_chunked: stanc accepts none of NicoStan's readers for the use ",
+                          stop(paste0("nico_reduce_sum: stanc accepts none of NicoStan's readers for the use ",
                                       "of ",
                                       block_name, ": ", fn_restore(substr(text, use, end_of_use))))
                     }
@@ -1588,12 +1600,12 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               constraint <-  constraint_of_each_block[[block$name]]
               if (constraint$kind == 0) next
               if (block$name %in% blocks_whose_log_jacobian_is_added_inside_the_chunks) {
-                    message(colourise(paste0("reduce_sum_chunked: the log-Jacobian of the constraint of ",
+                    message(colourise(paste0("nico_reduce_sum: the log-Jacobian of the constraint of ",
                                              block$name, " is added inside the chunks, by the reduce_sum that ",
                                              "slices it"), "cyan"))
                     next
               }
-              message(colourise(paste0("reduce_sum_chunked: the log-Jacobian of the constraint of ", block$name,
+              message(colourise(paste0("nico_reduce_sum: the log-Jacobian of the constraint of ", block$name,
                                        " is added by jacobian += at the start of the transformed parameters ",
                                        "block (no reduce_sum that slices it adds its value to the target as it ",
                                        "is, at the top level of the model block)"), "cyan"))
@@ -1662,7 +1674,8 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               if (fn_declaration(statements[k])$name %in% nuisance_params) {
                     statements[k] <-  paste0(sub(pattern = "^(\\s*).*$", replacement = "\\1",
                                                  x = fn_without_markers(statements[k])),
-                                             "// (held by NicoStan, reduce_sum_chunked:) ",
+                                             paste0("// (held by NicoStan, ",
+                                                    name_of_the_method_in_the_written_comments, ":) "),
                                              gsub(pattern = "\\s+", replacement = " ",
                                                   x = trimws(fn_without_markers(statements[k]))), "\n    //")
               }
@@ -1680,9 +1693,9 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                         "nicostan_size_of_the_nuisance_block;\n",
                         substring(text, generated_quantities_block[["closing"]]))
         if (!fn_stanc_accepts(text)) {
-              kept <-  sub("\\.stan$", "_rejected_by_stanc.stan", reduce_sum_chunked_Stan_model_file_path)
+              kept <-  sub("\\.stan$", "_rejected_by_stanc.stan", nico_reduce_sum_Stan_model_file_path)
               writeLines(text = fn_restore(text), con = kept)
-              stop(paste0("reduce_sum_chunked: stanc rejects the reduce_sum_chunked version of ",
+              stop(paste0("nico_reduce_sum: stanc rejects the nico_reduce_sum version of ",
                           Stan_model_file_path, " (kept for inspection: ", kept, ")"))
         }
         ##
@@ -1702,13 +1715,13 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               return(invisible(TRUE))
         }
 
-        fn_write_lines_when_they_change(lines  = c(paste0("// reduce_sum_chunked version of ",
-                                                          basename(Stan_model_file_path),
+        fn_write_lines_when_they_change(lines  = c(paste0("// ", name_of_the_method_in_the_written_comments,
+                                                          " version of ", basename(Stan_model_file_path),
                                                           ", written by NicoStan: its nuisance blocks (",
                                                           paste(nuisance_params, collapse = ", "),
                                                           ") are held by NicoStan inside the chunks"),
                                                    fn_restore(text)),
-                                        file   = reduce_sum_chunked_Stan_model_file_path)
+                                        file   = nico_reduce_sum_Stan_model_file_path)
         # readers_header <-  system.file("include", "NicoStan", "runtime", "general_functions",
         #                                "stan_external_nuisance_values_of_the_block_owned_by_NicoStan.hpp",
         #                                package = "NicoStan", mustWork = TRUE)
@@ -1717,7 +1730,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
               "include", "NicoStan", "runtime", "general_functions",
               "stan_external_nuisance_values_of_the_block_owned_by_NicoStan.hpp",
               package = "NicoStan", mustWork = TRUE)
-        user_header <-  sub("\\.stan$", "_user_header.hpp", reduce_sum_chunked_Stan_model_file_path)
+        user_header <-  sub("\\.stan$", "_user_header.hpp", nico_reduce_sum_Stan_model_file_path)
         fn_write_lines_when_they_change(lines  = c("#pragma once",
                                                    paste0("#include \"", readers_header, "\""),
                                                    if (!is.null(Stan_cpp_user_header)) {
@@ -1759,7 +1772,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                                                          text = transformed_data_body_of_the_model,
                                                          perl = TRUE)))
                           # if (length(declaration) == 0 || n_assignments != 1) {
-                          #   stop(paste0("reduce_sum_chunked: the size of the nuisance block ", name_of_block,
+                          #   stop(paste0("nico_reduce_sum: the size of the nuisance block ", name_of_block,
                           #               " uses ", name, ", which is neither a variable of the data block ",
                           #               "nor an integer of the transformed data declared with its value in ",
                           #               "one expression and never assigned again; it cannot be written in ",
@@ -1770,7 +1783,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                           ##  from the compiled model, whose generated quantities report it:
                           ##  fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_compiled_model())
                           if (length(declaration) == 0 || n_assignments != 1) {
-                                message(colourise(paste0("reduce_sum_chunked: the size of the nuisance block ",
+                                message(colourise(paste0("nico_reduce_sum: the size of the nuisance block ",
                                                          name_of_block, " uses ", name, ", which is set in the ",
                                                          "transformed data in a way that cannot be written in ",
                                                          "terms of the data (size so far: ", expression, "); ",
@@ -1783,7 +1796,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
                                               x = expression, perl = TRUE)
                     }
               }
-              stop(paste0("reduce_sum_chunked: the size of the nuisance block ", name_of_block, " is not ",
+              stop(paste0("nico_reduce_sum: the size of the nuisance block ", name_of_block, " is not ",
                           "written in terms of the data after 50 replacements of transformed-data integers ",
                           "(size so far: ", expression, ")"))
 
@@ -1836,10 +1849,10 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
         }
 
         result_of_the_writer <-  list(
-              Stan_model_file_path  = reduce_sum_chunked_Stan_model_file_path,
+              Stan_model_file_path  = nico_reduce_sum_Stan_model_file_path,
               Stan_cpp_user_header  = user_header,
               unit_upstream_proof   = R_fn_bridge_memory_proof_of_unit_upstream(
-                                            model_file = reduce_sum_chunked_Stan_model_file_path,
+                                            model_file = nico_reduce_sum_Stan_model_file_path,
                                             make_args = paste0("USER_HEADER=", user_header)),
               nuisance_blocks       = nuisance_blocks)
         ##
@@ -1852,7 +1865,7 @@ R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
         saveRDS(object = list(
                       key                     = key_of_this_version,
                       md5_of_the_version      = unname(tools::md5sum(
-                                                      files = reduce_sum_chunked_Stan_model_file_path)),
+                                                      files = nico_reduce_sum_Stan_model_file_path)),
                       md5_of_the_user_header  = unname(tools::md5sum(files = user_header)),
                       result                  = result_of_the_writer),
                 file = temporary_file_of_the_record)
@@ -1894,15 +1907,15 @@ fn_file_of_the_one_NicoStan_install <-  function(..., package, mustWork) {
 
 
 
-#' The number of nuisance values held by NicoStan for a reduce_sum_chunked model
+#' The number of nuisance values held by NicoStan for a nico_reduce_sum model
 #'
 #' Each nuisance block's number of terms times its values per term (both Stan expressions of the data, as
-#' R_fn_write_reduce_sum_chunked_version_of_Stan_model() returns them in nuisance_blocks), worked out in R from
+#' R_fn_write_nico_reduce_sum_version_of_Stan_model() returns them in nuisance_blocks), worked out in R from
 #' Stan_data_list (the writer has already written every transformed-data integer of a size in terms of the data);
 #' stops, naming the block, when an expression cannot be worked out from the data or is not a whole number, so
 #' that the size is then given by hand (n_nuisance_override).
 #'
-#' @param nuisance_blocks The nuisance_blocks of R_fn_write_reduce_sum_chunked_version_of_Stan_model().
+#' @param nuisance_blocks The nuisance_blocks of R_fn_write_nico_reduce_sum_version_of_Stan_model().
 #' @param Stan_data_list The model's data.
 #' @return The number of nuisance values, summed over the blocks.
 #' @keywords internal
@@ -1911,7 +1924,7 @@ fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_data <-  function( nuis
 
         ## (a block whose size the writer could not write in terms of the data: read from the compiled model)
         if (isTRUE(any(nuisance_blocks$size_read_from_the_compiled_model))) {
-              stop(paste0("reduce_sum_chunked: the size of the nuisance block(s) ",
+              stop(paste0("nico_reduce_sum: the size of the nuisance block(s) ",
                           paste(nuisance_blocks$name[nuisance_blocks$size_read_from_the_compiled_model],
                                 collapse = ", "),
                           " is set in the transformed data in a way that cannot be written in terms of the ",
@@ -1929,7 +1942,7 @@ fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_data <-  function( nuis
               if (!is.numeric(size_of_block) || length(size_of_block) != 1 || is.na(size_of_block) ||
                   size_of_block != round(size_of_block)) {
 
-                    stop(paste0("reduce_sum_chunked: the size of the nuisance block ", nuisance_blocks$name[i],
+                    stop(paste0("nico_reduce_sum: the size of the nuisance block ", nuisance_blocks$name[i],
                                 " (", nuisance_blocks$terms[i], " x ", nuisance_blocks$values_per_term[i],
                                 ") could not be worked out from Stan_data_list; give the size of all the ",
                                 "nuisance blocks with n_nuisance_override."))
@@ -1945,18 +1958,18 @@ fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_data <-  function( nuis
 
 
 
-#' The number of nuisance values held by NicoStan for a reduce_sum_chunked model, read from its compiled library
+#' The number of nuisance values held by NicoStan for a nico_reduce_sum model, read from its compiled library
 #'
 #' For a model whose nuisance block size is set in its transformed data in a way the writer cannot write in
 #' terms of the data (nuisance_blocks$size_read_from_the_compiled_model, e.g. a size from a flag set in a loop):
-#' the compiled library of the reduce_sum_chunked version, constructed with the data, reports the size of the
+#' the compiled library of the nico_reduce_sum version, constructed with the data, reports the size of the
 #' whole nuisance block in its generated quantities (nicostan_size_of_the_nuisance_block_held_by_NicoStan, written
-#' by R_fn_write_reduce_sum_chunked_version_of_Stan_model()), read with BridgeStan's param_constrain at the main
+#' by R_fn_write_nico_reduce_sum_version_of_Stan_model()), read with BridgeStan's param_constrain at the main
 #' parameters 0 on the unconstrained scale. Transformed parameters or generated quantities that read the nuisance
 #' block are given nuisance values of 0 (the values used outside NicoStan), as many as they ask for. Runs in a
 #' fresh R process (a library loaded once in a process is never loaded again from a newer build there).
 #'
-#' @param model_so_file The compiled library (BridgeStan) of the reduce_sum_chunked version.
+#' @param model_so_file The compiled library (BridgeStan) of the nico_reduce_sum version.
 #' @param Stan_data_list The model's data (a list, or the path of its JSON file).
 #' @return The number of nuisance values held by NicoStan.
 #' @keywords internal
@@ -1995,7 +2008,7 @@ fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_compiled_model <-  func
               if (is.na(position_of_the_size)) {
                     stop(paste0("the library ", model_so_file, " does not report ",
                                 "nicostan_size_of_the_nuisance_block_held_by_NicoStan: it is not a ",
-                                "reduce_sum_chunked version written by NicoStan"))
+                                "nico_reduce_sum version written by NicoStan"))
               }
               n_unconstrained <-  .C( "bs_param_unc_num_R", as.raw(model_pointer), num = as.integer(0),
                                       PACKAGE = library_name)$num
@@ -2073,14 +2086,14 @@ fn_slice_of_a_nuisance_block_read_as_a_matrix <-  function(body_of_definition,
 }
 ##
 ##
-## ---- A reduce_sum_chunked Stan model written before the matrix reader: each slice read by
+## ---- A nico_reduce_sum Stan model written before the matrix reader: each slice read by
 ##      nicostan_nuisance_array_of_row_vectors() that the body after it only reads as to_matrix(<slice>) is read
 ##      by nicostan_nuisance_matrix_of_terms() instead, and the matrix reader is declared in the functions block
 ##      after the array reader; the rest of the model (its comments and commented-out code included) is
 ##      unchanged. Writes the model to new_Stan_model_file_path (which may be Stan_model_file_path itself) and
 ##      returns the names of the slices read as matrices -
 ##
-R_fn_read_the_nuisance_slices_of_a_reduce_sum_chunked_Stan_model_as_matrices <-  function(
+R_fn_read_the_nuisance_slices_of_a_nico_reduce_sum_Stan_model_as_matrices <-  function(
                     Stan_model_file_path,
                     new_Stan_model_file_path
 ) {
@@ -2116,7 +2129,7 @@ R_fn_read_the_nuisance_slices_of_a_reduce_sum_chunked_Stan_model_as_matrices <- 
                           if (depth == 0) return(k)
                     }
               }
-              stop("reduce_sum_chunked: a bracket is not closed")
+              stop("nico_reduce_sum: a bracket is not closed")
         }
 
         ##
@@ -2167,7 +2180,7 @@ R_fn_read_the_nuisance_slices_of_a_reduce_sum_chunked_Stan_model_as_matrices <- 
                                                   new_declaration, slice$body_of_definition),
                                            "\n", fixed = TRUE)[[1]]
                     if (length(old_lines) != length(new_lines)) {
-                          stop(paste0("reduce_sum_chunked: the lines of the slice ", slice_name,
+                          stop(paste0("nico_reduce_sum: the lines of the slice ", slice_name,
                                       " changed in number"))
                     }
                     lines_with_the_old_ones_as_comments <-  c()
@@ -2195,7 +2208,7 @@ R_fn_read_the_nuisance_slices_of_a_reduce_sum_chunked_Stan_model_as_matrices <- 
                                                         "nicostan_nuisance_array_of_row_vectors\\([^;]*\\);"),
                                        text = text, perl = TRUE)
               if (array_reader == -1) {
-                    stop(paste0("reduce_sum_chunked: ", Stan_model_file_path, " does not declare ",
+                    stop(paste0("nico_reduce_sum: ", Stan_model_file_path, " does not declare ",
                                 "nicostan_nuisance_array_of_row_vectors()"))
               }
               end_of_the_array_reader <-  array_reader + attr(array_reader, "match.length") - 1
@@ -2208,6 +2221,57 @@ R_fn_read_the_nuisance_slices_of_a_reduce_sum_chunked_Stan_model_as_matrices <- 
         return(slices_read_as_matrices)
 
 }
+
+
+
+#' The file of the nico_reduce_sum version of a Stan model
+#'
+#' The file written beside the model, <model>_nico_reduce_sum.stan; a version already written under the former
+#' name, <model>_reduce_sum_chunked.stan, keeps that name, so that the library built from it is still found.
+#'
+#' @param Stan_model_file_path The Stan model.
+#' @return The path of the nico_reduce_sum version of the model.
+#' @noRd
+fn_path_of_the_nico_reduce_sum_version_of_a_Stan_model <-  function(
+                    Stan_model_file_path
+) {
+
+        file_under_the_former_name <-  sub("\\.stan$", "_reduce_sum_chunked.stan", Stan_model_file_path)
+        if (file.exists(file_under_the_former_name)) {
+              return(file_under_the_former_name)
+        }
+        return(sub("\\.stan$", "_nico_reduce_sum.stan", Stan_model_file_path))
+
+}
+
+
+
+#' The former name of the writer of the nico_reduce_sum version of a Stan model
+#'
+#' Calls R_fn_write_nico_reduce_sum_version_of_Stan_model() with the same arguments.
+#'
+#' @inheritParams R_fn_write_nico_reduce_sum_version_of_Stan_model
+#' @noRd
+R_fn_write_reduce_sum_chunked_version_of_Stan_model <-  function(
+                    Stan_model_file_path,
+                    nuisance_params,
+                    stanc_file_path,
+                    stanc_include_paths_arguments,
+                    Stan_cpp_user_header,
+                    nico_reduce_sum_Stan_model_file_path
+) {
+
+        return(R_fn_write_nico_reduce_sum_version_of_Stan_model(
+                    Stan_model_file_path                  = Stan_model_file_path,
+                    nuisance_params                       = nuisance_params,
+                    stanc_file_path                       = stanc_file_path,
+                    stanc_include_paths_arguments         = stanc_include_paths_arguments,
+                    Stan_cpp_user_header                  = Stan_cpp_user_header,
+                    nico_reduce_sum_Stan_model_file_path  = nico_reduce_sum_Stan_model_file_path))
+
+}
+
+
 
 
 

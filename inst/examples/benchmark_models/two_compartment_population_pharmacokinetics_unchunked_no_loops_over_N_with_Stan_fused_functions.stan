@@ -1,5 +1,5 @@
 // two_compartment_population_pharmacokinetics_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of the population PK model of Paper 1's layout timings
+// Unchunked Stan::math version of the population PK model of the tape-chunking paper's layout timings
 // (two_compartment_population_pharmacokinetics_chunked_no_loops_over_N_v2_automatic_reduce_sum_chunked, from its
 // source two_compartment_population_pharmacokinetics_chunked_no_loops_over_N_v2): the same log density as that
 // source at N_chunks = 1, and as two_compartment_population_pharmacokinetics.stan, as one pass over all N
@@ -39,8 +39,8 @@
 //   A = (alpha - k21) / ((ka - alpha) (alpha - beta)),  B = (k21 - beta) / ((ka - beta) (alpha - beta)),
 //   K = (k21 - ka) / ((ka - alpha) (ka - beta)),
 // i.e. dose ka / V1 times the second divided difference of f(lambda) = (k21 - lambda) exp(-lambda t) over the
-// three rates {alpha, beta, ka}. Torsten's pmx_solve_twocpt is not used: the solution is written here, in plain
-// Stan.
+// three rates {alpha, beta, ka}. Torsten's pmx_solve_twocpt is not used: the solution is written here, in
+// Stan::math.
 //
 // Numerical robustness: the tri-exponential divides by the differences of the three rates, so when ka is close
 // to alpha or beta (or alpha close to beta) its terms grow like 1 / (difference) and cancel: for a difference d

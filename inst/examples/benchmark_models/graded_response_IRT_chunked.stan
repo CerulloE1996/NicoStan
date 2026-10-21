@@ -20,7 +20,8 @@
 // The header of the tape-chunked model this one comes from (the next 14 lines):
 // Tape-chunked version of graded_response_IRT.stan: the same log density, with the likelihood of the responses
 // summed over the persons by reduce_sum_static, in chunks of chunk_size persons (data), so that each chunk's
-// autodiff tape is built, differentiated and released before the next one (Paper 1's tape chunking; N_chunks
+// autodiff tape is built, differentiated and released before the next one (the chunking paper's
+// chunking; N_chunks
 // from NicoStan::fn_compute_initial_N_chunks()). Each chunk's term is the original likelihood statement
 // restricted to the responses of the chunk's persons (the responses are sorted by person, so the chunk's
 // responses are contiguous: first_response[start] to last_response[end]), with the responses' persons counted

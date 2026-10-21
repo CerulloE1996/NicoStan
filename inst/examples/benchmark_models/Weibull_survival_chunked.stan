@@ -9,7 +9,8 @@
 //  out)
 // Tape-chunked version of Weibull_survival.stan: the same log density, with the likelihood summed over the
 // observations by reduce_sum_static, so that each chunk's autodiff tape is built, differentiated and released
-// before the next one (Paper 1's tape chunking; N_chunks from NicoStan::fn_compute_initial_N_chunks()). The data
+// before the next one (the chunking paper's chunking; N_chunks from
+// NicoStan::fn_compute_initial_N_chunks()). The data
 // hold the observed failures (N: t, X) and the censored observations (N_cens: t_cens, X_cens) apart; the observed
 // failures are the units of the chunks, in chunks of chunk_size failures (data), and each chunk also takes its
 // share of the censored observations, in proportion to its failures: the chunk of failures start to end takes the

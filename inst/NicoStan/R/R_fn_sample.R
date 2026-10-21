@@ -2534,7 +2534,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##      pre-burn-in test reordering (further below) always rebuilds.
                 ##
                 ## ---- a Stan model whose nuisance blocks are held by NicoStan (nuisance_params,
-                ##      reduce_sum_chunked): its model file is the reduce_sum_chunked version, compiled
+                ##      nico_reduce_sum): its model file is the nico_reduce_sum version, compiled
                 ##      against NicoStan's private runtime with the chunk-local bookkeeping and the nuisance
                 ##      block (the two options, set here too, as this may be a fresh R process); the size of
                 ##      its nuisance block was worked out at its initialisation (used when n_nuisance_override

@@ -81,7 +81,7 @@
 #include "stan_external_fused_weibull_lpdf.hpp"
 #include "stan_external_fused_bernoulli_logit_and_probit_glm_lpmf.hpp"
 // (the kernels of nico_bernoulli_logit_grouped_regression_lpmf, used by the GLM by group)
-#include "stan_external_fused_bernoulli_logit_grouped_regression_lpmf_of_13_Oct.hpp"
+#include "stan_external_fused_bernoulli_logit_grouped_regression_lpmf.hpp"
 
 #include <stan/math/rev.hpp>
 #include <stan/math/prim.hpp>

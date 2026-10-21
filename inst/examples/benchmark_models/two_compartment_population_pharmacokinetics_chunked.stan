@@ -6,7 +6,7 @@
 // Tape-chunked version of two_compartment_population_pharmacokinetics.stan: the same log density, with the
 // likelihood of the plasma concentrations summed over the patients by reduce_sum_static, in chunks of chunk_size
 // patients (data), so that each chunk's autodiff tape is built, differentiated and released before the next one
-// (Paper 1's tape chunking; N_chunks from NicoStan::fn_compute_initial_N_chunks()). Each chunk computes its
+// (the chunking paper's chunking; N_chunks from NicoStan::fn_compute_initial_N_chunks()). Each chunk computes its
 // patients' log CL, log Q, log V1, log V2 and log ka (mu + diag(omega) L_Omega z_i, non-centred, as in
 // two_compartment_population_pharmacokinetics.stan) and their samples' predicted concentrations with
 // two_compartment_oral_concentrations(), unchanged (the tri-exponential, and the stable form for the patients
@@ -29,7 +29,7 @@
 //   - the nuisance block z is declared as one row of 5 values per patient, array[N] row_vector[5] z (as
 //     u_raw, array[N] row_vector[n_tests], in LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan), and is itself
 //     the sliced argument of reduce_sum_static, in place of the loop that filled z_by_patient: nothing is built
-//     outside the chunks, and every argument of reduce_sum_static is a plain name (reduce_sum_static holds an
+//     outside the chunks, and every argument of reduce_sum_static is a single name (reduce_sum_static holds an
 //     expression by value and copies it at every split). Its unconstrained coordinates are in the same order as
 //     those of matrix[5, N] z (column i of the matrix = row i of the array: patient i's 5 values), so the log
 //     density at the same unconstrained point is unchanged; its initial values are given per patient (an N x 5
@@ -72,8 +72,8 @@
 //   A = (alpha - k21) / ((ka - alpha) (alpha - beta)),  B = (k21 - beta) / ((ka - beta) (alpha - beta)),
 //   K = (k21 - ka) / ((ka - alpha) (ka - beta)),
 // i.e. dose ka / V1 times the second divided difference of f(lambda) = (k21 - lambda) exp(-lambda t) over the
-// three rates {alpha, beta, ka}. Torsten's pmx_solve_twocpt is not used: the solution is written here, in plain
-// Stan.
+// three rates {alpha, beta, ka}. Torsten's pmx_solve_twocpt is not used: the solution is written here, in
+// Stan::math.
 //
 // Numerical robustness: the tri-exponential divides by the differences of the three rates, so when ka is close
 // to alpha or beta (or alpha close to beta) its terms grow like 1 / (difference) and cancel: for a difference d

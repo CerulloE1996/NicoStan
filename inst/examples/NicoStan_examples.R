@@ -406,17 +406,17 @@ NicoStan_check_model_structure <- function(model, example, expected_simd_lanes =
 ##
 NicoStan_compare_avx <-  function(avx_model, example, plain_file) {
 
-        plain_library <-  bridgestan::compile_model(plain_file, make_args = c("STAN_THREADS=true", "PRECOMPILED_HEADERS=false"))
-        plain <-  bridgestan::StanModel$new(plain_library, data = avx_model$init_object$json_file_path, seed = example$seed, warn = FALSE)
+        stan_math_library <-  bridgestan::compile_model(plain_file, make_args = c("STAN_THREADS=true", "PRECOMPILED_HEADERS=false"))
+        stan_math <-  bridgestan::StanModel$new(stan_math_library, data = avx_model$init_object$json_file_path, seed = example$seed, warn = FALSE)
         avx <-  bridgestan::StanModel$new(avx_model$init_object$model_so_file, data = avx_model$init_object$json_file_path,
                                          seed = example$seed, warn = FALSE)
-        u <-  plain$param_unconstrain_json(jsonlite::toJSON(example$initial_values[[1]], auto_unbox = TRUE, digits = NA))
+        u <-  stan_math$param_unconstrain_json(jsonlite::toJSON(example$initial_values[[1]], auto_unbox = TRUE, digits = NA))
         set.seed(example$seed + 41)
         points <-  c(list(u), lapply(seq_len(5), function(i) u + rnorm(length(u), sd = 0.3)))
         errors <-  do.call(rbind, lapply(points, function(point) {
 
                 a <-  avx$log_density_gradient(point, propto = FALSE, jacobian = TRUE)
-                b <-  plain$log_density_gradient(point, propto = FALSE, jacobian = TRUE)
+                b <-  stan_math$log_density_gradient(point, propto = FALSE, jacobian = TRUE)
                 c(log_density_absolute_error = abs(a$val - b$val),
                   gradient_max_scaled_error = max(abs(a$gradient - b$gradient) / pmax(1, abs(b$gradient))))
         }))
@@ -444,7 +444,7 @@ run_NicoStan_example <-  function( model,
 
         engine <-  match.arg(engine)
         math_backend <-  match.arg(math_backend)
-        if (engine == "cmdstanr" && math_backend != "Stan") stop("The CmdStanR comparison arm uses the plain Stan model.")
+        if (engine == "cmdstanr" && math_backend != "Stan") stop("The CmdStanR comparison arm uses the Stan::math model.")
         profile <-  match.arg(profile)
         if (is.null(warmup)) warmup <-  if (profile == "smoke") if (model == "EASY_stochastic_volatility") 500 else 200 else 1000
         if (is.null(iterations)) iterations <-  if (profile == "smoke") if (model == "EASY_stochastic_volatility") 500 else 250 else 1000

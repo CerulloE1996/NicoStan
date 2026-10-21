@@ -1447,8 +1447,8 @@ using nico::math::bmvp_simd_lanes;
 #include "stan_external_fused_student_t_id_glm_weibull_log_glm_and_bernoulli_logit_glm_by_group.hpp"
 // (the Student-t regression and the grouped Bernoulli-logit regression, private until now, timed
 //  against the GLMs above: the faster of each is the one the models use)
-#include "stan_external_fused_student_t_regression_lpdf_of_13_Oct.hpp"
-#include "stan_external_fused_bernoulli_logit_grouped_regression_lpmf_of_13_Oct.hpp"
+#include "stan_external_fused_student_t_regression_lpdf.hpp"
+#include "stan_external_fused_bernoulli_logit_grouped_regression_lpmf.hpp"
 // (the running version of log_sum_exp, one autodiff step for the whole vector)
 #include "stan_external_log_cumulative_sum_exp.hpp"
 // (any multi-exponential curve with each group's own coefficients and exponents, one autodiff step)
@@ -1459,7 +1459,7 @@ using nico::math::bmvp_simd_lanes;
 #include "stan_external_AR1_path.hpp"
 #include "stan_external_sum_log_square_plus.hpp"
 // (the fused normal with a log scale)
-#include "stan_external_fused_normal_log_scale_lpdf_of_13_Oct.hpp"
+#include "stan_external_fused_normal_log_scale_lpdf.hpp"
 #include "stan_external_fused_affine_compositions.hpp"
 // (the dot products of an affine predictor with indexed group effects and its log cumulative sum of
 //  exponentials, e.g. the partial likelihood of any proportional-hazards model with group effects, one autodiff

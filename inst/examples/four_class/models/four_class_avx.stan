@@ -6,7 +6,7 @@
 // WITHIN-CHAIN PARALLELISM / CHUNKED-TAPE variant (reduce_sum_static) of LC_MVOP_4class_joint_v1.
 // Same model, same log-density. Structural differences only:
 //   (1) u_raw is array[N] row_vector[n_tests] so reduce_sum_static slices the nuisance parameters;
-//   (2) the likelihood is a plain partial-sum function; the u tanh-Jacobian is RETURNED, not jacobian +=;
+//   (2) the likelihood is a hand-written partial-sum function; the u tanh-Jacobian is RETURNED, not jacobian +=;
 //   (3) no log_lik in transformed parameters - target is incremented once, inside reduce_sum_static;
 //   (4) observed / missing index sets are built per slice inside the partial function;
 //   (5) chunk_size (data) bounds the slice size; R defaults to ceil(N / num_chunks). With threads_per_chain = 1 this is "chunking":
@@ -783,7 +783,7 @@ functions {
             real out = 0.0;
 
             ////
-            //// ---- u transform + Jacobian (plain-function equivalent of lb_ub_jacobian(u_raw, 0, 1)):
+            //// ---- u transform + Jacobian (hand-written equivalent of lb_ub_jacobian(u_raw, 0, 1)):
             ////
             matrix[M, n_tests] tanh_u;
             for (m in 1:M)  tanh_u[m, ] = tanh(u_raw_slice[m]);

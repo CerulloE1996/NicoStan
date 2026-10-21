@@ -23,7 +23,7 @@ output_directory <- if (length(arguments) >= 4L) normalizePath(arguments[4L], mu
     file.path(getwd(), "NicoStan_four_class_results")
 if (!engine %in% c("NicoStan", "cmdstanr")) stop("engine must be NicoStan or cmdstanr")
 if (!backend %in% c("Stan", "AVX512", "AVX2")) stop("backend must be Stan, AVX512 or AVX2")
-if (engine == "cmdstanr" && backend != "Stan") stop("CmdStanR uses the plain Stan arm")
+if (engine == "cmdstanr" && backend != "Stan") stop("CmdStanR uses the Stan::math arm")
 if (!N %in% c(24L, 48L, 96L)) stop("N must be one of 24, 48, or 96")
 
 paths <- four_class_example_paths(example_directory = example_directory)
@@ -35,12 +35,12 @@ if (engine == "cmdstanr") {
     result <- run_four_class_cmdstanr_smoke(
         paths = paths,
         fixture_file = fixture_file,
-        stan_file = paths$source_plain,
+        stan_file = paths$source_Stan_math,
         output_rds = file.path(paths$runtime_directory,
                                paste0("cmdstanr_plain_N", N, ".rds"))
     )
 } else {
-    stan_file <- if (backend == "Stan") paths$source_plain else paths$source_avx
+    stan_file <- if (backend == "Stan") paths$source_Stan_math else paths$source_avx
     avx_header <- system.file("include", "BayesMVP", "stan_external_functions.hpp",
                               package = "BayesMVP")
     if (backend %in% c("AVX512", "AVX2") && (!nzchar(avx_header) || !file.exists(avx_header)))

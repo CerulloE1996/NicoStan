@@ -1,5 +1,5 @@
 // hierarchical_logistic_regression_unchunked_no_loops_over_N_with_Stan_fused_functions.stan
-// Unchunked plain Stan version of the hierarchical logistic model of Paper 1's layout timings
+// Unchunked Stan::math version of the hierarchical logistic model of the tape-chunking paper's layout timings
 // (hierarchical_logistic_regression_chunked_no_loops_over_N_automatic_reduce_sum_chunked, from its source
 // hierarchical_logistic_regression_chunked_no_loops_over_N): the same log density as
 // hierarchical_logistic_regression.stan, as one pass over all N observations, without reduce_sum_static.
