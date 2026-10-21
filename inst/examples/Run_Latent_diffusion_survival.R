@@ -24,8 +24,10 @@
 {
         example_source_file_paths <- as.character(unlist(lapply(sys.frames(), function(stack_frame) stack_frame$ofile)))
         if (!length(example_source_file_paths)) {
+
                 example_source_file_paths <- sub("^--file=", "", commandArgs()[startsWith(commandArgs(), "--file=")])
         }
+
         if (!length(example_source_file_paths)) stop("Source this file or run it with Rscript.")
         example_directory <- dirname(normalizePath(tail(example_source_file_paths, 1), mustWork = TRUE))
 }
@@ -90,7 +92,6 @@
         }
         benchmark_result$comparison$efficiency
 }
-
 
 
 

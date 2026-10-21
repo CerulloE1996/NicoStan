@@ -3,16 +3,21 @@
 ## Non-centred Gaussian priors are checked through their equivalent centred densities and transformation Jacobians.
 ##
 NicoStan_reference_log_density <-  function(example, p) {
+
         d <-  example$data
         normal <-  function(x, mean = 0, sd = 1) sum(dnorm(x, mean, sd, log = TRUE))
         if (example$model == "cox_frailty") {
+
                 eta <-  c(d$X %*% p$beta) + p$sigma_frailty * p$log_frailty_raw[d$group]
-                likelihood <-  sum(vapply(which(d$event == 1L), function(i) {
+                likelihood <-  sum(vapply(which(d$event == 1), function(i) {
+
                         risk <-  eta[d$t >= d$t[i]]
                         eta[i] - (max(risk) + log(sum(exp(risk - max(risk)))))
-                }, numeric(1L)))
+                }, numeric(1)))
+
                 return(likelihood + normal(p$beta, sd = 2) + normal(p$log_frailty_raw) + dexp(p$sigma_frailty, log = TRUE))
         }
+
         if (example$model == "weibull") {
                 observed_scale <-  exp(-(p$mu + c(d$X %*% p$beta)) / p$alpha)
                 censored_scale <-  exp(-(p$mu + c(d$X_cens %*% p$beta)) / p$alpha)
@@ -26,20 +31,22 @@ NicoStan_reference_log_density <-  function(example, p) {
                        normal(p$alpha, sd = 10) + normal(p$beta, sd = 2.5) + dexp(p$sigma, log = TRUE))
         }
         if (example$model == "hierarchical_logistic") {
-                beta <-  sweep(sweep(p$beta_raw, 2L, p$sigma, "*"), 2L, p$mu, "+")
-                eta <-  beta[d$group, 1L] + beta[d$group, 2L] * d$x
-                centred_prior <-  sum(vapply(1:2, function(i) normal(beta[, i], p$mu[i], p$sigma[i]), numeric(1L)))
+                beta <-  sweep(sweep(p$beta_raw, 2, p$sigma, "*"), 2, p$mu, "+")
+                eta <-  beta[d$group, 1] + beta[d$group, 2] * d$x
+                centred_prior <-  sum(vapply(1:2, function(i) normal(beta[, i], p$mu[i], p$sigma[i]), numeric(1)))
                 log_jacobian <-  d$K * sum(log(p$sigma))
-                return(sum(dbinom(d$y, 1L, plogis(eta), log = TRUE)) + centred_prior + log_jacobian +
+                return(sum(dbinom(d$y, 1, plogis(eta), log = TRUE)) + centred_prior + log_jacobian +
                        normal(p$mu, sd = 2) + normal(p$sigma, sd = 2))
         }
         if (example$model == "EASY_stochastic_volatility") {
+
                 h <-  numeric(d$T)
-                h[1L] <-  p$mu + p$sigma * p$h_std[1L] / sqrt(1 - p$phi^2)
-                if (d$T > 1L) for (i in 2:d$T) h[i] <-  p$mu + p$phi * (h[i - 1L] - p$mu) + p$sigma * p$h_std[i]
+                h[1] <-  p$mu + p$sigma * p$h_std[1] / sqrt(1 - p$phi^2)
+                if (d$T > 1) for (i in 2:d$T) h[i] <-  p$mu + p$phi * (h[i - 1] - p$mu) + p$sigma * p$h_std[i]
                 return(normal(d$y, sd = exp(h / 2)) + normal(p$h_std) + dunif(p$phi, -1, 1, log = TRUE) +
                        normal(p$sigma, sd = 0.5) + normal(p$mu, sd = 2))
         }
+
         if (example$model == "gaussian_process") {
                 x <-  (d$x - mean(d$x)) / sd(d$x)
                 y <-  (d$y - mean(d$y)) / sd(d$y)
@@ -53,16 +60,16 @@ NicoStan_reference_log_density <-  function(example, p) {
         }
         if (example$model == "joint_longitudinal_survival") {
                 factor <-  matrix(c(p$sigma_b0, p$rho_b * p$sigma_b1, 0,
-                                    p$sigma_b1 * sqrt(1 - p$rho_b^2)), nrow = 2L)
+                                    p$sigma_b1 * sqrt(1 - p$rho_b^2)), nrow = 2)
                 effects <-  factor %*% p$b_raw
                 inverse_covariance <-  solve(tcrossprod(factor))
                 centred_prior <-  -d$N_subj * (log(2 * pi) + sum(log(diag(factor)))) -
                                   0.5 * sum(effects * (inverse_covariance %*% effects))
                 log_jacobian <-  d$N_subj * sum(log(diag(factor)))
-                mu <-  c(d$X_long %*% p$beta_long) + effects[1L, d$subj_long] + effects[2L, d$subj_long] * d$time_long
+                mu <-  c(d$X_long %*% p$beta_long) + effects[1, d$subj_long] + effects[2, d$subj_long] * d$time_long
                 ## The example's fixed effects are intercept + time. Use the analytic integral as an independent check of quadrature.
-                rate <-  p$lambda * exp(c(d$X_surv %*% p$beta_surv) + p$alpha_assoc * (p$beta_long[1L] + effects[1L, ]))
-                slope <-  p$alpha_assoc * (p$beta_long[2L] + effects[2L, ])
+                rate <-  p$lambda * exp(c(d$X_surv %*% p$beta_surv) + p$alpha_assoc * (p$beta_long[1] + effects[1, ]))
+                slope <-  p$alpha_assoc * (p$beta_long[2] + effects[2, ])
                 cumulative_hazard <-  rate * d$T_surv
                 use_ratio <-  abs(slope) > 1e-8
                 cumulative_hazard[use_ratio] <-  rate[use_ratio] * expm1(slope[use_ratio] * d$T_surv[use_ratio]) / slope[use_ratio]
@@ -90,6 +97,7 @@ NicoStan_reference_log_density <-  function(example, p) {
                 }
                 x_at_event_or_censoring_time <- approx(x = grid_times, y = x_path, xout = d$t, rule = 2)$y
                 log_likelihood_by_subject <- vapply(seq_len(d$N), function(subject_index) {
+
                         subject_time <- d$t[subject_index]
                         interior_grid_indices <- which(grid_times <= subject_time)
                         interior_grid_indices <- interior_grid_indices[interior_grid_indices <= d$M]
@@ -99,17 +107,22 @@ NicoStan_reference_log_density <-  function(example, p) {
                         log_hazard_at_time <- log(p$hazard_scale) + log(x_at_event_or_censoring_time[subject_index]^2 + d$x_squared_hazard_offset)
                         d$event[subject_index] * log_hazard_at_time - integrated_hazard
                 }, numeric(1))
+
                 return(sum(log_likelihood_by_subject) + normal(p$w) + normal(p$drift_sin_coefficient, mean = 1.4, sd = 1) +
                        normal(p$drift_constant, mean = 1, sd = 1) + dlnorm(p$hazard_scale, meanlog = 0, sdlog = 1, log = TRUE))
         }
         stop("Unknown example model.")
 }
+
 ##
 NicoStan_check_density <-  function(bs, example, tolerance = 1e-7) {
+
         errors <-  vapply(example$initial_values, function(point) {
+
                 u <-  bs$param_unconstrain_json(jsonlite::toJSON(point, auto_unbox = TRUE, digits = NA))
                 abs(bs$log_density(u, propto = FALSE, jacobian = FALSE) - NicoStan_reference_log_density(example, point))
-        }, numeric(1L))
+        }, numeric(1))
+
         stopifnot(all(is.finite(errors)), max(errors) < tolerance)
         max(errors)
 }

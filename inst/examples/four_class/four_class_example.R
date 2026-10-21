@@ -6,6 +6,7 @@
 four_class_example_paths <- function(
     analysis_directory = file.path(getwd(), "Alg_paper_analysis"),
     example_directory = NULL) {
+
     if (!is.null(example_directory)) {
         example_directory <- normalizePath(example_directory, mustWork = FALSE)
         model_directory <- file.path(example_directory, "models")
@@ -44,15 +45,17 @@ four_class_example_paths <- function(
     )
 }
 
+
 four_class_add_current_data_fields <- function(stan_data) {
+
     stopifnot(is.list(stan_data), identical(as.integer(stan_data$n_class), 4L))
     ## Current four-class source requires these fields even when the optional OR
     ## parameterisation and generated-quantity diagnostics are disabled.
     defaults <- list(
-        ref_cutoff_category_A = 2L,
-        ref_cutoff_category_B = 2L,
-        use_OR_prior = 0L,
-        log_OR_shared = 1L,
+        ref_cutoff_category_A = 2,
+        ref_cutoff_category_B = 2,
+        use_OR_prior = 0,
+        log_OR_shared = 1,
         prior_mu_logit_A_mean = -2,
         prior_mu_logit_A_sd = 1,
         prior_mu_logit_B_mean = -2,
@@ -60,7 +63,7 @@ four_class_add_current_data_fields <- function(stan_data) {
         prior_sigma_logit_sd = 0.5,
         prior_log_OR_mean = 0,
         prior_log_OR_sd = 1,
-        use_cond_prior = 0L,
+        use_cond_prior = 0,
         prior_logit_Q_mean = -1,
         prior_logit_Q_sd = 1
     )
@@ -86,25 +89,33 @@ four_class_add_current_data_fields <- function(stan_data) {
     stan_data
 }
 
+
 four_class_write_json <- function(stan_data, json_file) {
+
     if (!requireNamespace("cmdstanr", quietly = TRUE)) stop("cmdstanr is required")
     dir.create(dirname(json_file), recursive = TRUE, showWarnings = FALSE)
     cmdstanr::write_stan_json(data = stan_data, file = json_file)
     invisible(json_file)
 }
 
+
 four_class_read_fixture <- function(fixture_file) {
+
     if (!file.exists(fixture_file)) stop("Synthetic fixture not found: ", fixture_file)
     if (identical(tolower(tools::file_ext(fixture_file)), "r"))
         return(dget(fixture_file))
     stop("Portable fixtures must be supplied as fixture.R text files")
 }
+
 four_class_model_data_string <- function(data_json) {
+
     paste(readLines(data_json, warn = FALSE), collapse = "")
 }
 
+
 four_class_external_model_cache <- function(stan_file, paths, output_directory = NULL,
                                              build_signature = NULL) {
+
     if (!requireNamespace("digest", quietly = TRUE)) stop("digest is required")
     example_directory <- normalizePath(paths$example_directory, mustWork = FALSE)
     if (is.null(output_directory) ||
@@ -115,7 +126,7 @@ four_class_external_model_cache <- function(stan_file, paths, output_directory =
     }
     dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
     source_hash <- digest::digest(file = normalizePath(stan_file), algo = "sha256")
-    signature <- if (is.null(build_signature)) "plain" else substr(build_signature, 1L, 12L)
+    signature <- if (is.null(build_signature)) "plain" else substr(build_signature, 1, 12)
     cached_file <- file.path(output_directory,
                              paste0(tools::file_path_sans_ext(basename(stan_file)),
                                     "_", substr(source_hash, 1L, 12L), "_", signature, ".stan"))
@@ -127,7 +138,9 @@ four_class_external_model_cache <- function(stan_file, paths, output_directory =
          source_sha256 = source_hash)
 }
 
+
 four_class_external_output_file <- function(output_rds, cache) {
+
     if (is.null(output_rds) ||
         startsWith(normalizePath(output_rds, mustWork = FALSE),
                    paste0(normalizePath(cache$output_directory), .Platform$file.sep)))
@@ -135,14 +148,16 @@ four_class_external_output_file <- function(output_rds, cache) {
     file.path(cache$output_directory, basename(output_rds))
 }
 
-four_class_assert_simd_lanes <- function(fit, expected_lanes = 8L) {
+
+four_class_assert_simd_lanes <- function(fit, expected_lanes = 8) {
+
     bs_model <- fit$init_object$bs_model
     gq_names <- bs_model$param_names(include_tp = TRUE, include_gq = TRUE)
     if (!"simd_lanes" %in% gq_names)
         stop("The AVX model has no generated-quantity SIMD lane probe")
     constrained <- bs_model$param_constrain(rep(0, bs_model$param_unc_num()),
                                              include_tp = TRUE, include_gq = TRUE,
-                                             rng = bs_model$new_rng(seed = 2026L))
+                                             rng = bs_model$new_rng(seed = 2026))
     lane_index <- match("simd_lanes", gq_names)
     lane <- unname(constrained[lane_index])
     if (!is.finite(lane) || abs(lane - expected_lanes) > 1e-8)
@@ -150,33 +165,39 @@ four_class_assert_simd_lanes <- function(fit, expected_lanes = 8L) {
     as.numeric(lane)
 }
 
+
 check_four_class_bridge_parity <- function(
     paths = four_class_example_paths(),
     data_json = paths$fixture_json,
     avx_header = NULL) {
+
     if (!requireNamespace("bridgestan", quietly = TRUE)) stop("bridgestan is required")
     if (!file.exists(paths$source_plain) || !file.exists(paths$source_avx)) stop("Plain/AVX source missing")
     data_string <- four_class_model_data_string(data_json)
     load_model <- function(stan_file, data_string, stanc_args = NULL, make_args = NULL) {
+
         so_file <- paste0(tools::file_path_sans_ext(normalizePath(stan_file)), "_model.so")
         if (!file.exists(so_file)) {
             so_file <- bridgestan::compile_model(normalizePath(stan_file),
                                                  stanc_args = stanc_args,
                                                  make_args = make_args)
         }
-        bridgestan::StanModel$new(lib = normalizePath(so_file), data = data_string, seed = 123L)
+        bridgestan::StanModel$new(lib = normalizePath(so_file), data = data_string, seed = 123)
     }
+
     if (is.null(avx_header)) stop("Supply the BayesMVP AVX header for the AVX comparison")
     if (!file.exists(avx_header)) stop("AVX header not found: ", avx_header)
     compare_one_data <- function(data_string, label) {
+
         plain <- load_model(paths$source_plain, data_string)
         avx <- load_model(paths$source_avx, data_string, stanc_args = "--allow-undefined",
                           make_args = c("STAN_THREADS=true",
                                         paste0("USER_HEADER=", normalizePath(avx_header))))
-        set.seed(2026L)
+        set.seed(2026)
         points <- c(list(rep(0, plain$param_unc_num())),
-                    lapply(seq_len(3L), function(ii) rnorm(plain$param_unc_num(), sd = 0.2)))
+                    lapply(seq_len(3), function(ii) rnorm(plain$param_unc_num(), sd = 0.2)))
         errors <- lapply(points, function(theta) {
+
             p <- plain$log_density_gradient(theta, propto = FALSE, jacobian = TRUE)
             a <- avx$log_density_gradient(theta, propto = FALSE, jacobian = TRUE)
             finite <- is.finite(p$val) && is.finite(a$val) && all(is.finite(p$gradient)) &&
@@ -186,6 +207,7 @@ check_four_class_bridge_parity <- function(
                                                                   pmax(1, abs(p$gradient))) else NA_real_,
                  finite = finite)
         })
+
         result <- list(
             label = label,
             unconstrained_dimension = plain$param_unc_num(),
@@ -199,14 +221,16 @@ check_four_class_bridge_parity <- function(
                   result$maximum_scaled_gradient_error < 1e-5)
         result
     }
+
     results <- list(default_normal = compare_one_data(data_string, "Phi_type=1"))
     ## The approximation branch is the one where AVX and Stan are expected to
-    ## differ slightly.  It exercises the custom fast_Phi_approx/log kernels.
+    ## differ slightly.  It exercises the custom nico_Phi_approx/log kernels.
     approximation_data <- sub('"Phi_type"[[:space:]]*:[[:space:]]*1',
                               '"Phi_type": 2', data_string, perl = TRUE)
     results$approximation <- compare_one_data(approximation_data, "Phi_type=2")
     results
 }
+
 
 run_four_class_nicostan_smoke <- function(
     paths = four_class_example_paths(),
@@ -216,10 +240,11 @@ run_four_class_nicostan_smoke <- function(
     avx_header = file.path(dirname(dirname(paths$paper3_directory)), "R_packages", "BayesMVP",
                            "inst", "BayesMVP", "inst", "include", "BayesMVP",
                            "stan_external_functions.hpp"),
-    chains = 2L, warmup = 60L, iterations = 80L, adapt_delta = 0.9, seed = 2026L,
+    chains = 2, warmup = 60, iterations = 80, adapt_delta = 0.9, seed = 2026,
     metric_type_main = "Empirical", metric_shape_main = "diag",
     M_decay_type = "inverse", phi_type = NULL,
     output_rds = file.path(paths$runtime_directory, "nicostan_plain_smoke.rds")) {
+
     math_backend <- match.arg(math_backend)
     if (!requireNamespace("NicoStan", quietly = TRUE)) stop("NicoStan is required")
     fixture <- four_class_read_fixture(fixture_file)
@@ -276,8 +301,8 @@ run_four_class_nicostan_smoke <- function(
         partitioned_HMC = FALSE, metric_type_main = metric_type_main,
         metric_shape_main = metric_shape_main, metric_type_nuisance = "uniform_diag",
         M_decay_type = M_decay_type,
-        n_threads_WCP_burnin = 1L, n_threads_WCP_sampling = 1L,
-        adapt_delta = adapt_delta, n_refresh = 20L, seed = seed, stream = seed,
+        n_threads_WCP_burnin = 1, n_threads_WCP_sampling = 1,
+        adapt_delta = adapt_delta, n_refresh = 20, seed = seed, stream = seed,
         reorder_cols_MVP = FALSE
     )
     fit_wall_seconds <- proc.time()[["elapsed"]] - fit_started
@@ -321,8 +346,8 @@ run_four_class_nicostan_smoke <- function(
         metric_type_main = metric_type_main,
         M_decay_type = M_decay_type,
         phi_type = fixture$data$Phi_type,
-        avx_kernel_path_active = uses_avx_backend && fixture$data$Phi_type != 1L,
-        avx_kernel_path = if (uses_avx_backend && fixture$data$Phi_type != 1L)
+        avx_kernel_path_active = uses_avx_backend && fixture$data$Phi_type != 1,
+        avx_kernel_path = if (uses_avx_backend && fixture$data$Phi_type != 1)
             "BayesMVP vectorized external branch" else if (uses_avx_backend)
             "Stan exact-CDF branch; external vector functions bypassed" else "Stan built-in math",
         simd_lanes = simd_lanes,
@@ -337,12 +362,14 @@ run_four_class_nicostan_smoke <- function(
     result
 }
 
+
 run_four_class_cmdstanr_smoke <- function(
     paths = four_class_example_paths(),
     fixture_file = paths$fixture_file,
     stan_file = paths$source_plain,
-    chains = 2L, warmup = 60L, iterations = 80L, adapt_delta = 0.9, phi_type = NULL, seed = 2026L,
+    chains = 2, warmup = 60, iterations = 80, adapt_delta = 0.9, phi_type = NULL, seed = 2026,
     output_rds = file.path(paths$runtime_directory, "cmdstanr_plain_smoke.rds")) {
+
     if (!requireNamespace("cmdstanr", quietly = TRUE)) stop("cmdstanr is required")
     fixture <- four_class_read_fixture(fixture_file)
     fixture$data <- four_class_add_current_data_fields(fixture$data)
@@ -358,9 +385,9 @@ run_four_class_cmdstanr_smoke <- function(
     fit <- model$sample(
         data = fixture$data,
         init = fixture$initial_values[seq_len(chains)],
-        chains = chains, parallel_chains = chains, threads_per_chain = 1L,
+        chains = chains, parallel_chains = chains, threads_per_chain = 1,
         iter_warmup = warmup, iter_sampling = iterations,
-        adapt_delta = adapt_delta, seed = seed, refresh = 20L,
+        adapt_delta = adapt_delta, seed = seed, refresh = 20,
         output_dir = cache$output_directory
     )
     fit_wall_seconds <- proc.time()[["elapsed"]] - fit_started
@@ -382,9 +409,9 @@ run_four_class_cmdstanr_smoke <- function(
         fit = fit,
         math_backend = "Stan",
         n_nuisance = as.integer(fixture$data$N * fixture$data$n_tests),
-        n_params_main = 67L,
+        n_params_main = 67,
         main_parameter_names = summary$variable,
-        n_params_main_unconstrained = 67L,
+        n_params_main_unconstrained = 67,
         main_parameter_count_constrained = nrow(summary),
         min_ess_main = min_ess,
         max_rhat_main = max_rhat,

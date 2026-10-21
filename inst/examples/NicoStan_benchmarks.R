@@ -9,20 +9,23 @@
 ##
 
 NicoStan_benchmark_registry <- function() {
+
         data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic",
                       "joint_longitudinal_survival", "gaussian_process", "EASY_stochastic_volatility",
                       "latent_diffusion_survival"),
-            N_1 = c(100L, 100L, 250L, 300L, 25L, 40L, 250L, 100L),
-            N_2 = c(250L, 250L, 1000L, 1200L, 75L, 80L, 1000L, 200L),
-            N_3 = c(500L, 500L, 3000L, 4000L, 200L, 160L, 4000L, 800L),
+            N_1 = c(100, 100, 250, 300, 25, 40, 250, 100),
+            N_2 = c(250, 250, 1000, 1200, 75, 80, 1000, 200),
+            N_3 = c(500, 500, 3000, 4000, 200, 160, 4000, 800),
             units = c("observations", "observations", "observations", "observations",
                       "subjects", "observations", "time_points", "subjects"),
             diffusion_eligible = c(TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, TRUE),
             stringsAsFactors = FALSE)
 }
 
+
 NicoStan_benchmark_arms <- function(include_avx2 = FALSE) {
+
         arms <- data.frame(
             arm = c("CmdStanR", "NicoStan", "NicoStan_AVX512"),
             engine = c("cmdstanr", "NicoStan", "NicoStan"),
@@ -35,48 +38,61 @@ NicoStan_benchmark_arms <- function(include_avx2 = FALSE) {
         arms
 }
 
+
 NicoStan_benchmark_grid <- function(models = NULL, N_grid = NULL) {
+
         registry <- NicoStan_benchmark_registry()
         if (is.null(models)) models <- registry$model
         stopifnot(all(models %in% registry$model))
         rows <- lapply(models, function(model) {
+
                 row <- registry[match(model, registry$model), , drop = FALSE]
                 if (is.null(N_grid)) sizes <- as.integer(unlist(row[c("N_1", "N_2", "N_3")])) else {
                         sizes <- N_grid[[model]]
                         if (is.null(sizes)) stop(paste0("N_grid has no entry for model ", model, "."))
                 }
-                stopifnot(length(sizes) == 3L, all(is.finite(sizes)), all(sizes == as.integer(sizes)), all(sizes >= 12L))
+                stopifnot(length(sizes) == 3, all(is.finite(sizes)), all(sizes == as.integer(sizes)), all(sizes >= 12))
                 data.frame(model = model, N = as.integer(sizes), units = row$units,
                            diffusion_eligible = row$diffusion_eligible, stringsAsFactors = FALSE)
         })
+
         do.call(rbind, rows)
 }
 
+
 NicoStan_benchmark_cpu_has_isa <- function(math_backend) {
+
         if (math_backend == "Stan") return(TRUE)
         if (!file.exists("/proc/cpuinfo")) return(NA)
         lines <- readLines("/proc/cpuinfo", warn = FALSE)
         flags <- paste(lines[startsWith(lines, "flags")], collapse = " ")
         required <- if (math_backend == "AVX512") c("avx512f", "avx512vl", "avx512dq", "fma") else c("avx2", "fma")
-        all(vapply(required, function(flag) grepl(paste0("\\b", flag, "\\b"), flags), logical(1L)))
+        all(vapply(required, function(flag) grepl(paste0("\\b", flag, "\\b"), flags), logical(1)))
 }
 
+
 NicoStan_benchmark_hash_files <- function(paths) {
+
         paths <- unique(as.character(paths))
         paths <- paths[nzchar(paths)]
         setNames(vapply(paths, function(path) {
+
                 if (!file.exists(path)) return(NA_character_)
                 digest::digest(file = path, algo = "sha256")
-        }, character(1L)), basename(paths))
+        }, character(1)), basename(paths))
+
 }
 
+
 NicoStan_benchmark_package_fingerprint <- function(package_name) {
+
         package_path <- tryCatch(find.package(package_name), error = function(error) "")
         if (!nzchar(package_path)) return(list(path = NA_character_, files = NA_character_))
         package_files <- list.files(package_path, recursive = TRUE, full.names = TRUE)
         package_files <- package_files[grepl("(^|/)(R/.*\\.(rdb|rdx|rds)|libs/.*\\.(so|dll|dylib))$", package_files)]
         list(path = normalizePath(package_path, mustWork = TRUE), files = NicoStan_benchmark_hash_files(package_files))
 }
+
 
 ## The AVX arms APPEND their ISA flags (CXXFLAGS_OPTIM, which Stan math's make/compiler_flags adds after
 ## BridgeStan's make/local CXXFLAGS) instead of passing CXXFLAGS on the make command line. A command-line CXXFLAGS REPLACES
@@ -87,6 +103,7 @@ NicoStan_benchmark_package_fingerprint <- function(package_name) {
 ## while everything else is identical to the AVX512 arm, as vect_type = "AVX2" does for the native BayesMVP models.
 ## The fits check simd_lanes (8 / 4) against the requested backend and stop on a mismatch.
 NicoStan_benchmark_compile_arguments <- function(math_backend) {
+
         compile_arguments <- c("STAN_THREADS=true", "PRECOMPILED_HEADERS=false")
         if (math_backend == "Stan") return(compile_arguments)
         if (!math_backend %in% c("AVX512", "AVX2")) stop("math_backend must be Stan, AVX2 or AVX512, got: ", math_backend)
@@ -97,7 +114,9 @@ NicoStan_benchmark_compile_arguments <- function(math_backend) {
         compile_arguments
 }
 
+
 NicoStan_benchmark_build_fingerprint <- function(engine, math_backend) {
+
         package_fingerprints <- list()
         if (engine == "NicoStan") package_fingerprints$NicoStan <- NicoStan_benchmark_package_fingerprint("NicoStan")
         if (engine == "cmdstanr") package_fingerprints$cmdstanr <- NicoStan_benchmark_package_fingerprint("cmdstanr")
@@ -120,18 +139,22 @@ NicoStan_benchmark_build_fingerprint <- function(engine, math_backend) {
         list(hash = digest::digest(payload, algo = "sha256"), payload = payload)
 }
 
+
 NicoStan_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, chains, warmup,
                                                  iterations, adapt_delta, burnin_algorithm,
                                                  include_avx2, harness_path, model_dir,
                                                  build_fingerprint = NULL) {
+
         registry <- NicoStan_example_registry()
         source_file <- registry$file[match(model, registry$model)]
         avx_file <- if (arm$math_backend == "Stan") source_file else sub(".stan$", "_avx.stan", source_file)
         source_paths <- file.path(model_dir, c(source_file, avx_file))
         source_hashes <- vapply(unique(source_paths), function(path) {
+
                 if (!file.exists(path)) return(NA_character_)
                 digest::digest(file = path, algo = "sha256")
-        }, character(1L))
+        }, character(1))
+
         harness_hash <- digest::digest(file = harness_path, algo = "sha256")
         orchestration_path <- file.path(dirname(harness_path), "NicoStan_benchmarks.R")
         orchestration_hash <- if (file.exists(orchestration_path)) digest::digest(file = orchestration_path, algo = "sha256") else NA_character_
@@ -141,31 +164,39 @@ NicoStan_benchmark_item_fingerprint <- function(model, N, arm, seed, profile, ch
                                    burnin_algorithm = burnin_algorithm, include_avx2 = include_avx2,
                                    source_hashes = source_hashes, harness_hash = harness_hash,
                                    orchestration_hash = orchestration_hash,
-                                   build_fingerprint = build_fingerprint), algo = "sha256"), 1L, 16L)
+                                   build_fingerprint = build_fingerprint), algo = "sha256"), 1, 16)
 }
 
+
 NicoStan_benchmark_read_manifest <- function(path) {
+
         if (!file.exists(path)) return(data.frame(stringsAsFactors = FALSE))
         utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
 }
 
+
 NicoStan_benchmark_write_manifest <- function(manifest, path) {
+
         dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
         utils::write.csv(manifest, path, row.names = FALSE)
         invisible(manifest)
 }
 
+
 NicoStan_benchmark_upsert_manifest <- function(manifest, row) {
+
         if (!nrow(manifest)) return(row)
         for (name in setdiff(names(row), names(manifest))) manifest[[name]] <- NA_character_
         for (name in setdiff(names(manifest), names(row))) row[[name]] <- NA_character_
         row <- row[, names(manifest), drop = FALSE]
         key <- manifest$fingerprint == row$fingerprint
-        if (any(key)) manifest[which(key)[1L], names(row)] <- row[1L, names(row)] else manifest <- rbind(manifest, row)
+        if (any(key)) manifest[which(key)[1], names(row)] <- row[1, names(row)] else manifest <- rbind(manifest, row)
         manifest
 }
 
+
 NicoStan_benchmark_summary_row <- function(record, model, N, arm, replicate, fingerprint) {
+
         settings <- record$settings
         nested_status <- if (!is.null(record$nested_rhat_grouping$status)) record$nested_rhat_grouping$status else "unavailable"
         nested_value <- if (!is.null(record$max_nested_rhat_main)) record$max_nested_rhat_main else NA_real_
@@ -196,30 +227,32 @@ NicoStan_benchmark_summary_row <- function(record, model, N, arm, replicate, fin
             run_dir = record$run_dir, stringsAsFactors = FALSE)
 }
 
+
 NicoStan_benchmark_run <- function(models = NULL, N_grid = NULL,
                                     arms = NULL,
-                                    profile = c("analysis", "smoke"), seed = 2026L,
-                                    replicate = 1L, chains = 4L, warmup = NULL, iterations = NULL,
+                                    profile = c("analysis", "smoke"), seed = 2026,
+                                    replicate = 1, chains = 4, warmup = NULL, iterations = NULL,
                                     adapt_delta = NULL, burnin_algorithm = "CHESSR",
                                     include_avx2 = FALSE, validate = FALSE, fail_fast = FALSE,
                                     output_dir = file.path(getwd(), "NicoStan_benchmark_results"),
                                     model_dir = file.path(.NicoStan_examples_source_directory, "models")) {
+
         profile <- match.arg(profile)
-        stopifnot(length(replicate) == 1L, replicate >= 1L, replicate == as.integer(replicate))
-        if (is.null(warmup)) warmup <- if (profile == "smoke") 100L else 1000L
-        if (is.null(iterations)) iterations <- if (profile == "smoke") 100L else 1000L
+        stopifnot(length(replicate) == 1, replicate >= 1, replicate == as.integer(replicate))
+        if (is.null(warmup)) warmup <- if (profile == "smoke") 100 else 1000
+        if (is.null(iterations)) iterations <- if (profile == "smoke") 100 else 1000
         grid <- NicoStan_benchmark_grid(models = models, N_grid = N_grid)
         if (is.null(arms)) arms <- NicoStan_benchmark_arms(include_avx2 = include_avx2)
         arms <- as.data.frame(arms, stringsAsFactors = FALSE)
         required_arm_columns <- c("arm", "engine", "math_backend")
-        stopifnot(all(required_arm_columns %in% names(arms)), nrow(arms) > 0L)
+        stopifnot(all(required_arm_columns %in% names(arms)), nrow(arms) > 0)
         if (is.null(models)) models <- unique(grid$model)
         harness_path <- file.path(.NicoStan_examples_source_directory, "NicoStan_examples.R")
         manifest_path <- file.path(output_dir, "benchmark_manifest.csv")
         manifest <- NicoStan_benchmark_read_manifest(manifest_path)
         dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
         summary_rows <- list()
-        counter <- 0L
+        counter <- 0
         total <- nrow(grid) * nrow(arms)
         for (grid_index in seq_len(nrow(grid))) {
                 model <- grid$model[grid_index]
@@ -236,23 +269,25 @@ NicoStan_benchmark_run <- function(models = NULL, N_grid = NULL,
                         ## The arm is deliberately absent from the seed.  This is
                         ## what makes the simulated data and every chain's initial
                         ## values identical across CmdStanR, NicoStan, and AVX.
-                        item_seed <- as.integer(seed + 100000L * (grid_index - 1L) + replicate - 1L)
+                        item_seed <- as.integer(seed + 100000 * (grid_index - 1) + replicate - 1)
                         build_fingerprint <- NicoStan_benchmark_build_fingerprint(engine = arm$engine, math_backend = arm$math_backend)
                         fingerprint <- NicoStan_benchmark_item_fingerprint(model = model, N = N, arm = arm,
                             seed = item_seed, profile = profile, chains = chains, warmup = warmup,
                             iterations = iterations, adapt_delta = adapt_delta, burnin_algorithm = burnin_algorithm,
                             include_avx2 = include_avx2, harness_path = harness_path, model_dir = model_dir,
                             build_fingerprint = build_fingerprint$hash)
-                        counter <- counter + 1L
+                        counter <- counter + 1
                         existing <- nrow(manifest) && any(manifest$fingerprint == fingerprint & manifest$status == "complete")
                         if (existing) {
                                 result_path <- manifest$result_path[which(manifest$fingerprint == fingerprint & manifest$status == "complete")[1L]]
                                 if (file.exists(result_path)) {
                                         record <- tryCatch(readRDS(result_path), error = function(error) NULL)
                                         if (is.list(record) && is.list(record$benchmark) && identical(record$benchmark$fingerprint, fingerprint)) {
+
                                                 summary_rows[[length(summary_rows) + 1L]] <- NicoStan_benchmark_summary_row(record, model, N, arm$arm, replicate, fingerprint)
                                                 next
                                         }
+
                                 }
                         }
                         item_output <- file.path(output_dir, "fits", paste0(model, "_N", N, "_rep", replicate, "_", arm$arm, "_", fingerprint))
@@ -267,10 +302,12 @@ NicoStan_benchmark_run <- function(models = NULL, N_grid = NULL,
                                       chains = chains, warmup = warmup, iterations = iterations, adapt_delta = adapt_delta,
                                     N = N, validate = validate, output_dir = item_output, model_dir = model_dir)
                         }, error = function(error) {
+
                                 error_message <<- conditionMessage(error)
                                 if (isTRUE(fail_fast)) stop(error)
                                 NULL
                         })
+
                         if (!is.null(result)) {
                                 status <- "complete"
                                 result$benchmark <- list(fingerprint = fingerprint, build_fingerprint = build_fingerprint,
@@ -300,7 +337,9 @@ NicoStan_benchmark_run <- function(models = NULL, N_grid = NULL,
         output
 }
 
+
 NicoStan_benchmark_compare <- function(summary) {
+
         empty <- data.frame(stringsAsFactors = FALSE)
         if (!nrow(summary)) return(list(efficiency = empty, posterior_agreement = empty, checks = empty))
         keys <- unique(summary[c("model", "N", "replicate")])
@@ -310,19 +349,19 @@ NicoStan_benchmark_compare <- function(summary) {
         for (index in seq_len(nrow(keys))) {
                 subset <- summary[summary$model == keys$model[index] & summary$N == keys$N[index] & summary$replicate == keys$replicate[index], , drop = FALSE]
                 reference <- subset[subset$arm == "CmdStanR", , drop = FALSE]
-                if (nrow(reference) != 1L) next
-                check_rows[[length(check_rows) + 1L]] <- data.frame(
+                if (nrow(reference) != 1) next
+                check_rows[[length(check_rows) + 1]] <- data.frame(
                     model = keys$model[index], N = keys$N[index], replicate = keys$replicate[index],
-                    data_identical = length(unique(subset$data_sha256)) == 1L,
-                    initial_values_identical = length(unique(subset$initial_values_sha256)) == 1L,
-                    ess_parameter_set_identical = length(unique(subset$ess_parameter_set)) == 1L,
-                    ess_parameter_bases_identical = length(unique(subset$ess_parameter_bases)) == 1L,
+                    data_identical = length(unique(subset$data_sha256)) == 1,
+                    initial_values_identical = length(unique(subset$initial_values_sha256)) == 1,
+                    ess_parameter_set_identical = length(unique(subset$ess_parameter_set)) == 1,
+                    ess_parameter_bases_identical = length(unique(subset$ess_parameter_bases)) == 1,
                     arms_completed = nrow(subset), all_diagnostic_targets_met = all(subset$diagnostic_target_met),
                     nested_rhat_statuses = paste(unique(subset$nested_rhat_grouping_status), collapse = "|"),
                     stringsAsFactors = FALSE)
                 for (row_index in seq_len(nrow(subset))) {
                         row <- subset[row_index, , drop = FALSE]
-                        efficiency_rows[[length(efficiency_rows) + 1L]] <- data.frame(
+                        efficiency_rows[[length(efficiency_rows) + 1]] <- data.frame(
                             model = row$model, N = row$N, replicate = row$replicate, arm = row$arm,
                             reference_arm = "CmdStanR", fitting_time_ratio_vs_cmdstanr = row$fitting_seconds / reference$fitting_seconds,
                             sampling_time_ratio_vs_cmdstanr = row$sampling_seconds / reference$sampling_seconds,
@@ -338,7 +377,7 @@ NicoStan_benchmark_compare <- function(summary) {
                             nested_rhat_grouping_status = row$nested_rhat_grouping_status,
                             diagnostic_target_met = row$diagnostic_target_met, stringsAsFactors = FALSE)
                 }
-                common_parameters <- strsplit(reference$ess_parameter_set, "\\|", fixed = FALSE)[[1L]]
+                common_parameters <- strsplit(reference$ess_parameter_set, "\\|", fixed = FALSE)[[1]]
                 for (row_index in seq_len(nrow(subset))) {
                         row <- subset[row_index, , drop = FALSE]
                         result_path <- summary$run_dir[match(row$fingerprint, summary$fingerprint)]
@@ -356,7 +395,7 @@ NicoStan_benchmark_compare <- function(summary) {
                         if (!length(keep)) next
                         current <- current[match(keep, current$variable), , drop = FALSE]
                         ref <- ref[match(keep, ref$variable), , drop = FALSE]
-                        agreement_rows[[length(agreement_rows) + 1L]] <- data.frame(
+                        agreement_rows[[length(agreement_rows) + 1]] <- data.frame(
                             model = row$model, N = row$N, replicate = row$replicate, arm = row$arm,
                             reference_arm = "CmdStanR", parameters_compared = length(keep),
                             mean_absolute_posterior_mean_difference = mean(abs(current$mean - ref$mean)),
@@ -371,7 +410,9 @@ NicoStan_benchmark_compare <- function(summary) {
              checks = if (length(check_rows)) do.call(rbind, check_rows) else empty)
 }
 
+
 NicoStan_benchmark_collect <- function(output_dir) {
+
         path <- file.path(output_dir, "benchmark_results.rds")
         if (file.exists(path)) return(readRDS(path))
         manifest <- NicoStan_benchmark_read_manifest(file.path(output_dir, "benchmark_manifest.csv"))

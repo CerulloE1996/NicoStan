@@ -349,7 +349,8 @@ functions {
       }
       real inv_Phi_from_log_lower(real log_p) {
                 //// Called only for a probability <= 0.5. Exponentiating is safe down to -700.
-                if (log_p > -700.0) return inv_Phi(exp(log_p));
+                // if (log_p > -700.0) return inv_Phi(exp(log_p));
+                //// (no -700 threshold: the Newton steps below find the quantile at every log_p)
                 real z = -sqrt(-2.0 * log_p);
                 for (i in 1:5) {
                     real lp = log_Phi_stable(z);
@@ -632,10 +633,11 @@ functions {
                               //// Phi_type = 2: log Phi_approx(b) = log_inv_logit(poly), log(1 - Phi_approx(b)) = log_inv_logit(-poly),
                               //// exact and stable for every b (log1m of Phi_approx at b was log(0) for b > ~7.11).
                               else if (Phi_type == 2) lp = log_inv_logit(k == 1 ? poly : -poly);
-                              else {
-                                    real p = Phi(b);
-                                    lp = k == 1 ? log(p) : log1m(p);
-                              }
+                              //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                              // else {
+                                    // real p = Phi(b);
+                                    // lp = k == 1 ? log(p) : log1m(p);
+                              // }
                         } else {
                               int to = t - n_binary_tests;
                               int own = class_D[c,test_condition[t]] + 1;
@@ -662,7 +664,8 @@ functions {
                                     real poly_gap = (hi - lo) * (0.07056 * (square(lo) + lo * hi + square(hi)) + 1.5976);
                                     lp = log_inv_logit(poly_hi) + log_inv_logit(-poly_lo) + log1m_exp(-poly_gap);
                               }
-                              else lp = log(Phi(hi)-Phi(lo));
+                              //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                              // else lp = log(Phi(hi)-Phi(lo));
                         }
                         }
                         cache[c,(t-1)*Kmax+k] = lp;
@@ -810,7 +813,8 @@ functions {
                   if (n_m > 0) {
                         array[n_m] int mis = idx_m[1:n_m];
                         if (Phi_type == 2) Z_std_norm[mis, t] = inv_Phi_approx_from_prob(u[mis, t]);
-                        else               Z_std_norm[mis, t] = inv_Phi(u[mis, t]);
+                        //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                        // else               Z_std_norm[mis, t] = inv_Phi(u[mis, t]);
                         y1[mis, t] = rep_vector(0.0, n_m);
                   }
 
@@ -890,23 +894,25 @@ functions {
                                           tmp[, 2] = log_1m_Phi_signed + log_v;
                                           Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(sign_y .* (log_sum_exp_2d(tmp) - (log_1m_v + log_1m_Phi_signed)));
                                           y1[index, t] = log_1m_Phi_signed;
-                                    } else {
-                                          //// Phi_type = 0: exact normal, with the observed side REFLECTED onto the lower tail so 1 - Phi(Bz) is never formed.
-                                          //// y == 0: Z < Bz, probability Phi(Bz), Z = Phi^{-1}(u Phi(Bz)). y == 1: Z > Bz, probability 1 - Phi(Bz) = Phi(-Bz), and
-                                          //// -Z < -Bz with -Z = Phi^{-1}((1 - u) Phi(-Bz)). With reflect_sign = -1 (y == 1) or +1 (y == 0) and u_reflected = 1 - u (y == 1) or u (y == 0):
-                                          ////     prob_t = Phi(reflect_sign * Bz),  Z = reflect_sign * Phi^{-1}(u_reflected * prob_t),  y1 = log(prob_t).
-                                          //// Same target as the old y1 = log(yy .* (1 - Phi(Bz)) + ...), but 1 - Phi(Bz) near overflow_threshold (3.2e-14 at 7.5) lost up to
-                                          //// ~1.4e-3 nats, and Phi^{-1}(Phi(Bz) + (1 - Phi(Bz)) u) rounded to Phi^{-1}(1) = +Inf for u > ~0.9965 at Bz = 7.5. 1 - u is exact for u >= 0.5.
-                                          vector[n_ok] reflect_sign = 1.0 - 2.0 * yy;
-                                          vector[n_ok] u_reflected;
-                                          for (ii in 1:n_ok) {
-                                                if (yy[ii] == 1) u_reflected[ii] = 1.0 - u[index[ii], t];
-                                                else             u_reflected[ii] = u[index[ii], t];
-                                          }
-                                          vector[n_ok] prob_t = Phi(reflect_sign .* Bound_Z);
-                                          Z_std_norm[index, t] = reflect_sign .* inv_Phi(u_reflected .* prob_t);
-                                          y1[index, t] = log(prob_t);
                                     }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // } else {
+                                          // //// Phi_type = 0: exact normal, with the observed side REFLECTED onto the lower tail so 1 - Phi(Bz) is never formed.
+                                          // //// y == 0: Z < Bz, probability Phi(Bz), Z = Phi^{-1}(u Phi(Bz)). y == 1: Z > Bz, probability 1 - Phi(Bz) = Phi(-Bz), and
+                                          // //// -Z < -Bz with -Z = Phi^{-1}((1 - u) Phi(-Bz)). With reflect_sign = -1 (y == 1) or +1 (y == 0) and u_reflected = 1 - u (y == 1) or u (y == 0):
+                                          // ////     prob_t = Phi(reflect_sign * Bz),  Z = reflect_sign * Phi^{-1}(u_reflected * prob_t),  y1 = log(prob_t).
+                                          // //// Same target as the old y1 = log(yy .* (1 - Phi(Bz)) + ...), but 1 - Phi(Bz) near overflow_threshold (3.2e-14 at 7.5) lost up to
+                                          // //// ~1.4e-3 nats, and Phi^{-1}(Phi(Bz) + (1 - Phi(Bz)) u) rounded to Phi^{-1}(1) = +Inf for u > ~0.9965 at Bz = 7.5. 1 - u is exact for u >= 0.5.
+                                          // vector[n_ok] reflect_sign = 1.0 - 2.0 * yy;
+                                          // vector[n_ok] u_reflected;
+                                          // for (ii in 1:n_ok) {
+                                                // if (yy[ii] == 1) u_reflected[ii] = 1.0 - u[index[ii], t];
+                                                // else             u_reflected[ii] = u[index[ii], t];
+                                          // }
+                                          // vector[n_ok] prob_t = Phi(reflect_sign .* Bound_Z);
+                                          // Z_std_norm[index, t] = reflect_sign .* inv_Phi(u_reflected .* prob_t);
+                                          // y1[index, t] = log(prob_t);
+                                    // }
                               }
                               if (n_uf > 0) {   //// underflow + y == 0
                                     array[n_uf] int index = uf_idx[1:n_uf];
@@ -918,17 +924,19 @@ functions {
                                           vector[n_uf] log_1m_Phi_Z = log1m_exp(log(u[index, t]) + log_Bound_U_Phi_Bound_Z);
                                           Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
                                           y1[index, t] = log_Bound_U_Phi_Bound_Z;
-                                    } else {
-                                          //// Phi_type = 0: EXACT normal tail on the log scale, so the target has no Phi / Phi_approx splice at underflow_threshold.
-                                          //// y1 = log Phi(Bz).  Z = Phi^{-1}(u Phi(Bz)) from log(q) = log(u) + log Phi(Bz) (q < Phi(-7.5) ~ 3.2e-14, so the lower-tail inverse is used).
-                                          //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
-                                          vector[n_uf] log_Phi_Bound_Z;
-                                          for (ii in 1:n_uf) log_Phi_Bound_Z[ii] = log_Phi_stable(Bound_Z[ii]);
-                                          vector[n_uf] log_q = log(u[index, t]) + log_Phi_Bound_Z;
-                                          vector[n_uf] log_1m_q = log1m_exp(log_q);
-                                          for (ii in 1:n_uf) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
-                                          y1[index, t] = log_Phi_Bound_Z;
                                     }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // } else {
+                                          // //// Phi_type = 0: EXACT normal tail on the log scale, so the target has no Phi / Phi_approx splice at underflow_threshold.
+                                          // //// y1 = log Phi(Bz).  Z = Phi^{-1}(u Phi(Bz)) from log(q) = log(u) + log Phi(Bz) (q < Phi(-7.5) ~ 3.2e-14, so the lower-tail inverse is used).
+                                          // //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
+                                          // vector[n_uf] log_Phi_Bound_Z;
+                                          // for (ii in 1:n_uf) log_Phi_Bound_Z[ii] = log_Phi_stable(Bound_Z[ii]);
+                                          // vector[n_uf] log_q = log(u[index, t]) + log_Phi_Bound_Z;
+                                          // vector[n_uf] log_1m_q = log1m_exp(log_q);
+                                          // for (ii in 1:n_uf) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
+                                          // y1[index, t] = log_Phi_Bound_Z;
+                                    // }
                               }
                               if (n_of > 0) {   //// overflow + y == 1
                                     array[n_of] int index = of_idx[1:n_of];
@@ -943,18 +951,20 @@ functions {
                                           vector[n_of] log_1m_Phi_Z = log1m(u[index, t]) + log_Bound_U_Phi_Bound_Z_1m;
                                           Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
                                           y1[index, t] = log_Bound_U_Phi_Bound_Z_1m;
-                                    } else {
-                                          //// Phi_type = 0: EXACT normal tail on the log scale, so the target has no Phi / Phi_approx splice at overflow_threshold.
-                                          //// y1 = log(1 - Phi(Bz)) = log Phi(-Bz).  Z = Phi^{-1}(q), q = Phi(Bz) + (1 - Phi(Bz)) u, from log(1 - q) = log(1 - u) + log Phi(-Bz)
-                                          //// (1 - q < Phi(-7.5), so the upper-tail inverse, driven by log(1 - q), is used).
-                                          //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
-                                          vector[n_of] log_1m_Phi_Bound_Z;
-                                          for (ii in 1:n_of) log_1m_Phi_Bound_Z[ii] = log_Phi_stable(-Bound_Z[ii]);
-                                          vector[n_of] log_1m_q = log1m(u[index, t]) + log_1m_Phi_Bound_Z;
-                                          vector[n_of] log_q = log1m_exp(log_1m_q);
-                                          for (ii in 1:n_of) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
-                                          y1[index, t] = log_1m_Phi_Bound_Z;
                                     }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // } else {
+                                          // //// Phi_type = 0: EXACT normal tail on the log scale, so the target has no Phi / Phi_approx splice at overflow_threshold.
+                                          // //// y1 = log(1 - Phi(Bz)) = log Phi(-Bz).  Z = Phi^{-1}(q), q = Phi(Bz) + (1 - Phi(Bz)) u, from log(1 - q) = log(1 - u) + log Phi(-Bz)
+                                          // //// (1 - q < Phi(-7.5), so the upper-tail inverse, driven by log(1 - q), is used).
+                                          // //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
+                                          // vector[n_of] log_1m_Phi_Bound_Z;
+                                          // for (ii in 1:n_of) log_1m_Phi_Bound_Z[ii] = log_Phi_stable(-Bound_Z[ii]);
+                                          // vector[n_of] log_1m_q = log1m(u[index, t]) + log_1m_Phi_Bound_Z;
+                                          // vector[n_of] log_q = log1m_exp(log_1m_q);
+                                          // for (ii in 1:n_of) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
+                                          // y1[index, t] = log_1m_Phi_Bound_Z;
+                                    // }
                               }
 
                         } else {
@@ -1043,35 +1053,37 @@ functions {
                                           tmp_upper[, 1] = log_1m_Phi_lo + log1m(u[index, t]);
                                           tmp_upper[, 2] = log_1m_Phi_hi + log(u[index, t]);
                                           Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_sum_exp_2d(tmp_lower) - log_sum_exp_2d(tmp_upper));
-                                    } else {
-                                          //// Phi_type = 0: exact normal, with intervals above 0 (Bound_Z_lo > 0) REFLECTED onto the lower side so Phi values near 1 are
-                                          //// never subtracted. For lo > 0: Phi(hi) - Phi(lo) = Phi(-lo) - Phi(-hi), and -Z lies in (-hi, -lo) with -Z = Phi^{-1}(Phi(-hi) + prob_t (1 - u)).
-                                          //// After reflection Bound_Z_lo_reflected <= 0, so Phi(Bound_Z_lo_reflected) <= 0.5 and prob_t and the inverse-CDF argument keep full
-                                          //// relative accuracy up to overflow_threshold (the old Phi_hi - Phi_lo lost up to ~1.4e-3 nats near 7.5, and Phi^{-1}(Phi_lo + prob_t u)
-                                          //// rounded to +Inf for u > ~0.9965 at Bound_Z_lo = 7.5). Same target as the old Phi_type = 0 code. 1 - u is exact for u >= 0.5.
-                                          vector[n_ok] reflect_sign;
-                                          vector[n_ok] Bound_Z_lo_reflected;
-                                          vector[n_ok] Bound_Z_hi_reflected;
-                                          vector[n_ok] u_reflected;
-                                          for (ii in 1:n_ok) {
-                                                if (Bound_Z_lo[ii] > 0) {
-                                                      reflect_sign[ii] = -1.0;
-                                                      Bound_Z_lo_reflected[ii] = -Bound_Z_hi[ii];
-                                                      Bound_Z_hi_reflected[ii] = -Bound_Z_lo[ii];
-                                                      u_reflected[ii] = 1.0 - u[index[ii], t];
-                                                } else {
-                                                      reflect_sign[ii] = 1.0;
-                                                      Bound_Z_lo_reflected[ii] = Bound_Z_lo[ii];
-                                                      Bound_Z_hi_reflected[ii] = Bound_Z_hi[ii];
-                                                      u_reflected[ii] = u[index[ii], t];
-                                                }
-                                          }
-                                          vector[n_ok] Phi_lo = Phi(Bound_Z_lo_reflected);
-                                          vector[n_ok] Phi_hi = Phi(Bound_Z_hi_reflected);
-                                          vector[n_ok] prob_t = Phi_hi - Phi_lo;
-                                          Z_std_norm[index, t] = reflect_sign .* inv_Phi(Phi_lo + prob_t .* u_reflected);
-                                          y1[index, t] = log(prob_t);
                                     }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // } else {
+                                          // //// Phi_type = 0: exact normal, with intervals above 0 (Bound_Z_lo > 0) REFLECTED onto the lower side so Phi values near 1 are
+                                          // //// never subtracted. For lo > 0: Phi(hi) - Phi(lo) = Phi(-lo) - Phi(-hi), and -Z lies in (-hi, -lo) with -Z = Phi^{-1}(Phi(-hi) + prob_t (1 - u)).
+                                          // //// After reflection Bound_Z_lo_reflected <= 0, so Phi(Bound_Z_lo_reflected) <= 0.5 and prob_t and the inverse-CDF argument keep full
+                                          // //// relative accuracy up to overflow_threshold (the old Phi_hi - Phi_lo lost up to ~1.4e-3 nats near 7.5, and Phi^{-1}(Phi_lo + prob_t u)
+                                          // //// rounded to +Inf for u > ~0.9965 at Bound_Z_lo = 7.5). Same target as the old Phi_type = 0 code. 1 - u is exact for u >= 0.5.
+                                          // vector[n_ok] reflect_sign;
+                                          // vector[n_ok] Bound_Z_lo_reflected;
+                                          // vector[n_ok] Bound_Z_hi_reflected;
+                                          // vector[n_ok] u_reflected;
+                                          // for (ii in 1:n_ok) {
+                                                // if (Bound_Z_lo[ii] > 0) {
+                                                      // reflect_sign[ii] = -1.0;
+                                                      // Bound_Z_lo_reflected[ii] = -Bound_Z_hi[ii];
+                                                      // Bound_Z_hi_reflected[ii] = -Bound_Z_lo[ii];
+                                                      // u_reflected[ii] = 1.0 - u[index[ii], t];
+                                                // } else {
+                                                      // reflect_sign[ii] = 1.0;
+                                                      // Bound_Z_lo_reflected[ii] = Bound_Z_lo[ii];
+                                                      // Bound_Z_hi_reflected[ii] = Bound_Z_hi[ii];
+                                                      // u_reflected[ii] = u[index[ii], t];
+                                                // }
+                                          // }
+                                          // vector[n_ok] Phi_lo = Phi(Bound_Z_lo_reflected);
+                                          // vector[n_ok] Phi_hi = Phi(Bound_Z_hi_reflected);
+                                          // vector[n_ok] prob_t = Phi_hi - Phi_lo;
+                                          // Z_std_norm[index, t] = reflect_sign .* inv_Phi(Phi_lo + prob_t .* u_reflected);
+                                          // y1[index, t] = log(prob_t);
+                                    // }
                               }
                               if (n_lt > 0) {   //// BOTH bounds in the left tail
                                     array[n_lt] int index = lt_idx[1:n_lt];
@@ -1087,22 +1099,24 @@ functions {
                                           tmp[, 2] = log_Phi_hi + log(u[index, t]);
                                           vector[n_lt] log_Phi_Z = log_sum_exp_2d(tmp);
                                           Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log1m_exp(log_Phi_Z));
-                                    } else {
-                                          //// Phi_type = 0: EXACT normal interval on the log scale, so the target has no Phi / Phi_approx splice at underflow_threshold.
-                                          //// y1 = log(Phi(hi) - Phi(lo)).  Z = Phi^{-1}(q), q = (1 - u) Phi(lo) + u Phi(hi) (a sum of positive terms, q < Phi(-7.5)).
-                                          //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
-                                          vector[n_lt] log_Phi_lo;
-                                          vector[n_lt] log_Phi_hi;
-                                          for (ii in 1:n_lt) log_Phi_lo[ii] = log_Phi_stable(Bound_Z_lo[ii]);
-                                          for (ii in 1:n_lt) log_Phi_hi[ii] = log_Phi_stable(Bound_Z_hi[ii]);
-                                          y1[index, t] = log_Phi_hi + log1m_exp(log_Phi_lo - log_Phi_hi);
-                                          matrix[n_lt, 2] tmp;
-                                          tmp[, 1] = log_Phi_lo + log1m(u[index, t]);
-                                          tmp[, 2] = log_Phi_hi + log(u[index, t]);
-                                          vector[n_lt] log_q = log_sum_exp_2d(tmp);
-                                          vector[n_lt] log_1m_q = log1m_exp(log_q);
-                                          for (ii in 1:n_lt) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
                                     }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // } else {
+                                          // //// Phi_type = 0: EXACT normal interval on the log scale, so the target has no Phi / Phi_approx splice at underflow_threshold.
+                                          // //// y1 = log(Phi(hi) - Phi(lo)).  Z = Phi^{-1}(q), q = (1 - u) Phi(lo) + u Phi(hi) (a sum of positive terms, q < Phi(-7.5)).
+                                          // //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
+                                          // vector[n_lt] log_Phi_lo;
+                                          // vector[n_lt] log_Phi_hi;
+                                          // for (ii in 1:n_lt) log_Phi_lo[ii] = log_Phi_stable(Bound_Z_lo[ii]);
+                                          // for (ii in 1:n_lt) log_Phi_hi[ii] = log_Phi_stable(Bound_Z_hi[ii]);
+                                          // y1[index, t] = log_Phi_hi + log1m_exp(log_Phi_lo - log_Phi_hi);
+                                          // matrix[n_lt, 2] tmp;
+                                          // tmp[, 1] = log_Phi_lo + log1m(u[index, t]);
+                                          // tmp[, 2] = log_Phi_hi + log(u[index, t]);
+                                          // vector[n_lt] log_q = log_sum_exp_2d(tmp);
+                                          // vector[n_lt] log_1m_q = log1m_exp(log_q);
+                                          // for (ii in 1:n_lt) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
+                                    // }
                               }
                               if (n_rt > 0) {   //// BOTH bounds in the right tail
                                     array[n_rt] int index = rt_idx[1:n_rt];
@@ -1119,23 +1133,25 @@ functions {
                                           vector[n_rt] log_1m_Phi_Z = log_sum_exp_2d(tmp);
                                           vector[n_rt] log_Phi_Z = log1m_exp(log_1m_Phi_Z);
                                           Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
-                                    } else {
-                                          //// Phi_type = 0: EXACT normal interval on the log scale, so the target has no Phi / Phi_approx splice at overflow_threshold.
-                                          //// y1 = log((1 - Phi(lo)) - (1 - Phi(hi))), with 1 - Phi(x) = Phi(-x).  Z = Phi^{-1}(q) from
-                                          //// 1 - q = (1 - u)(1 - Phi(lo)) + u (1 - Phi(hi)) (a sum of positive terms, 1 - q < Phi(-7.5)).
-                                          //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
-                                          vector[n_rt] log_1m_Phi_lo;
-                                          vector[n_rt] log_1m_Phi_hi;
-                                          for (ii in 1:n_rt) log_1m_Phi_lo[ii] = log_Phi_stable(-Bound_Z_lo[ii]);
-                                          for (ii in 1:n_rt) log_1m_Phi_hi[ii] = log_Phi_stable(-Bound_Z_hi[ii]);
-                                          y1[index, t] = log_1m_Phi_lo + log1m_exp(log_1m_Phi_hi - log_1m_Phi_lo);
-                                          matrix[n_rt, 2] tmp;
-                                          tmp[, 1] = log_1m_Phi_lo + log1m(u[index, t]);
-                                          tmp[, 2] = log_1m_Phi_hi + log(u[index, t]);
-                                          vector[n_rt] log_1m_q = log_sum_exp_2d(tmp);
-                                          vector[n_rt] log_q = log1m_exp(log_1m_q);
-                                          for (ii in 1:n_rt) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
                                     }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // } else {
+                                          // //// Phi_type = 0: EXACT normal interval on the log scale, so the target has no Phi / Phi_approx splice at overflow_threshold.
+                                          // //// y1 = log((1 - Phi(lo)) - (1 - Phi(hi))), with 1 - Phi(x) = Phi(-x).  Z = Phi^{-1}(q) from
+                                          // //// 1 - q = (1 - u)(1 - Phi(lo)) + u (1 - Phi(hi)) (a sum of positive terms, 1 - q < Phi(-7.5)).
+                                          // //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
+                                          // vector[n_rt] log_1m_Phi_lo;
+                                          // vector[n_rt] log_1m_Phi_hi;
+                                          // for (ii in 1:n_rt) log_1m_Phi_lo[ii] = log_Phi_stable(-Bound_Z_lo[ii]);
+                                          // for (ii in 1:n_rt) log_1m_Phi_hi[ii] = log_Phi_stable(-Bound_Z_hi[ii]);
+                                          // y1[index, t] = log_1m_Phi_lo + log1m_exp(log_1m_Phi_hi - log_1m_Phi_lo);
+                                          // matrix[n_rt, 2] tmp;
+                                          // tmp[, 1] = log_1m_Phi_lo + log1m(u[index, t]);
+                                          // tmp[, 2] = log_1m_Phi_hi + log(u[index, t]);
+                                          // vector[n_rt] log_1m_q = log_sum_exp_2d(tmp);
+                                          // vector[n_rt] log_q = log1m_exp(log_1m_q);
+                                          // for (ii in 1:n_rt) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
+                                    // }
                               }
 
                         } //// end binary / ordinal
@@ -1165,75 +1181,80 @@ functions {
       //// unconstrained and the importance weights degenerate. Uses std_normal_lcdf / lccdf
       //// for tail stability; GQ only, so no autodiff cost.
       //////////////////////////////////////////////////////////////////////////
-      vector log_lik_obs_ghk_rng( int n, int R,
-                                data matrix y_use, data array[,] int obs_mask, data array[,] int y_ord,
-                                data array[] matrix X, data array[] int n_covs_per_outcome,
-                                data array[] int pop, data array[,] int class_D, data array[] int test_condition,
-                                matrix beta, array[] matrix beta_cov, array[] matrix L_Omega,
-                                matrix log_prev_subject, array[] vector C_vec_tp, array[] vector log_spacing_tp,
-                                data array[] int ord_start_index, data array[] int ord_end_index,
-                                data array[] int n_thr_per_ord_test, data array[] int n_cat_per_ord_test,
-                                data int n_binary_tests, data real C_sentinel,
-                                data int n_tests, data int n_class, data int n_covariates_max) {
+      //// ---- (commented out: the marginal log-likelihood for LOO below, log_lik_obs_ghk_rng(), integrates
+      ////  the missing tests out over the observed tests only - by the Cholesky factor of their correlation
+      ////  matrix - not by the GHK method of the missing tests used everywhere else in this model (their
+      ////  untruncated draws in the conditioning chain); kept as comments; n_loo_draws > 0 is rejected in
+      ////  transformed data)
+//    vector log_lik_obs_ghk_rng( int n, int R,
+//                              data matrix y_use, data array[,] int obs_mask, data array[,] int y_ord,
+//                              data array[] matrix X, data array[] int n_covs_per_outcome,
+//                              data array[] int pop, data array[,] int class_D, data array[] int test_condition,
+//                              matrix beta, array[] matrix beta_cov, array[] matrix L_Omega,
+//                              matrix log_prev_subject, array[] vector C_vec_tp, array[] vector log_spacing_tp,
+//                              data array[] int ord_start_index, data array[] int ord_end_index,
+//                              data array[] int n_thr_per_ord_test, data array[] int n_cat_per_ord_test,
+//                              data int n_binary_tests, data real C_sentinel,
+//                              data int n_tests, data int n_class, data int n_covariates_max) {
 
-            vector[n_class] lp_class;
-            int P = 0;
-            array[n_tests] int test_buffer;
-            for (t in 1:n_tests) if (obs_mask[n, t] == 1) { P += 1; test_buffer[P] = t; }
-            if (P == 0) return to_vector(log_prev_subject[n]);
-            array[P] int tests = test_buffer[1:P];
-            for (c in 1:n_class) {
-                  matrix[P, P] L;
-                  vector[R] lp_r;
-                  if (P == n_tests) L = L_Omega[c];
-                  else {
-                      matrix[n_tests, n_tests] Sigma = multiply_lower_tri_self_transpose(L_Omega[c]);
-                      L = cholesky_decompose(Sigma[tests, tests]);
-                  }
-                  for (r in 1:R) {
-                        real lp = 0.0;
-                        vector[P] z = rep_vector(0.0, P);
-                        for (j in 1:P) {
-                              int t = tests[j];
-                              int nc = n_covs_per_outcome[t];
-                              real mu = beta[c, t];
-                              real lo;
-                              real hi;
-                              real log_width = positive_infinity();
-                              if (nc > 0) mu += X[t][n, 1:nc] * beta_cov[class_D[c, test_condition[t]] + 1][1:nc, t];
-                              if (j > 1) mu += dot_product(L[j, 1:(j - 1)], z[1:(j - 1)]);
-                              if (t <= n_binary_tests) {
-                                    real b = -mu / L[j, j];
-                                    lo = y_use[n, t] == 1 ? b : negative_infinity();
-                                    hi = y_use[n, t] == 1 ? positive_infinity() : b;
-                              } else {
-                                    int to = t - n_binary_tests;
-                                    int k = y_ord[to, n];
-                                    int ss = class_D[c, test_condition[t]] + 1;
-                                    int first = ord_start_index[to];
-                                    lo = k == 1 ? negative_infinity() : (C_vec_tp[ss][first + k - 2] - mu) / L[j, j];
-                                    hi = k == n_cat_per_ord_test[to] ? positive_infinity()
-                                         : (C_vec_tp[ss][first + k - 1] - mu) / L[j, j];
-                                    if (k > 1 && k < n_cat_per_ord_test[to])
-                                        log_width = log_spacing_tp[ss][first + k - 1] - log(L[j, j]);
-                              }
-                              if (j < P) {
-                                  real u = uniform_rng(0.0, 1.0);
-                                  while (u <= 0.0 || u >= 1.0) u = uniform_rng(0.0, 1.0);
-                                  vector[2] step = normal_interval_step(lo, hi, log_width, log(u), log1m(u));
-                                  z[j] = step[1]; lp += step[2];
-                              } else lp += normal_interval_mass(lo, hi, log_width);
-                        }
-                        lp_r[r] = lp;
-                  }
-                  lp_class[c] = log_sum_exp(lp_r) - log(R) + log_prev_subject[n, c];
-            }
-            //// returns the JOINT log p(y_n, class = c) for each class. log_sum_exp of it is the
-            //// marginal log-likelihood for LOO; softmax of it is the posterior class probability
-            //// for that subject, which is the diagnostic quantity.
-            return lp_class;
+//          vector[n_class] lp_class;
+//          int P = 0;
+//          array[n_tests] int test_buffer;
+//          for (t in 1:n_tests) if (obs_mask[n, t] == 1) { P += 1; test_buffer[P] = t; }
+//          if (P == 0) return to_vector(log_prev_subject[n]);
+//          array[P] int tests = test_buffer[1:P];
+//          for (c in 1:n_class) {
+//                matrix[P, P] L;
+//                vector[R] lp_r;
+//                if (P == n_tests) L = L_Omega[c];
+//                else {
+//                    matrix[n_tests, n_tests] Sigma = multiply_lower_tri_self_transpose(L_Omega[c]);
+//                    L = cholesky_decompose(Sigma[tests, tests]);
+//                }
+//                for (r in 1:R) {
+//                      real lp = 0.0;
+//                      vector[P] z = rep_vector(0.0, P);
+//                      for (j in 1:P) {
+//                            int t = tests[j];
+//                            int nc = n_covs_per_outcome[t];
+//                            real mu = beta[c, t];
+//                            real lo;
+//                            real hi;
+//                            real log_width = positive_infinity();
+//                            if (nc > 0) mu += X[t][n, 1:nc] * beta_cov[class_D[c, test_condition[t]] + 1][1:nc, t];
+//                            if (j > 1) mu += dot_product(L[j, 1:(j - 1)], z[1:(j - 1)]);
+//                            if (t <= n_binary_tests) {
+//                                  real b = -mu / L[j, j];
+//                                  lo = y_use[n, t] == 1 ? b : negative_infinity();
+//                                  hi = y_use[n, t] == 1 ? positive_infinity() : b;
+//                            } else {
+//                                  int to = t - n_binary_tests;
+//                                  int k = y_ord[to, n];
+//                                  int ss = class_D[c, test_condition[t]] + 1;
+//                                  int first = ord_start_index[to];
+//                                  lo = k == 1 ? negative_infinity() : (C_vec_tp[ss][first + k - 2] - mu) / L[j, j];
+//                                  hi = k == n_cat_per_ord_test[to] ? positive_infinity()
+//                                       : (C_vec_tp[ss][first + k - 1] - mu) / L[j, j];
+//                                  if (k > 1 && k < n_cat_per_ord_test[to])
+//                                      log_width = log_spacing_tp[ss][first + k - 1] - log(L[j, j]);
+//                            }
+//                            if (j < P) {
+//                                real u = uniform_rng(0.0, 1.0);
+//                                while (u <= 0.0 || u >= 1.0) u = uniform_rng(0.0, 1.0);
+//                                vector[2] step = normal_interval_step(lo, hi, log_width, log(u), log1m(u));
+//                                z[j] = step[1]; lp += step[2];
+//                            } else lp += normal_interval_mass(lo, hi, log_width);
+//                      }
+//                      lp_r[r] = lp;
+//                }
+//                lp_class[c] = log_sum_exp(lp_r) - log(R) + log_prev_subject[n, c];
+//          }
+//          //// returns the JOINT log p(y_n, class = c) for each class. log_sum_exp of it is the
+//          //// marginal log-likelihood for LOO; softmax of it is the posterior class probability
+//          //// for that subject, which is the diagnostic quantity.
+//          return lp_class;
 
-      }
+//    }
 
 
       //////////////////////////////////////////////////////////////////////////
@@ -1545,6 +1566,8 @@ data {
       //// to Pr(B | A) depends on the prevalences, and a share of prior draws has a Frechet ceiling
       //// min(prev_A, prev_B) / prev_A below the intended lower endpoint - those draws cannot reach it
       //// at ANY odds ratio.
+      if (Phi_type != 1 && Phi_type != 2)
+          reject("Phi_type must be 1 (Phi) or 2 (Phi_approx); got Phi_type = ", Phi_type);
       ////
       //// In this mode the SAME declared parameters are reused with a different meaning, so that no
       //// parameter is left out of the target density:
@@ -1773,6 +1796,13 @@ transformed data {
               n_cat_per_ord_test_pad[t_ord] = n_cat_per_ord_test[t_ord];
           }
       }
+      ////
+      //// (n_loo_draws > 0: the LOO log-likelihood of the generated quantities, which integrated the
+      ////  missing tests out over the observed tests only, not by the GHK method, is commented out)
+      if (n_loo_draws > 0)
+          reject("n_loo_draws > 0 is not available: the LOO log-likelihood (log_lik_obs_ghk_rng) is ",
+                 "commented out, since it integrated the missing tests out over the observed tests only, ",
+                 "not by the GHK method; set n_loo_draws = 0");
 }
 
 parameters {
@@ -2689,21 +2719,24 @@ generated quantities {
       expected_class_count = rep_vector(0.0, n_class);
       
       ////
-      if (n_loo_draws > 0) {
-          for (n in 1:N) {
-              vector[n_class] lp_c = log_lik_obs_ghk_rng(n, n_loo_draws,
-                                               y_use, obs_mask, y_ord, X, n_covs_per_outcome, pop,
-                                               class_D, test_condition,
-                                               beta, beta_cov_by_own_status, L_Omega, log_prev_subject_gq, C_vec_tp, log_C_gap_tp,
-                                               ord_start_index, ord_end_index,
-                                               n_thr_per_ord_test, n_cat_per_ord_test,
-                                               n_binary_tests, C_sentinel, n_tests, n_class, n_covariates_max);
-              log_lik[n] = log_sum_exp(lp_c);
-              vector[n_class] pc = softmax(lp_c);
-              expected_class_count += pc;
-              if (save_subject_probs == 1) class_prob[n] = to_row_vector(pc);
-          }
-      }
+      //// (commented out: the LOO log-likelihood over the observed tests only, log_lik_obs_ghk_rng(), which
+      ////  integrates the missing tests out instead of the GHK method; n_loo_draws > 0 is rejected in
+      ////  transformed data)
+//    if (n_loo_draws > 0) {
+//        for (n in 1:N) {
+//            vector[n_class] lp_c = log_lik_obs_ghk_rng(n, n_loo_draws,
+//                                             y_use, obs_mask, y_ord, X, n_covs_per_outcome, pop,
+//                                             class_D, test_condition,
+//                                             beta, beta_cov_by_own_status, L_Omega, log_prev_subject_gq, C_vec_tp, log_C_gap_tp,
+//                                             ord_start_index, ord_end_index,
+//                                             n_thr_per_ord_test, n_cat_per_ord_test,
+//                                             n_binary_tests, C_sentinel, n_tests, n_class, n_covariates_max);
+//            log_lik[n] = log_sum_exp(lp_c);
+//            vector[n_class] pc = softmax(lp_c);
+//            expected_class_count += pc;
+//            if (save_subject_probs == 1) class_prob[n] = to_row_vector(pc);
+//        }
+//    }
       
       for (other in 0:1) for (t in 1:n_tests) {
           real gap = t <= n_binary_tests ? beta_own[2,t] - beta_own[1,t]

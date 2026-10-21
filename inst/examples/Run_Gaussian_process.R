@@ -3,7 +3,7 @@
 ## Source this file in R or run with Rscript. Edit the settings below for the research run.
 ##
 model <-  "gaussian_process"
-N_values <-  c(40L, 80L, 160L)
+N_values <-  c(40, 80, 160)
 profile <-  Sys.getenv("NICOSTAN_EXAMPLE_PROFILE", unset = "analysis")
 burnin_algorithm <-  "CHESSR"
 ##
@@ -11,10 +11,11 @@ burnin_algorithm <-  "CHESSR"
 .example_sources <-  as.character(unlist(lapply(sys.frames(), function(frame) frame$ofile)))
 if (!length(.example_sources)) .example_sources <-  sub("^--file=", "", commandArgs()[startsWith(commandArgs(), "--file=")])
 if (!length(.example_sources)) stop("Source this file or run it with Rscript.")
-.example_directory <-  dirname(normalizePath(tail(.example_sources, 1L), mustWork = TRUE))
+.example_directory <-  dirname(normalizePath(tail(.example_sources, 1), mustWork = TRUE))
 ## Select a separate library only when explicitly requested.
 .example_library <-  Sys.getenv("NICOSTAN_EXAMPLE_R_LIB", unset = "")
 if (nzchar(.example_library)) {
+
         if ("NicoStan" %in% loadedNamespaces() &&
             normalizePath(getNamespaceInfo(asNamespace("NicoStan"), "path")) !=
             normalizePath(file.path(.example_library, "NicoStan"), mustWork = FALSE)) {
@@ -22,6 +23,7 @@ if (nzchar(.example_library)) {
         }
         .libPaths(c(.example_library, .libPaths()))
 }
+
 source(file.path(.example_directory, "NicoStan_examples.R"))
 source(file.path(.example_directory, "NicoStan_benchmarks.R"))
 ##
@@ -42,7 +44,6 @@ benchmark_result <-  NicoStan_benchmark_run(models = model, N_grid = setNames(li
     output_dir = file.path(getwd(), paste0("NicoStan_benchmark_", model)),
     model_dir = file.path(.example_directory, "models"))
 benchmark_result$comparison$efficiency
-
 
 
 

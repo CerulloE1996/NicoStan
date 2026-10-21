@@ -10,23 +10,26 @@
 .nicostan_admin_script_path <- function() {
 
     source_files <- vapply(sys.frames(), function(frame) {
+
         value <- frame$ofile
         if (is.null(value)) "" else as.character(value)
-    }, character(1L))
+    }, character(1))
+
     source_files <- source_files[nzchar(source_files)]
 
-    if (length(source_files) > 0L) {
-        return(normalizePath(tail(source_files, 1L), mustWork = TRUE))
+    if (length(source_files) > 0) {
+        return(normalizePath(tail(source_files, 1), mustWork = TRUE))
     }
 
     command_args <- commandArgs(trailingOnly = FALSE)
     file_args <- sub("^--file=", "", command_args[grepl("^--file=", command_args)])
-    if (length(file_args) > 0L) {
-        return(normalizePath(tail(file_args, 1L), mustWork = TRUE))
+    if (length(file_args) > 0) {
+        return(normalizePath(tail(file_args, 1), mustWork = TRUE))
     }
 
     ""
 }
+
 
 
 .nicostan_admin_find_source <- function(script_path,
@@ -55,7 +58,7 @@
 
     for (search_root in unique(search_roots)) {
         candidate <- normalizePath(search_root, mustWork = FALSE)
-        for (iteration in seq_len(8L)) {
+        for (iteration in seq_len(8)) {
             if (file.exists(file.path(candidate, "DESCRIPTION")) &&
                 file.exists(file.path(candidate, "inst", "NicoStan", "DESCRIPTION"))) {
                 return(candidate)
@@ -73,6 +76,7 @@
 }
 
 
+
 .nicostan_admin_r_executable <- function() {
 
     if (.Platform$OS.type == "windows") {
@@ -81,6 +85,7 @@
         file.path(R.home("bin"), "R")
     }
 }
+
 
 
 .nicostan_admin_install_outer <- function(source_root,
@@ -104,6 +109,7 @@
 
     invisible(TRUE)
 }
+
 
 
 .nicostan_admin_run_clean <- function(arguments) {
@@ -138,6 +144,7 @@
 }
 
 
+
 #' Install NicoStan from the local outer and inner source packages
 #'
 #' @param source_root Path to `R_packages/NicoStan`.  The default searches from
@@ -159,9 +166,9 @@ run_NicoStan_admin_install <- function(source_root = NULL,
         lib <- env_library
     }
     if (is.null(lib)) {
-        lib <- .libPaths()[1L]
+        lib <- .libPaths()[1]
     }
-    if (!is.character(lib) || length(lib) != 1L || !nzchar(lib)) {
+    if (!is.character(lib) || length(lib) != 1 || !nzchar(lib)) {
         stop("lib must be one non-empty directory path.")
     }
 
@@ -183,6 +190,7 @@ run_NicoStan_admin_install <- function(source_root = NULL,
 
     invisible(lib)
 }
+
 
 
 .nicostan_admin_install_worker <- function(source_root,
@@ -207,10 +215,10 @@ run_NicoStan_admin_install <- function(source_root = NULL,
 }
 
 
+
 if (isTRUE(getOption("NicoStan.admin.autorun", TRUE))) {
     run_NicoStan_admin_install()
 }
-
 
 
 

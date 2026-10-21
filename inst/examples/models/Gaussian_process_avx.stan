@@ -6,7 +6,7 @@
 
 functions {
   real bmvp_simd_lanes();
-  vector fast_exp(vector x);
+  vector nico_exp(vector x);
 
     matrix example_gp_cov(array[] real left, array[] real right, real amplitude, real lengthscale) {
       int n_left = size(left);
@@ -14,7 +14,7 @@ functions {
       matrix[n_left, n_right] covariance;
       for (i in 1:n_left) {
         vector[n_right] squared_distance = square(to_vector(right) - left[i]);
-        covariance[i] = (square(amplitude) * fast_exp(-0.5 * squared_distance / square(lengthscale)))';
+        covariance[i] = (square(amplitude) * nico_exp(-0.5 * squared_distance / square(lengthscale)))';
       }
       return covariance;
     }

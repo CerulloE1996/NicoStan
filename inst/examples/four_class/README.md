@@ -73,7 +73,9 @@ undefined. CmdStanR records its NUTS metric separately.
 The AVX run expects an installed BayesMVP extension package providing
 `BayesMVP/stan_external_functions.hpp`. The fused source is included for separate
 compilation and comparison; it is not silently substituted into the ordinary AVX
-run.
+run. It is compiled with `--allow-undefined` and the user header
+`user_header_of_the_fused_variant_with_NicoSIMD.hpp`, which includes NicoSIMD's
+truncated-normal quantile and log mass (the GHK step) and holds no code of its own.
 
 The APMS helper used to generate the fused source is a build-time development
 tool. The generated Stan files and synthetic fixtures in this directory are the

@@ -38,7 +38,8 @@ model {
   // Example-scale priors: centred/unit-scale covariates and survival times in the chosen reference unit.
   alpha ~ lognormal(0, 0.5);
   beta ~ normal(0, 1);
-  mu ~ normal(-1, 1.5);
+  // mu ~ normal(-1, 1.5);
+  mu ~ normal(0, 2);
   
   // Likelihood for observed failures
   t ~ weibull(alpha, lambda);

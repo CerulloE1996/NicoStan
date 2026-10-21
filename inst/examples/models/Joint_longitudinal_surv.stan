@@ -71,7 +71,8 @@ model {
   sigma_b1 ~ exponential(1);
   rho_b ~ uniform(-1, 1);
   // Baseline hazard prior on the example's time scale (median 0.2 per time unit).
-  lambda ~ lognormal(log(0.2), 1);
+  // lambda ~ lognormal(log(0.2), 1);
+  lambda ~ lognormal(log(0.1), 1.5);
   alpha_assoc ~ normal(0, 1);
   
   // Equivalent non-centred form of the original correlated Gaussian effects.

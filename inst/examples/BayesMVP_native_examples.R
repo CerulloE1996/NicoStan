@@ -2,6 +2,7 @@
 ## Native multivariate probit examples supplied by the BayesMVP extension.
 ##
 run_BayesMVP_native_example <-  function(Model_type = c("MVP", "LC_MVP", "MVOP", "LC_MVOP", "latent_trait"), ...) {
+
         Model_type <-  match.arg(Model_type)
         example_file <-  system.file("examples", "run_native_example.R", package = "BayesMVP")
         if (!nzchar(example_file)) stop("Install the current BayesMVP extension before running its native examples.")
@@ -9,27 +10,30 @@ run_BayesMVP_native_example <-  function(Model_type = c("MVP", "LC_MVP", "MVOP",
         sys.source(example_file, envir = example_environment)
         example_environment$run_native_example(Model_type = Model_type, ...)
 }
+
 ##
 benchmark_BayesMVP_native_example <-  function(Model_type,
-                                               N_values = c(48L, 150L, 500L),
+                                               N_values = c(48, 150, 500),
                                                burnin_algorithm = "CHESSR",
-                                               n_burnin = 200L,
-                                               n_iter = 250L,
+                                               n_burnin = 200,
+                                               n_iter = 250,
                                                output_directory = file.path(getwd(), paste0("BayesMVP_native_", Model_type))) {
-        stopifnot(length(N_values) == 3L, length(unique(N_values)) == 3L)
+
+        stopifnot(length(N_values) == 3, length(unique(N_values)) == 3)
         dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
         records <-  lapply(N_values, function(N) {
+
                 fit <-  run_BayesMVP_native_example(Model_type = Model_type, N = N,
                     burnin_algorithm = burnin_algorithm, n_burnin = n_burnin, n_iter = n_iter)
                 draws <-  fit$model_fit_object$traces$traces_as_arrays$trace_params_main
                 summary <-  posterior::summarise_draws(posterior::as_draws_array(draws), "ess_bulk", "ess_tail", "rhat")
-                stopifnot(dim(draws)[3L] == fit$init_object$n_params_main)
+                stopifnot(dim(draws)[3] == fit$init_object$n_params_main)
                 time_sampling <-  as.numeric(fit$result$time_sampling)
                 time_fitting <-  time_sampling + as.numeric(fit$result$time_burnin)
                 if (!is.finite(time_sampling) || time_sampling <= 0) time_sampling <-  NA_real_
                 if (!is.finite(time_fitting) || time_fitting <= 0) time_fitting <-  NA_real_
                 efficiency <-  fit$model_fit_object$summaries$efficiency_info
-                gradient_work <-  efficiency$L_main_during_sampling * n_iter * dim(draws)[2L]
+                gradient_work <-  efficiency$L_main_during_sampling * n_iter * dim(draws)[2]
                 build <-  list(BayesMVP_version = as.character(utils::packageVersion("BayesMVP")),
                     NicoStan_version = as.character(utils::packageVersion("NicoStan")),
                     BayesMVP_library = find.package("BayesMVP"), NicoStan_library = find.package("NicoStan"),
@@ -37,7 +41,7 @@ benchmark_BayesMVP_native_example <-  function(Model_type,
                     BayesMVP_R_sha256 = digest::digest(file = file.path(find.package("BayesMVP"), "R", "BayesMVP.rdb"), algo = "sha256"),
                     NicoStan_R_sha256 = digest::digest(file = file.path(find.package("NicoStan"), "R", "NicoStan.rdb"), algo = "sha256"))
                 fingerprint <-  substr(digest::digest(list(Model_type, N, burnin_algorithm, n_burnin, n_iter, build),
-                                                       algo = "sha256"), 1L, 16L)
+                                                       algo = "sha256"), 1, 16)
                 result <-  list(Model_type = Model_type, N = N, summary_main = summary,
                     main_parameter_names = summary$variable, n_nuisance = fit$n_nuisance,
                     min_ESS_main = min(summary$ess_bulk), min_ESS_tail_main = min(summary$ess_tail),
@@ -53,11 +57,14 @@ benchmark_BayesMVP_native_example <-  function(Model_type,
                 saveRDS(result, file.path(output_directory, paste0(Model_type, "_N", N, "_", fingerprint, ".rds")))
                 result
         })
+
         table <-  do.call(rbind, lapply(records, function(result) {
+
                 as.data.frame(result[c("Model_type", "N", "n_nuisance", "min_ESS_main", "min_ESS_tail_main",
                     "max_Rhat_main", "sampling_seconds", "fitting_seconds", "min_ESS_per_sec_sampling",
                     "min_ESS_per_sec_fitting", "min_ESS_per_1000_grad_sampling", "gradient_work_basis", "engine", "fingerprint")])
         }))
+
         utils::write.csv(table, file.path(output_directory, "native_efficiency.csv"), row.names = FALSE)
         list(summary = table, results = records)
 }

@@ -1,7 +1,7 @@
 ## Source-friendly four-class entrypoint.
 ##
 ## Visible benchmark settings:
-N_vec <- c(24L, 48L, 96L)
+N_vec <- c(24, 48, 96)
 four_class_benchmark_mode <- "analysis"  # or "smoke"
 four_class_benchmark_output <- file.path(getwd(), "NicoStan_four_class_results")
 
@@ -11,12 +11,13 @@ four_class_benchmark_output <- file.path(getwd(), "NicoStan_four_class_results")
 .run_4lc_sources <- as.character(unlist(lapply(sys.frames(), function(frame) frame$ofile)))
 if (!length(.run_4lc_sources))
     .run_4lc_sources <- sub("^--file=", "", commandArgs()[startsWith(commandArgs(), "--file=")])
-.run_4lc_source_file <- if (length(.run_4lc_sources)) tail(.run_4lc_sources, 1L) else NULL
+.run_4lc_source_file <- if (length(.run_4lc_sources)) tail(.run_4lc_sources, 1) else NULL
 
 run_4LC_MVOP <- function(
     N_values = N_vec,
     mode = four_class_benchmark_mode,
     output_directory = four_class_benchmark_output) {
+
     N_values <- as.integer(N_values)
     if (!length(N_values) || anyNA(N_values) || any(!N_values %in% N_vec))
         stop("N_values must be selected from 24, 48, and 96")
@@ -43,9 +44,9 @@ run_4LC_MVOP <- function(
                             mustWork = FALSE))
 }
 
+
 if (!interactive() && identical(Sys.getenv("NICO_RUN_4LC_MVOP"), "1"))
     run_4LC_MVOP()
-
 
 
 
