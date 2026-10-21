@@ -1,13 +1,11 @@
 
 
 # 
-# json <- jsonlite::fromJSON("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_data/data_6e479c5a0b94fe3f633a31e26aa5dbcc_1000.json")
 # json$n_thr_per_ord_test
 # json$n_cat_per_ord_test
 # json$n_ordinal_tests
 # 
 # 
-# file.remove("/home/enzocerullo/R/R-4.3.3/lib/R/library/BayesMVP/stan_data/data_6e479c5a0b94fe3f633a31e26aa5dbcc_1000.json")
 
 
 ## R_fn_initialise_model.R               
@@ -132,10 +130,10 @@ initialise_model <- function( Model_type,
                                                                            model_args_list = model_args_list)
         }
         ##
-        ## ---- reduce_sum_chunked (nuisance_params = c("z", ...), the names of the model's nuisance blocks):
+        ## ---- nico_reduce_sum (nuisance_params = c("z", ...), the names of the model's nuisance blocks):
 ##
         ##      NicoStan writes the version of the Stan model whose nuisance blocks it holds inside the chunks of
-        ##      its reduce_sum (R_fn_write_reduce_sum_chunked_version_of_Stan_model.R), and its user header; the
+        ##      its reduce_sum (R_fn_write_nico_reduce_sum_version_of_Stan_model.R), and its user header; the
         ##      version is compiled against NicoStan's private runtime with the chunk-local bookkeeping and the
         ##      nuisance block (options NicoStan.reduce_sum_lean_slicing and NicoStan.reduce_sum_nuisance_block,
         ##      set here for the session), and the size of its nuisance block is worked out from the data (or
@@ -162,34 +160,34 @@ initialise_model <- function( Model_type,
               stanc_args_as_text <-  as.character(unlist(stanc_args, use.names = FALSE))
               stanc_include_paths_arguments <-  stanc_args_as_text[startsWith(x = stanc_args_as_text,
                                                                               prefix = "--include-paths")]
-              reduce_sum_chunked_version <-  R_fn_write_reduce_sum_chunked_version_of_Stan_model(
+              nico_reduce_sum_version <-  R_fn_write_nico_reduce_sum_version_of_Stan_model(
                                                    Stan_model_file_path           = Stan_model_file_path,
                                                    nuisance_params                = nuisance_params,
                                                    stanc_file_path                = stanc_file_path,
                                                    stanc_include_paths_arguments  = stanc_include_paths_arguments,
                                                    Stan_cpp_user_header           = Stan_cpp_user_header)
-              Stan_model_file_path <-  reduce_sum_chunked_version$Stan_model_file_path
-              Stan_cpp_user_header <-  reduce_sum_chunked_version$Stan_cpp_user_header
-              nuisance_blocks_held_by_NicoStan <-  reduce_sum_chunked_version$nuisance_blocks
+              Stan_model_file_path <-  nico_reduce_sum_version$Stan_model_file_path
+              Stan_cpp_user_header <-  nico_reduce_sum_version$Stan_cpp_user_header
+              nuisance_blocks_held_by_NicoStan <-  nico_reduce_sum_version$nuisance_blocks
               options(NicoStan.reduce_sum_lean_slicing = TRUE, NicoStan.reduce_sum_nuisance_block = TRUE)
               ##
               ## (the size of the nuisance block: each block's number of terms times its values per term, both
               ##  Stan expressions of the data, worked out in R from Stan_data_list)
               # if (is.null(n_nuisance_override)) {
               #       n_nuisance_override <-  fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_data(
-              #                                     nuisance_blocks  = reduce_sum_chunked_version$nuisance_blocks,
+              #                                     nuisance_blocks  = nico_reduce_sum_version$nuisance_blocks,
               #                                     Stan_data_list   = Stan_data_list)
               # }
               ## (a block whose size the writer could not write in terms of the data, e.g. a size from a flag set
               ##  in a loop of the transformed data: the size is read from the compiled model in get_model_info())
               size_read_from_the_compiled_model <-  isTRUE(any(
-                    reduce_sum_chunked_version$nuisance_blocks$size_read_from_the_compiled_model))
+                    nico_reduce_sum_version$nuisance_blocks$size_read_from_the_compiled_model))
               if (is.null(n_nuisance_override) && !size_read_from_the_compiled_model) {
                     n_nuisance_override <-  fn_size_of_the_nuisance_blocks_held_by_NicoStan_from_the_data(
-                                                  nuisance_blocks  = reduce_sum_chunked_version$nuisance_blocks,
+                                                  nuisance_blocks  = nico_reduce_sum_version$nuisance_blocks,
                                                   Stan_data_list   = Stan_data_list)
               }
-              message(colourise(paste0("reduce_sum_chunked: the nuisance blocks ", paste(nuisance_params,
+              message(colourise(paste0("nico_reduce_sum: the nuisance blocks ", paste(nuisance_params,
                                                                                          collapse = ", "),
                                        " (", if (is.null(n_nuisance_override)) "their number of values read from "
                                        else n_nuisance_override,
