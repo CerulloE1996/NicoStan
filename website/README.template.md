@@ -116,6 +116,20 @@ based on the tape-chunking method of
 "Cache-aware chunking dramatically improves parallel scaling for HMC: Application to multivariate probit model"
 (in preparation).
 See [nico_reduce_sum and nico_map_rect](#nico_reduce_sum-and-nico_map_rect) for more information.
+
+<!-- ----------------------------------------------------------------------------------------- -->
+**How the implementations are compared.** Every model is compared on the following axes, where applicable:
+
+| Comparison | Choices |
+|---|---|
+| Math functions | nico::math (NicoSIMD's custom AVX2, AVX-512 or NEON (via SIMDe) C++ functions) versus Stan::math |
+| Fusion | Fused functions wherever available versus non-fused |
+| Sum calculation | nico_reduce_sum versus Stan's reduce_sum |
+| Map calculation (Cox only) | nico_map_rect versus Stan's map_rect |
+
+Usually eight combinations, four when an axis does not apply, and up to sixteen for the Cox model with the map axis;
+a missing implementation is not "N/A". The table names the axes only; the timings are reported separately.
+
 <!-- ----------------------------------------------------------------------------------------- -->
 - **Hybrid diffusion-pathspace HMC** for models with suitable Gaussian latent/nuisance blocks,
 based on [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003),
