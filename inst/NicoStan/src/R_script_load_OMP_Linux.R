@@ -32,7 +32,27 @@ get_OMP <- function() {
               }
         }
         
-        return(0)
+        ## (none of the paths above: the libgomp of the C++ compiler R builds with; else -fopenmp, which links it)
+        CXX_of_R <-  tryCatch(system2(file.path(R.home("bin"), "R"),
+                                      args = c("CMD", "config", "CXX"),
+                                      stdout = TRUE,
+                                      stderr = FALSE),
+                              error = function(e) character(0))
+        words_of_CXX <-  strsplit(trimws(paste(CXX_of_R, collapse = " ")), " +")[[1]]
+        words_of_CXX <-  words_of_CXX[!grepl("ccache$", words_of_CXX)]
+        if (length(words_of_CXX) > 0) {
+              omp_path_of_the_compiler <-  tryCatch(system2(words_of_CXX[1],
+                                                            args = "-print-file-name=libgomp.so",
+                                                            stdout = TRUE,
+                                                            stderr = FALSE),
+                                                    error = function(e) character(0))
+              if ((length(omp_path_of_the_compiler) == 1) && (dirname(omp_path_of_the_compiler) != ".") &&
+                  file.exists(omp_path_of_the_compiler)) {
+                    return(writeLines(as.character(omp_path_of_the_compiler)))
+              }
+        }
+
+        return(writeLines("-fopenmp"))
 
 }
 
