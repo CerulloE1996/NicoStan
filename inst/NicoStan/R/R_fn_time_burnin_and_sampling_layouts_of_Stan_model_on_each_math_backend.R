@@ -12,18 +12,20 @@
 ##       (fn_compute_sampling_num_chunks_for_CPUs_of_this_process()) for each number of threads per chain;
 ##   (3) the seconds of one lp_grad call give the leapfrog steps (L = 10) and the iterations of each timed call
 ##       (about target_seconds_of_timed_call; fn_L_and_N_iter_of_each_timed_call_from_seconds_per_lp_grad_call());
-##   (4) the sampling layouts (n_chains_sampling chains, one per CPU: 180 on the local-HPC and 16 on the laptop,
-##       as in Paper 1; N_threads/chain = 1): N_chunks = 1 (no chunking) and the equations' N_chunks times
-##       2^(-3, ..., 3), doubled again while the largest is the fastest;
+##   (4) the sampling layouts (n_chains_sampling chains; N_threads/chain from threads_per_chain_of_sampling_grid,
+##       at most n_CPUs / n_chains_sampling): the N_chunks of num_chunks_of_each_listed_N for the case's N (the
+##       list of the next listed N up; the largest listed N's list above it), at least N_threads/chain, doubled
+##       again while the largest timed is within 10% of the fastest;
 ##       each timed by NicoStan's one-call timing in the sampler of the sampling phase (untimed, then timed
 ##       iterations in one C++ call, timed by the chains' own seconds;
 ##       fn_time_sampling_of_Stan_model_for_each_layout());
-##   (5) the burn-in layouts (n_chains_burnin = 4 chains, as in Paper 1; N_threads/chain from
-##       threads_per_chain_of_burnin_grid, at most n_CPUs / n_chains_burnin, i.e. WCP and chunking):
-##       N_chunks = 1, N_chunks = N_threads/chain and the equations' N_chunks, each timed in NicoStan's
-##       persistent burn-in worker,
+##   (5) the burn-in layouts (n_chains_burnin chains; N_threads/chain from threads_per_chain_of_burnin_grid, at
+##       most n_CPUs / n_chains_burnin, i.e. WCP and chunking): the same N_chunks as the sampling layouts, each
+##       timed in NicoStan's persistent burn-in worker,
 ##       whose chains wait for each other at every iteration, as in the burn-in
 ##       (fn_time_burnin_iteration_for_each_num_chunks(), one untimed iteration first).
+## An AUTO-CHUNKING library takes each layout's N_chunks as N_chunks_of_auto_chunking, its model's reduce_sum
+## the same N_chunks (both on) or 1 chunk (AUTO-CHUNKING alone, 1 thread per chain), in both phases.
 ## phases_to_time = "sampling" times the sampling layouts only (the preliminary AVX check: each math backend's own
 ## optimal sampling N_chunks); the real benchmarks time both phases (the default).
 ## Layouts are ranked by the total throughput TP_iter = N_chains N_iter / T_e (iterations per second over all
@@ -46,15 +48,15 @@
 #' @param output_file The CSV file (one row per layout; rows are appended).
 #' @param n_CPUs The CPUs of the timings (default: those of this process).
 #' @param n_chains_burnin The burn-in chains (default 4).
-#' @param n_chains_sampling The sampling chains with one thread each (default n_CPUs: 180 on the local-HPC, 16 on
-#'   the laptop, as in Paper 1); with N_threads/chain threads each, n_chains_sampling / N_threads/chain chains, so
-#'   that every CPU is used.
-#' @param threads_per_chain_of_sampling_grid The N_threads/chain of the sampling layouts (default c(1, 2, 4):
-#'   WCP and chunking are searched in the sampling phase too, never chunking only).
-#' @param threads_per_chain_of_burnin_grid Default c(1, 2, 4, 8, 16, 32), and n_CPUs / n_chains_burnin.
+#' @param n_chains_sampling The sampling chains, the same at every N_threads/chain of the sampling grid.
+#' @param threads_per_chain_of_sampling_grid The N_threads/chain of the sampling layouts (those with
+#'   n_chains_sampling x N_threads/chain <= n_CPUs are timed).
+#' @param threads_per_chain_of_burnin_grid The N_threads/chain of the burn-in layouts (those with
+#'   n_chains_burnin x N_threads/chain <= n_CPUs are timed).
 #' @param phases_to_time The phases whose layouts are timed: "sampling" and / or "burnin" (default both; the
 #'   preliminary AVX check uses "sampling" only).
-#' @param multipliers_of_equations_num_chunks Default 2^(-3:3).
+#' @param num_chunks_of_each_listed_N A named list (names: N) of the N_chunks of the grids at each listed N; a
+#'   case's N takes the list of the next listed N up, and an N above the largest listed N takes its list.
 #' @param fewest_num_chunks_of_grid The fewest N_chunks of every grid (default 1: the unchunked layouts too).
 #' @param L_preferred The leapfrog steps of each iteration (default 10).
 #' @param L_may_be_lowered_when_the_fewest_iterations_last_longer_than_the_target Default TRUE; FALSE keeps
@@ -102,7 +104,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
         threads_per_chain_of_sampling_grid,
         threads_per_chain_of_burnin_grid,
         phases_to_time,
-        multipliers_of_equations_num_chunks,
+        num_chunks_of_each_listed_N,
         most_num_chunks_of_grid,
         fewest_num_chunks_of_grid,
         L_preferred,
@@ -132,7 +134,16 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
         ##
         for (math_backend in names(arguments_of_build_of_each_math_backend)) {
               stan_file <-  arguments_of_build_of_each_math_backend[[math_backend]]$Stan_model_file_path
-              so_file <-  sub("\\.stan$", "_model.so", stan_file)
+              ## (an AUTO-CHUNKING library is built from the cell's own .stan file, auto_chunking = TRUE in its
+              ##  record; a copy of the .stan file named _auto_chunked is the withdrawn route)
+              if (grepl("_auto_chunked[.]stan$", stan_file)) {
+                    stop(paste0(math_backend, ": ", stan_file, " is a copy of a Stan file; build the ",
+                                "AUTO-CHUNKING library from the cell's own .stan file (auto_chunking = TRUE)."))
+              }
+              library_is_auto_chunked <-  isTRUE(arguments_of_build_of_each_math_backend[[
+                                                         math_backend]]$auto_chunking)
+              so_file <-  R_fn_library_of_Stan_model_file(model_file     = stan_file,
+                                                          auto_chunking  = library_is_auto_chunked)
               if (!file.exists(stan_file) || !file.exists(so_file)) {
                     stop(paste0(math_backend, ": the library ", so_file, " (or its .stan file) is missing; ",
                                 "build it first, on the CPUs not used for timings."))
@@ -141,55 +152,128 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                     stop(paste0(math_backend, ": the library ", so_file, " is older than its .stan file; build ",
                                 "it again first."))
               }
+              ## (an AUTO-CHUNKING library: its build arguments say whether its reduce_sum is on as well, both
+              ##  then taking the layout's num_chunks; AUTO-CHUNKING alone has no WCP, so 1 thread per chain, in
+              ##  both phases)
+              if (library_is_auto_chunked) {
+                    with_reduce_sum <-  arguments_of_build_of_each_math_backend[[
+                                              math_backend]]$auto_chunking_with_reduce_sum
+                    if (!(isTRUE(with_reduce_sum) || isFALSE(with_reduce_sum))) {
+                          stop(paste0(math_backend, ": the AUTO-CHUNKING library ", so_file, " needs ",
+                                      "auto_chunking_with_reduce_sum (TRUE or FALSE) in its build arguments."))
+                    }
+                    if (isFALSE(with_reduce_sum) && any(c(threads_per_chain_of_sampling_grid,
+                                                          threads_per_chain_of_burnin_grid) != 1)) {
+                          stop(paste0(math_backend, ": AUTO-CHUNKING alone has no WCP: 1 thread per chain only."))
+                    }
+              }
         }
         for (N_name in names(Stan_data_list_of_each_N)) {
               stopifnot(as.numeric(N_name) == Stan_data_list_of_each_N[[N_name]]$N)
         }
         ##
-        ## ---- the layouts of the grids (before the equations, the largest number of them, for the prediction):
+        ## ---- The N_chunks of a layout's grid ---------------------------------------------------------------------------------------
         ##
-        threads_per_chain_of_burnin_grid <-  sort(unique(c(threads_per_chain_of_burnin_grid,
-                                                           floor(n_CPUs / n_chains_burnin))))
-        threads_per_chain_of_burnin_grid <-  threads_per_chain_of_burnin_grid[
-                                                   threads_per_chain_of_burnin_grid * n_chains_burnin <= n_CPUs]
-        n_num_chunks_per_number_of_threads <-  length(multipliers_of_equations_num_chunks) + 2 + 1
+        ## (the list of the case's N in num_chunks_of_each_listed_N - the next listed N up, the largest listed N's
+        ##  list above it - with at least one chunk per thread, at least fewest_num_chunks_of_grid chunks, and
+        ##  never more chunks than N; the doublings past its largest come in the loops below)
+        fn_num_chunks_of_grid <-  function(threads_per_chain,
+                                           N_of_the_case) {
+
+              listed_N <-  as.numeric(names(num_chunks_of_each_listed_N))
+              index_of_the_listed_N <-  if (any(listed_N >= N_of_the_case))
+                                              which(listed_N == min(listed_N[listed_N >= N_of_the_case])) else
+                                              which.max(listed_N)
+              num_chunks <-  num_chunks_of_each_listed_N[[index_of_the_listed_N]]
+              num_chunks <-  num_chunks[num_chunks >= threads_per_chain]
+              num_chunks <-  pmax(fewest_num_chunks_of_grid, num_chunks)
+              num_chunks <-  sort(unique(num_chunks))
+              return(num_chunks[num_chunks <= N_of_the_case])
+
+        }
+        ##
+        ## ---- The layouts of the grids ----------------------------------------------------------------------------------------------
+        ##
         stopifnot(n_chains_sampling <= n_CPUs, all(phases_to_time %in% c("sampling", "burnin")))
         threads_per_chain_of_sampling_layouts <-  c()
-        # if ("sampling" %in% phases_to_time) threads_per_chain_of_sampling_layouts <-  1
         if ("sampling" %in% phases_to_time) {
-              divides_the_sampling_chains <-  (n_chains_sampling %% threads_per_chain_of_sampling_grid == 0)
               threads_per_chain_of_sampling_layouts <-  threads_per_chain_of_sampling_grid[
-                                                              divides_the_sampling_chains]
+                    threads_per_chain_of_sampling_grid * n_chains_sampling <= n_CPUs]
         }
         threads_per_chain_of_burnin_layouts <-  c()
-        if ("burnin" %in% phases_to_time) threads_per_chain_of_burnin_layouts <-  threads_per_chain_of_burnin_grid
-        n_layouts_of_each_N_and_backend <-  n_num_chunks_per_number_of_threads *
-                                            (length(threads_per_chain_of_sampling_layouts) +
-                                             length(threads_per_chain_of_burnin_layouts))
+        if ("burnin" %in% phases_to_time) {
+              threads_per_chain_of_burnin_layouts <-  threads_per_chain_of_burnin_grid[
+                    threads_per_chain_of_burnin_grid * n_chains_burnin <= n_CPUs]
+        }
+        ##
+        ## ---- Every layout of the grids, before the doublings, and whether a full call of it is saved -------------------------------
+        ##
+        planned_layouts <-  list()
+        for (math_backend in names(arguments_of_build_of_each_math_backend)) {
+              for (N_name in names(Stan_data_list_of_each_N)) {
+                    for (phase in phases_to_time) {
+                          n_chains_of_the_phase <-  if (phase == "sampling") n_chains_sampling else
+                                                          n_chains_burnin
+                          threads_per_chain_of_the_phase <-  if (phase == "sampling")
+                                                                   threads_per_chain_of_sampling_layouts else
+                                                                   threads_per_chain_of_burnin_layouts
+                          for (threads_per_chain in threads_per_chain_of_the_phase) {
+                                num_chunks <-  fn_num_chunks_of_grid(threads_per_chain,
+                                                                     Stan_data_list_of_each_N[[N_name]]$N)
+                                if (length(num_chunks) == 0) next
+                                planned_layouts[[length(planned_layouts) + 1]] <-  data.frame(
+                                      math_backend   = math_backend,
+                                      N              = Stan_data_list_of_each_N[[N_name]]$N,
+                                      phase          = phase,
+                                      n_chains       = n_chains_of_the_phase,
+                                      n_threads_WCP  = threads_per_chain,
+                                      num_chunks     = num_chunks,
+                                      stringsAsFactors = FALSE)
+                          }
+                    }
+              }
+        }
+        planned_layouts <-  if (length(planned_layouts) == 0) data.frame() else do.call(rbind, planned_layouts)
+        if (nrow(planned_layouts) > 0) planned_layouts$already_saved <-  FALSE
+        columns_of_a_layout <-  c("math_backend", "N", "phase", "n_chains", "n_threads_WCP", "num_chunks")
+        if ((nrow(planned_layouts) > 0) && file.exists(output_file)) {
+              rows_saved_before <-  utils::read.csv(output_file, stringsAsFactors = FALSE)
+              if (!("timed_with_the_short_call_only" %in% names(rows_saved_before))) {
+                    rows_saved_before$timed_with_the_short_call_only <-  FALSE
+              }
+              is_a_full_call <-  !(rows_saved_before$timed_with_the_short_call_only %in% TRUE)
+              rows_saved_before <-  rows_saved_before[is_a_full_call, , drop = FALSE]
+              if (all(columns_of_a_layout %in% names(rows_saved_before))) {
+                    planned_layouts$already_saved <-  do.call(paste, planned_layouts[columns_of_a_layout]) %in%
+                                                      do.call(paste, rows_saved_before[columns_of_a_layout])
+              }
+        }
         n_cases <-  length(arguments_of_build_of_each_math_backend) * length(Stan_data_list_of_each_N)
+        n_layouts_to_time <-  if (nrow(planned_layouts) == 0) 0 else sum(!planned_layouts$already_saved)
         ## (each layout: one untimed iteration and the timed call, plus its start-up; each case: initialisation,
-        ##  M_bytes/chain and the lp_grad timing, about 5 s)
-        predicted_seconds_of_everything <-  n_cases * (5 + n_layouts_of_each_N_and_backend *
-                                                       (max(2 * target_seconds_of_timed_call,
-                                                            1.2 * minimum_seconds_of_timed_call) +
-                                                        predicted_seconds_of_setup_of_each_layout))
+        ##  M_bytes/chain and the lp_grad timing, about 5 s; the doublings past each list are not counted)
+        predicted_seconds_of_everything <-  5 * n_cases + n_layouts_to_time *
+                                                          (max(2 * target_seconds_of_timed_call,
+                                                               1.2 * minimum_seconds_of_timed_call) +
+                                                           predicted_seconds_of_setup_of_each_layout)
         message(paste0("\033[36mPredicted total time: ", round(predicted_seconds_of_everything / 60, 1),
-                       " minutes (", n_cases, " cases of math backend and N, at most ",
-                       n_layouts_of_each_N_and_backend, " layouts each; phases: ",
+                       " minutes (", n_cases, " cases of math backend and N; ", nrow(planned_layouts),
+                       " layouts before the doublings, ", n_layouts_to_time, " of them not saved yet; phases: ",
                        paste(phases_to_time, collapse = " and "), "; burn-in N_threads/chain ",
                        paste(threads_per_chain_of_burnin_layouts, collapse = ", "), " with ", n_chains_burnin,
                        " chains; sampling N_threads/chain ",
                        paste(threads_per_chain_of_sampling_layouts, collapse = ", "), " with ", n_chains_sampling,
-                       " / N_threads/chain chains).\033[0m"))
+                       " chains).\033[0m"))
         if (predicted_seconds_of_everything > 60 * most_minutes_of_everything) {
               stop(paste0("The predicted total time is more than ", most_minutes_of_everything, " minutes."))
         }
         if (isTRUE(dry_run)) {
               return(list(predicted_minutes_of_everything = predicted_seconds_of_everything / 60,
                           n_cases = n_cases,
-                          most_layouts_of_each_case = n_layouts_of_each_N_and_backend,
-                          threads_per_chain_of_burnin_grid = threads_per_chain_of_burnin_grid,
-                          n_chains_sampling = n_chains_sampling))
+                          most_layouts_of_each_case = if (n_cases == 0) 0 else nrow(planned_layouts) / n_cases,
+                          threads_per_chain_of_burnin_grid = threads_per_chain_of_burnin_layouts,
+                          n_chains_sampling = n_chains_sampling,
+                          planned_layouts = planned_layouts))
         }
         ##
         fn_snapshot_or_NA <-  function() {
@@ -268,11 +352,12 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                  (finished$phase == phase) &
                                  (is.na(finished$n_chains_of_the_search) |
                                   (finished$n_chains_of_the_search == n_chains_of_the_search))
-              ## (a search marked finished before the grid went down to 50 observations per chunk is searched
-              ##  again: its saved rows are used, and only the layouts it lacks are timed)
+              ## (a search marked finished on another grid of N_chunks, e.g. the earlier one down to 50
+              ##  observations per chunk, is searched again: its saved rows are used, and only the layouts it lacks
+              ##  are timed)
               if (!("grid_of_num_chunks" %in% names(finished))) return(FALSE)
               is_this_search <-  is_this_search &
-                                 (finished$grid_of_num_chunks %in% "down_to_50_observations_per_chunk")
+                                 (finished$grid_of_num_chunks %in% "E1_E2_chunk_counts_rounded_to_powers_of_2")
               return(any(is_this_search, na.rm = TRUE))
         }
 
@@ -283,7 +368,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                       phase                           = phase,
                                       n_chains_of_the_search          = n_chains_of_the_search,
                                       how_it_is_known_to_be_finished  = "searched_to_the_end",
-                                      grid_of_num_chunks              = "down_to_50_observations_per_chunk",
+                                      grid_of_num_chunks              = "E1_E2_chunk_counts_rounded_to_powers_of_2",
                                       saved_at                        = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
                                       stringsAsFactors                = FALSE)
               if (file.exists(file_of_finished_searches)) {
@@ -298,6 +383,37 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               message(paste0("\033[32m", math_backend, ", N = ", N, ", ", phase, " with ", n_chains_of_the_search,
                              " chains: search finished, written to ", basename(file_of_finished_searches),
                              "\033[0m"))
+        }
+
+        ##
+        ## ---- the unbracketed lines:
+        ##
+        fn_write_unbracketed_line <-  function(N,
+                                               math_backend,
+                                               phase,
+                                               n_chains_of_the_line,
+                                               threads_per_chain_of_the_line,
+                                               largest_num_chunks) {
+
+              line <-  data.frame(rows_file           = basename(output_file),
+                                  N                   = N,
+                                  math_backend        = math_backend,
+                                  phase               = phase,
+                                  n_chains            = n_chains_of_the_line,
+                                  n_threads_WCP       = threads_per_chain_of_the_line,
+                                  largest_num_chunks  = largest_num_chunks,
+                                  saved_at            = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+                                  stringsAsFactors    = FALSE)
+              file_of_unbracketed_lines <-  file.path(dirname(output_file), "unbracketed_lines.csv")
+              if (file.exists(file_of_unbracketed_lines)) {
+                    line <-  rbind(utils::read.csv(file_of_unbracketed_lines, stringsAsFactors = FALSE),
+                                   line)
+              }
+              utils::write.csv(line, file_of_unbracketed_lines, row.names = FALSE)
+              message(paste0("\033[31m", math_backend, ", N = ", N, ", ", phase, " ", n_chains_of_the_line,
+                             " x ", threads_per_chain_of_the_line, ": peak not bracketed at ", largest_num_chunks,
+                             " chunks; line not complete\033[0m"))
+
         }
 
         ## (the fastest burn-in seconds per iteration of the full calls saved by this R process for an N and math
@@ -474,25 +590,45 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
         # fn_num_chunks_of_grid <-  function(threads_per_chain, num_chunks_from_equations, most_num_chunks) {
         #       num_chunks <-  c(1, threads_per_chain,
         #                        num_chunks_from_equations * multipliers_of_equations_num_chunks)
-        fn_num_chunks_of_grid <-  function(threads_per_chain, num_chunks_from_equations, most_num_chunks,
-                                           N_of_the_case) {
-
-              log2_of_one_chunk_per_thread <-  ceiling(log2(max(1, threads_per_chain)))
-              log2_of_50_observations_per_chunk <-  max(log2_of_one_chunk_per_thread,
-                                                        ceiling(log2(N_of_the_case / 50)))
-              num_chunks <-  c(1, threads_per_chain,
-                               num_chunks_from_equations * multipliers_of_equations_num_chunks,
-                               2^(log2_of_one_chunk_per_thread:log2_of_50_observations_per_chunk))
-              num_chunks <-  2^round(log2(pmax(1, num_chunks)))
-              num_chunks <-  pmax(threads_per_chain, num_chunks)
-              if (threads_per_chain == 1) num_chunks <-  c(1, num_chunks)
-              ## (no layout with fewer than fewest_num_chunks_of_grid chunks, e.g. none unchunked at a large N,
-              ##  where those layouts are far too slow to time)
-              num_chunks <-  pmax(fewest_num_chunks_of_grid, num_chunks)
-              num_chunks <-  sort(unique(num_chunks))
-              ## (the same chunk_size is the same model data: retain the smallest requested count once.)
-              return(num_chunks[!duplicated(ceiling(N_of_the_case / num_chunks))])
-        }
+        ## (the earlier grid, replaced by fn_num_chunks_of_grid() above: the equations' N_chunks times each
+        ##  multiplier and the powers of two down to 50 observations per chunk)
+        # fn_num_chunks_of_grid <-  function(threads_per_chain, num_chunks_from_equations, most_num_chunks,
+        #                                    N_of_the_case) {
+        #
+        #       log2_of_one_chunk_per_thread <-  ceiling(log2(max(1, threads_per_chain)))
+        #       # log2_of_50_observations_per_chunk <-  max(log2_of_one_chunk_per_thread,
+        #       #                                           ceiling(log2(N_of_the_case / 50)))
+        #       ##
+        #       ## ---- The doublings go on to the first power of two whose chunk_size is 50 or fewer ---------------------------------
+        #       ##
+        #       log2_of_50_observations_per_chunk <-  log2_of_one_chunk_per_thread
+        #       while ((2^log2_of_50_observations_per_chunk < N_of_the_case) &&
+        #              (fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+        #                     N         = N_of_the_case,
+        #                     N_chunks  = 2^log2_of_50_observations_per_chunk)$chunk_size > 50)) {
+        #
+        #             log2_of_50_observations_per_chunk <-  log2_of_50_observations_per_chunk + 1
+        #
+        #       }
+        #       num_chunks <-  c(1, threads_per_chain,
+        #                        num_chunks_from_equations * multipliers_of_equations_num_chunks,
+        #                        2^(log2_of_one_chunk_per_thread:log2_of_50_observations_per_chunk))
+        #       num_chunks <-  2^round(log2(pmax(1, num_chunks)))
+        #       # num_chunks <-  pmax(threads_per_chain, num_chunks)
+        #       ## (at least the smallest power of two with one chunk per thread, e.g. 32 at 24 threads: TBB's
+        #       ##  halving runs a power of two of chunks, so any other N_chunks runs more chunks than it says)
+        #       num_chunks <-  pmax(2^log2_of_one_chunk_per_thread, num_chunks)
+        #       if (threads_per_chain == 1) num_chunks <-  c(1, num_chunks)
+        #       ## (no layout with fewer than fewest_num_chunks_of_grid chunks, e.g. none unchunked at a large N,
+        #       ##  where those layouts are far too slow to time)
+        #       num_chunks <-  pmax(fewest_num_chunks_of_grid, num_chunks)
+        #       num_chunks <-  sort(unique(num_chunks))
+        #       ## (the same chunk_size is the same model data: retain the smallest requested count once.)
+        #       # return(num_chunks[!duplicated(ceiling(N_of_the_case / num_chunks))])
+        #       ## (the N_chunks of the grid are powers of two, each with its own chunk_size and so its own chunks of
+        #       ##  reduce_sum_static; more chunks than N cannot run)
+        #       return(num_chunks[num_chunks <= N_of_the_case])
+        # }
 
         ##
         all_rows <-  list()
@@ -502,9 +638,18 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               arguments_of_build <-  arguments_of_build_of_each_math_backend[[math_backend]]
               Stan_data_list <-  Stan_data_list_of_each_N[[N_name]]
               N <-  Stan_data_list$N
-              Stan_data_list$chunk_size <-  as.integer(N)
+              # Stan_data_list$chunk_size <-  as.integer(N)
+              ## (the data as one chunk: chunk_size and N_blocks of N_chunks = 1, from the one chunk_size formula)
+              Stan_data_list <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(Stan_data_list  = Stan_data_list,
+                                                                               N_chunks        = 1)
+              ## (an AUTO-CHUNKING library reads N_chunks_of_auto_chunking from its data: 1, no chunking, for its
+              ##  set-up, M_bytes/chain and lp_grad timing; the timer sets it for each layout)
+              library_is_auto_chunked <-  isTRUE(arguments_of_build$auto_chunking)
+              Stan_data_list_of_the_set_up <-  Stan_data_list
+              if (library_is_auto_chunked) Stan_data_list_of_the_set_up$N_chunks_of_auto_chunking <-  1L
               most_num_chunks <-  Inf
-              so_file <-  sub("\\.stan$", "_model.so", arguments_of_build$Stan_model_file_path)
+              so_file <-  R_fn_library_of_Stan_model_file(model_file     = arguments_of_build$Stan_model_file_path,
+                                                          auto_chunking  = library_is_auto_chunked)
               so_file_mtime_before <-  file.info(so_file)$mtime
               message(paste0("\033[36m", math_backend, ", N = ", N, " ...\033[0m"))
               ## (the searches of this N and math backend already finished are skipped, the whole case when every
@@ -514,6 +659,8 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                                     n_chains_sampling)
               burnin_search_is_finished <-  ("burnin" %in% phases_to_time) &&
                                             fn_search_is_finished(N, math_backend, "burnin", n_chains_burnin)
+              sampling_line_not_bracketed <-  FALSE
+              burnin_line_not_bracketed <-  FALSE
               if (sampling_search_is_finished) {
                     message(paste0("\033[36m", math_backend, ", N = ", N, ": sampling search already finished ",
                                    "(", basename(file_of_finished_searches), "): not timed again\033[0m"))
@@ -537,11 +684,12 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                      n_nuisance_owned_by_NicoStan_of_each_N[[N_name]]
               init_object <-  initialise_model( Model_type            = "Stan",
                                                 sample_nuisance       = TRUE,
-                                                Stan_data_list        = Stan_data_list,
+                                                Stan_data_list        = Stan_data_list_of_the_set_up,
                                                 Stan_model_file_path  = arguments_of_build$Stan_model_file_path,
                                                 Stan_cpp_user_header  = arguments_of_build$Stan_cpp_user_header,
                                                 stanc_args            = arguments_of_build$stanc_args,
                                                 make_args             = arguments_of_build$make_args,
+                                                auto_chunking         = library_is_auto_chunked,
                                                 compile               = TRUE,
                                                 n_nuisance_override   = if (n_nuisance_owned_by_NicoStan > 0)
                                                                               n_nuisance_owned_by_NicoStan else
@@ -597,11 +745,12 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           init_object <-  initialise_model(
                                 Model_type            = "Stan",
                                 sample_nuisance       = TRUE,
-                                Stan_data_list        = Stan_data_list,
+                                Stan_data_list        = Stan_data_list_of_the_set_up,
                                 Stan_model_file_path  = arguments_of_build$Stan_model_file_path,
                                 Stan_cpp_user_header  = arguments_of_build$Stan_cpp_user_header,
                                 stanc_args            = arguments_of_build$stanc_args,
                                 make_args             = arguments_of_build$make_args,
+                                auto_chunking         = library_is_auto_chunked,
                                 compile               = TRUE,
                                 n_nuisance_override   = n_nuisance_named)
                           if (!identical(file.info(so_file)$mtime, so_file_mtime_before)) {
@@ -615,12 +764,14 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                              init_object$n_params_main, " main parameters"), "cyan"))
               }
               JSON_text <-  fn_JSON_text_of_Stan_data_list(Stan_data_list = Stan_data_list)
+              JSON_text_of_the_set_up <-  if (library_is_auto_chunked) fn_JSON_text_of_Stan_data_list(
+                                                Stan_data_list = Stan_data_list_of_the_set_up) else JSON_text
               ##
               ## ---- (2) M_bytes/chain, (3) L and N_iter from the seconds of one lp_grad call:
               ##
               M_bytes <-  fn_estimate_initial_M_bytes_per_chain(
                                 model_so_file                 = init_object$model_so_file,
-                                Stan_data_list                = Stan_data_list,
+                                Stan_data_list                = Stan_data_list_of_the_set_up,
                                 n_repeats                     = 1,
                                 n_nuisance_owned_by_NicoStan  = n_nuisance_owned_by_NicoStan)$M_bytes_per_chain
               ##  calls of its Stan file, and the L2 cache per core, threads per core and cores of this process's
@@ -638,7 +789,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                  L2_cache_and_threads_per_core$N_threads_per_core))
               lp_grad <-  fn_seconds_per_lp_grad_call_of_compiled_Stan_model(
                                 model_so_file                   = init_object$model_so_file,
-                                JSON_text_of_Stan_data          = JSON_text,
+                                JSON_text_of_Stan_data          = JSON_text_of_the_set_up,
                                 stop_if_library_already_loaded  = FALSE,
                                 n_nuisance_owned_by_NicoStan    = n_nuisance_owned_by_NicoStan,
                                 BridgeStan_model_already_built_from_the_same_JSON_text  = NULL,
@@ -682,8 +833,10 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               if (sampling_search_is_finished) threads_per_chain_of_sampling_layouts_of_this_case <-  c()
               for (threads_per_chain in threads_per_chain_of_sampling_layouts_of_this_case) {
 
-                    # n_chains <-  n_chains_sampling
-                    n_chains <-  n_chains_sampling / threads_per_chain
+                    # n_chains <-  n_chains_sampling / threads_per_chain
+                    ## (the same chains at every N_threads/chain: the one grid of chains x threads per chain of
+                    ##  both phases)
+                    n_chains <-  n_chains_sampling
                     equations <-  fn_compute_sampling_num_chunks_for_CPUs_of_this_process(
                                         M_bytes_per_chain       = M_bytes,
                                         n_chains_sampling       = n_chains,
@@ -698,7 +851,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                 kind_of_tape                  = kind_of_tape_of_this_library,
                                 L2_cache_size_bytes_per_core  = L2_cache_and_threads_per_core$L2_cache_size_bytes,
                                 N_threads_per_core            = L2_cache_and_threads_per_core$N_threads_per_core
-                          )$num_chunks_sampling
+                          )$num_chunks_at_one_thread_per_chain
                     }
                     ## (a search already started for these chains and threads: the equations' N_chunks saved with
                     ##  its rows, so that the grid, and hence the search's path, is the same as before it stopped)
@@ -711,15 +864,20 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                         is.finite(rows_saved_of_these_threads$num_chunks_from_equations[1])) {
                           num_chunks_from_equations <-  rows_saved_of_these_threads$num_chunks_from_equations[1]
                     }
-                    num_chunks_of_grid <-  fn_num_chunks_of_grid(threads_per_chain, num_chunks_from_equations,
-                                                                 # most_num_chunks)
-                                                                 most_num_chunks, N)
+                    # num_chunks_of_grid <-  fn_num_chunks_of_grid(threads_per_chain, num_chunks_from_equations,
+                    #                                              most_num_chunks, N)
+                    num_chunks_of_grid <-  fn_num_chunks_of_grid(threads_per_chain, N)
                     TP_iter_of_grid <-  c()
                     index_of_num_chunks <-  1
                     while (index_of_num_chunks <= length(num_chunks_of_grid)) {
                           layout <-  data.frame( n_chains       = n_chains,
                                                  n_threads_WCP  = threads_per_chain,
                                                  num_chunks     = num_chunks_of_grid[index_of_num_chunks])
+                          ## (an AUTO-CHUNKING library with its reduce_sum on: both take the layout's num_chunks)
+                          if (library_is_auto_chunked &&
+                              isTRUE(arguments_of_build$auto_chunking_with_reduce_sum)) {
+                                layout$num_chunks_of_auto_chunking <-  layout$num_chunks
+                          }
                           ## (a layout whose chains' gradients need more than 70% of the memory available, i.e.
                           ##  N_chains x M_bytes_per_chain / N_chunks, is not timed, so that the machine never
                           ##  runs out of memory, e.g. the unchunked Stan math layouts with 180 chains at
@@ -761,14 +919,26 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                     # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
                                     ##  of the fastest)
                                     (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
-                                      if (ceiling(N / (2 * num_chunks_of_grid[index_of_num_chunks])) ==
-                                          ceiling(N / num_chunks_of_grid[index_of_num_chunks])) {
-                                            stop(paste0("The throughput peak is not bracketed: another doubling ",
-                                                        "has the same chunk_size. No completed reference grid ",
-                                                        "is claimed for this line."))
+                                      # if (ceiling(N / (2 * num_chunks_of_grid[index_of_num_chunks])) ==
+                                      #     ceiling(N / num_chunks_of_grid[index_of_num_chunks])) {
+                                      ## (twice the chunks would be more chunks than N: the doublings end here)
+                                      if ((!missing(most_num_chunks_of_grid)) &&
+                                          (2 * num_chunks_of_grid[index_of_num_chunks] >
+                                             most_num_chunks_of_grid)) {
+                                            ## (the most chunks of the grid, e.g. 1 with no chunking at all:
+                                            ##  the doublings end here, and the search is finished)
+                                      } else if (2 * num_chunks_of_grid[index_of_num_chunks] > N) {
+                                            sampling_line_not_bracketed <-  TRUE
+                                            fn_write_unbracketed_line(N,
+                                                                      math_backend,
+                                                                      "sampling",
+                                                                      n_chains,
+                                                                      threads_per_chain,
+                                                                      num_chunks_of_grid[index_of_num_chunks])
+                                      } else {
+                                            num_chunks_of_grid <-  c(num_chunks_of_grid,
+                                                                     2 * num_chunks_of_grid[index_of_num_chunks])
                                       }
-                                      num_chunks_of_grid <-  c(num_chunks_of_grid,
-                                                               2 * num_chunks_of_grid[index_of_num_chunks])
                                 }
                                 index_of_num_chunks <-  index_of_num_chunks + 1
                                 next
@@ -1023,6 +1193,15 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           }
                           timing$TP_iter <-  1 / timing$seconds_per_draw_over_all_chains
                           timing$num_chunks_from_equations <-  num_chunks_from_equations
+                          ## (the N_chunks asked for and, beside it, the chunk_size and the N_blocks that ran)
+                          blocks_of_layout <-  fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                     N         = N,
+                                                     N_chunks  = layout$num_chunks)
+                          timing$chunk_size <-  blocks_of_layout$chunk_size
+                          timing$N_blocks <-  blocks_of_layout$N_blocks
+                          ## (an AUTO-CHUNKING library: its N_chunks_of_auto_chunking, the layout's num_chunks)
+                          if (library_is_auto_chunked) timing$num_chunks_of_auto_chunking <-  layout$num_chunks
+                          # timing$n_chunks_of_size_chunk_size <-  blocks_of_layout$n_chunks_of_size_chunk_size
                           timing$math_backend <-  math_backend
                           timing$N <-  N
                           timing$L <-  L_and_N_iter$L
@@ -1035,14 +1214,25 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           if ((index_of_num_chunks == length(num_chunks_of_grid)) &&
                               # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
                               (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
-                                if (ceiling(N / (2 * num_chunks_of_grid[index_of_num_chunks])) ==
-                                    ceiling(N / num_chunks_of_grid[index_of_num_chunks])) {
-                                      stop(paste0("The throughput peak is not bracketed: another doubling ",
-                                                  "has the same chunk_size. No completed reference grid ",
-                                                  "is claimed for this line."))
+                                # if (ceiling(N / (2 * num_chunks_of_grid[index_of_num_chunks])) ==
+                                #     ceiling(N / num_chunks_of_grid[index_of_num_chunks])) {
+                                ## (twice the chunks would be more chunks than N: the doublings end here)
+                                if ((!missing(most_num_chunks_of_grid)) &&
+                                    (2 * num_chunks_of_grid[index_of_num_chunks] > most_num_chunks_of_grid)) {
+                                      ## (the most chunks of the grid, e.g. 1 with no chunking at all:
+                                      ##  the doublings end here, and the search is finished)
+                                } else if (2 * num_chunks_of_grid[index_of_num_chunks] > N) {
+                                      sampling_line_not_bracketed <-  TRUE
+                                      fn_write_unbracketed_line(N,
+                                                                math_backend,
+                                                                "sampling",
+                                                                n_chains,
+                                                                threads_per_chain,
+                                                                num_chunks_of_grid[index_of_num_chunks])
+                                } else {
+                                      num_chunks_of_grid <-  c(num_chunks_of_grid,
+                                                               2 * num_chunks_of_grid[index_of_num_chunks])
                                 }
-                                num_chunks_of_grid <-  c(num_chunks_of_grid,
-                                                         2 * num_chunks_of_grid[index_of_num_chunks])
                           }
                           index_of_num_chunks <-  index_of_num_chunks + 1
                     }
@@ -1050,7 +1240,8 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               }
               ## (the sampling search of this N and math backend ran to its end: written to the file of finished
               ##  searches)
-              if (("sampling" %in% phases_to_time) && !sampling_search_is_finished) {
+              if (("sampling" %in% phases_to_time) && !sampling_search_is_finished &&
+                  !sampling_line_not_bracketed) {
                     fn_write_finished_search(N, math_backend, "sampling", n_chains_sampling)
               }
               ##
@@ -1087,9 +1278,9 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                         is.finite(rows_saved_of_these_threads$num_chunks_from_equations[1])) {
                           num_chunks_from_equations <-  rows_saved_of_these_threads$num_chunks_from_equations[1]
                     }
-                    num_chunks_of_grid <-  fn_num_chunks_of_grid(threads_per_chain, num_chunks_from_equations,
-                                                                 # most_num_chunks)
-                                                                 most_num_chunks, N)
+                    # num_chunks_of_grid <-  fn_num_chunks_of_grid(threads_per_chain, num_chunks_from_equations,
+                    #                                              most_num_chunks, N)
+                    num_chunks_of_grid <-  fn_num_chunks_of_grid(threads_per_chain, N)
                     TP_iter_of_grid <-  c()
                     index_of_num_chunks <-  1
                     while (index_of_num_chunks <= length(num_chunks_of_grid)) {
@@ -1122,15 +1313,52 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                     # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
                                     ##  of the fastest)
                                     (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
-                                      if (ceiling(N / (2 * num_chunks)) == ceiling(N / num_chunks)) {
-                                            stop(paste0("The throughput peak is not bracketed: another doubling ",
-                                                        "has the same chunk_size. No completed reference grid ",
-                                                        "is claimed for this line."))
+                                      # if (ceiling(N / (2 * num_chunks)) == ceiling(N / num_chunks)) {
+                                      ## (twice the chunks would be more chunks than N: the doublings end here)
+                                      if ((!missing(most_num_chunks_of_grid)) &&
+                                          (2 * num_chunks > most_num_chunks_of_grid)) {
+                                            ## (the most chunks of the grid, e.g. 1 with no chunking at all:
+                                            ##  the doublings end here, and the search is finished)
+                                      } else if (2 * num_chunks > N) {
+                                            burnin_line_not_bracketed <-  TRUE
+                                            fn_write_unbracketed_line(N,
+                                                                      math_backend,
+                                                                      "burnin",
+                                                                      n_chains_burnin,
+                                                                      threads_per_chain,
+                                                                      num_chunks)
+                                      } else {
+                                            num_chunks_of_grid <-  c(num_chunks_of_grid, 2 * num_chunks)
                                       }
-                                      num_chunks_of_grid <-  c(num_chunks_of_grid, 2 * num_chunks)
                                 }
                                 index_of_num_chunks <-  index_of_num_chunks + 1
                                 next
+                          }
+                          ##
+                          ## ---- An AUTO-CHUNKING library: its chunks in the data given to the worker --------------------------------
+                          ##
+                          ## (the layout's num_chunks is N_chunks_of_auto_chunking, put first in the data's JSON
+                          ##  text, and the model's reduce_sum takes the same num_chunks (both on) or 1 chunk
+                          ##  (AUTO-CHUNKING alone))
+                          num_chunks_of_the_models_reduce_sum <-  num_chunks
+                          JSON_text_of_the_layout <-  JSON_text
+                          if (library_is_auto_chunked) {
+
+                                if (!isTRUE(arguments_of_build$auto_chunking_with_reduce_sum)) {
+                                      num_chunks_of_the_models_reduce_sum <-  1
+                                }
+                                position_of_the_first_brace <-  regexpr(pattern  = "{",
+                                                                        text     = substr(JSON_text, 1, 64),
+                                                                        fixed    = TRUE)
+                                stopifnot(position_of_the_first_brace > 0)
+                                JSON_text_of_the_layout <-  paste0("{\"N_chunks_of_auto_chunking\": ",
+                                                                   as.integer(num_chunks), ", ",
+                                                                   ## (to the last character: substring() stops at
+                                                                   ##  1,000,000 characters by default)
+                                                                   substring(JSON_text,
+                                                                             position_of_the_first_brace + 1,
+                                                                             nchar(JSON_text)))
+
                           }
                           ## (the layout's burn-in worker kept from its short call for its timed call(s): its data
                           ##  file, worker and untimed iteration once per layout, not once per call, about 0.075 s
@@ -1173,13 +1401,13 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                       Stan_data_list                      = Stan_data_list,
                                       n_chains_burnin                     = n_chains_burnin,
                                       n_threads_WCP_burnin                = threads_per_chain,
-                                      num_chunks_candidates               = num_chunks,
+                                      num_chunks_candidates               = num_chunks_of_the_models_reduce_sum,
                                       n_rounds                            = 1,
                                       environment_of_workers_kept_for_reuse  = workers_of_the_layout,
                                       n_timed_iterations                  = N_iter_of_the_short_call,
                                       minimum_seconds_per_timing          = 0,
                                       L_main                              = L_and_N_iter$L,
-                                      JSON_text_of_Stan_data_list         = JSON_text,
+                                      JSON_text_of_Stan_data_list         = JSON_text_of_the_layout,
                                       ## (the data given as its JSON text, with the layout's chunk_size: no data
                                       ##  file per call, and the worker takes the Stan model kept for that text,
                                       pass_the_data_to_the_worker_as_JSON_text_instead_of_a_file  = TRUE,
@@ -1241,7 +1469,8 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                         Stan_data_list                      = Stan_data_list,
                                                         n_chains_burnin                     = n_chains_burnin,
                                                         n_threads_WCP_burnin                = threads_per_chain,
-                                                        num_chunks_candidates               = num_chunks,
+                                                        num_chunks_candidates               =
+                                                              num_chunks_of_the_models_reduce_sum,
                                                         n_rounds                            = 1,
                                                         environment_of_workers_kept_for_reuse  =
                                                               workers_of_the_layout,
@@ -1250,7 +1479,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                         minimum_seconds_per_timing          = 0,
                                                         # L_main                              = L_and_N_iter$L,
                                                         L_main                              = L_of_the_burnin_call,
-                                                        JSON_text_of_Stan_data_list         = JSON_text,
+                                                        JSON_text_of_Stan_data_list         = JSON_text_of_the_layout,
                                                   pass_the_data_to_the_worker_as_JSON_text_instead_of_a_file =
                                                               TRUE,
 ##                                                        n_untimed_iterations_before_timing  = 1,
@@ -1345,6 +1574,15 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                  seconds_per_draw_or_iteration_of_the_short_call =
                                                        seconds_per_draw_or_iteration_of_the_short_call,
                                                  stringsAsFactors                    = FALSE)
+                          ## (the N_chunks asked for and, beside it, the chunk_size and the N_blocks that ran)
+                          blocks_of_layout <-  fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                     N         = N,
+                                                     N_chunks  = num_chunks)
+                          timing$chunk_size <-  blocks_of_layout$chunk_size
+                          timing$N_blocks <-  blocks_of_layout$N_blocks
+                          ## (an AUTO-CHUNKING library: its N_chunks_of_auto_chunking, the layout's num_chunks)
+                          if (library_is_auto_chunked) timing$num_chunks_of_auto_chunking <-  num_chunks
+                          # timing$n_chunks_of_size_chunk_size <-  blocks_of_layout$n_chunks_of_size_chunk_size
                           if (!timed_with_the_short_call_only) {
                                 fastest_seconds_per_iteration_of_burnin_so_far <-
                                       min(fastest_seconds_per_iteration_of_burnin_so_far, seconds_per_iteration,
@@ -1373,12 +1611,23 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           if ((index_of_num_chunks == length(num_chunks_of_grid)) &&
                               # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
                               (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
-                                if (ceiling(N / (2 * num_chunks)) == ceiling(N / num_chunks)) {
-                                      stop(paste0("The throughput peak is not bracketed: another doubling ",
-                                                  "has the same chunk_size. No completed reference grid ",
-                                                  "is claimed for this line."))
+                                # if (ceiling(N / (2 * num_chunks)) == ceiling(N / num_chunks)) {
+                                ## (twice the chunks would be more chunks than N: the doublings end here)
+                                if ((!missing(most_num_chunks_of_grid)) &&
+                                    (2 * num_chunks > most_num_chunks_of_grid)) {
+                                      ## (the most chunks of the grid, e.g. 1 with no chunking at all:
+                                      ##  the doublings end here, and the search is finished)
+                                } else if (2 * num_chunks > N) {
+                                      burnin_line_not_bracketed <-  TRUE
+                                      fn_write_unbracketed_line(N,
+                                                                math_backend,
+                                                                "burnin",
+                                                                n_chains_burnin,
+                                                                threads_per_chain,
+                                                                num_chunks)
+                                } else {
+                                      num_chunks_of_grid <-  c(num_chunks_of_grid, 2 * num_chunks)
                                 }
-                                num_chunks_of_grid <-  c(num_chunks_of_grid, 2 * num_chunks)
                           }
                           index_of_num_chunks <-  index_of_num_chunks + 1
                     }
@@ -1386,7 +1635,8 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               }
               ## (the burn-in search of this N, math backend and number of chains ran to its end: written to the
               ##  file of finished searches)
-              if (("burnin" %in% phases_to_time) && !burnin_search_is_finished) {
+              if (("burnin" %in% phases_to_time) && !burnin_search_is_finished &&
+                  !burnin_line_not_bracketed) {
                     fn_write_finished_search(N, math_backend, "burnin", n_chains_burnin)
               }
 

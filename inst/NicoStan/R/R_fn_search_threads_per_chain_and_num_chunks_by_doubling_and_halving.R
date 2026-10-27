@@ -115,7 +115,13 @@ fn_search_threads_per_chain_and_num_chunks_by_doubling_and_halving <-  function(
                                    fn_allowed_layout(layout[1], 2 * layout[2]),
                                    fn_allowed_layout(layout[1], layout[2] / 2))
               names_of_neighbours <-  vapply(X = neighbours, FUN = fn_name_of_layout, FUN.VALUE = "")
-              keep <-  !duplicated(names_of_neighbours) & (names_of_neighbours != fn_name_of_layout(layout))
+              # keep <-  !duplicated(names_of_neighbours) & (names_of_neighbours != fn_name_of_layout(layout))
+              ## (most_num_chunks is the N of the data: exactly N_chunks chunks run, so that more chunks than units
+              ##  would leave chunks empty)
+              num_chunks_of_neighbours <-  vapply(X = neighbours, FUN = function(neighbour) neighbour[2],
+                                                  FUN.VALUE = 0)
+              keep <-  !duplicated(names_of_neighbours) & (names_of_neighbours != fn_name_of_layout(layout)) &
+                       (num_chunks_of_neighbours <= most_num_chunks)
               return(neighbours[keep])
         }
 

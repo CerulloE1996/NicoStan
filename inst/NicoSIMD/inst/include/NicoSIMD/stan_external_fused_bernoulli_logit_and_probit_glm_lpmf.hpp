@@ -73,7 +73,40 @@ namespace fused_logit = nico::math::fused_bernoulli_logit;
 
 
 // ---- SIMD helpers of this header (the block width and the masked loads of a final partial block)
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+
+inline double set_all_lanes(const double a) {
+
+    return a;
+
+}
+ALWAYS_INLINE double multiply_and_add_blocks(const double a,
+                                             const double b,
+                                             const double c) {
+
+    return std::fma(a, b, c);
+
+}
+ALWAYS_INLINE double add_blocks(const double a,
+                                const double b) {
+
+    return a + b;
+
+}
+ALWAYS_INLINE double load_first_lanes(const double* p,
+                                      const int count) {
+
+    return (count > 0) ? p[0] : 0.0;
+
+}
+ALWAYS_INLINE double keep_first_lanes(const double x,
+                                      const int count) {
+
+    return (count > 0) ? x : 0.0;
+
+}
+
+#elif BMVP_LANES == 8
 
 inline __m512d       set_all_lanes(const double a) { return _mm512_set1_pd(a); }
 ALWAYS_INLINE __m512d multiply_and_add_blocks(const __m512d a, const __m512d b, const __m512d c) {
@@ -158,7 +191,7 @@ ALWAYS_INLINE __m512d probit_log_probability_and_partial_of_block(const __m512d 
                                                                numerator_of_partial),
                                                  log_argument));
     }
-    return _mm512_sub_pd(nico_log_1_AVX512(log_argument), _mm512_maskz_mov_pd(z_negative, half_a_squared));
+    return _mm512_sub_pd(nico_log_1_double_precision_AVX512(log_argument), _mm512_maskz_mov_pd(z_negative, half_a_squared));
 
 }
 
@@ -252,7 +285,7 @@ ALWAYS_INLINE __m256d probit_log_probability_and_partial_of_block(const __m256d 
                                                                numerator_of_partial),
                                                  log_argument));
     }
-    return _mm256_sub_pd(nico_log_1_AVX2(log_argument), _mm256_and_pd(half_a_squared, z_negative));
+    return _mm256_sub_pd(nico_log_1_double_precision_AVX2(log_argument), _mm256_and_pd(half_a_squared, z_negative));
 
 }
 
@@ -272,6 +305,7 @@ struct logit_link {
     }
 };
 
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 struct probit_link {
     static constexpr const char* function_name = "nico_bernoulli_probit_glm_lpmf";
     template <bool compute_partials>
@@ -281,6 +315,7 @@ struct probit_link {
 
     }
 };
+#endif
 
 
 
@@ -610,13 +645,23 @@ class vari_fused_bernoulli_glm_lpmf final : public vari {
 
     void chain() final {
         const double adjoint = adj_;
-        for (int j = 0; j < n_operands_; ++j) operands_[j]->adj_ += adjoint * partials_[j];
+        for (int first = 0; first < n_operands_; first += rows_per_chunk) {
+            const int count = std::min(rows_per_chunk, n_operands_ - first);
+            for (int i = 0; i < count; ++i) {
+                const int j = first + i;
+                operands_[j]->adj_ += adjoint * partials_[j];
+            }
+        }
         if (x_operands_ != nullptr) {
             for (int k = 0; k < K_; ++k) {
                 const double adjoint_times_beta_k = adjoint * beta_values_[k];
                 vari** x_operands_of_column = x_operands_ + static_cast<std::ptrdiff_t>(k) * N_;
-                for (int i = 0; i < N_; ++i) {
-                    x_operands_of_column[i]->adj_ += adjoint_times_beta_k * partials_of_f_[i];
+                for (int first = 0; first < N_; first += rows_per_chunk) {
+                    const int count = std::min(rows_per_chunk, N_ - first);
+                    for (int j = 0; j < count; ++j) {
+                        const int i = first + j;
+                        x_operands_of_column[i]->adj_ += adjoint_times_beta_k * partials_of_f_[i];
+                    }
                 }
             }
         }
@@ -776,6 +821,7 @@ inline stan::return_type_t<T_x, T_alpha, T_beta> nico_bernoulli_logit_glm_lpmf(c
 
 using nico::math::nico_bernoulli_logit_glm_lpmf;
 
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 namespace nico::math {
 
 template <bool propto, typename T_y, typename T_x, typename T_alpha, typename T_beta,
@@ -796,6 +842,7 @@ inline stan::return_type_t<T_x, T_alpha, T_beta> nico_bernoulli_probit_glm_lpmf(
 }  // namespace nico::math
 
 using nico::math::nico_bernoulli_probit_glm_lpmf;
+#endif
 
 
 

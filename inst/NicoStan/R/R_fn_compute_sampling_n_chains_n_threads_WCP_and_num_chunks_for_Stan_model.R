@@ -195,8 +195,11 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
         ## ---- M_bytes/chain of this compiled model (the full data as one piece):
         ##
         if (is.null(M_bytes_per_chain)) {
-              Stan_data_list_one_piece <-  Stan_data_list
-              Stan_data_list_one_piece$chunk_size <-  as.integer(N_units)
+              # Stan_data_list_one_piece <-  Stan_data_list
+              # Stan_data_list_one_piece$chunk_size <-  as.integer(N_units)
+              Stan_data_list_one_piece <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                 Stan_data_list  = Stan_data_list,
+                                                 N_chunks        = 1)
               ## (one fresh-process measurement: the peak memory of one log density and gradient is the same in
               ##  every repeat to 0.1% (the three repeats of every case of the 18 Oct calibration agreed to that),
               ##  and each repeat is a fresh R process that loads the library and the data, seconds each at
@@ -324,7 +327,8 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
               seconds_of_start_up_of_each_call_made <<-  c(seconds_of_start_up_of_each_call_made,
                                                            max(0, timing$seconds_spent_timing[1] -
                                                                   seconds_of_timed_work_of_call))
-              return(timing$seconds_per_iteration[1])
+              return(timing$seconds_per_iteration[1] * L_of_timed_calls /
+                     timing$L_of_the_timed_call[1])
         }
 
         ##
@@ -353,12 +357,12 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
         ##                                                                 2^ceiling(log2(rule$N_chunks))))
         ## if (tape_fits_in_cache) num_chunks_sampling_from_equations <-  1
         ##
-        ## (every CPU used: one chain per CPU with 1 thread when the chains are not given, otherwise the most
-        ##  threads per chain, a power of two, that the CPUs allow for the chains given)
-        threads_per_chain_from_equations <-  1
-        if (!is.null(n_chains_given)) {
-              threads_per_chain_from_equations <-  2^floor(log2(most_threads_per_chain))
-        }
+        # ## (every CPU used: one chain per CPU with 1 thread when the chains are not given, otherwise the most
+        # ##  threads per chain, a power of two, that the CPUs allow for the chains given)
+        # threads_per_chain_from_equations <-  1
+        # if (!is.null(n_chains_given)) {
+        #       threads_per_chain_from_equations <-  2^floor(log2(most_threads_per_chain))
+        # }
         # rule <-  fn_compute_sampling_num_chunks_for_CPUs_of_this_process(
         #                M_bytes_per_chain       = M_bytes_per_chain,
         #                n_chains_sampling       = fn_n_chains_of_threads_per_chain(
@@ -376,9 +380,27 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
                                                     L2_cache_and_threads_per_core$L2_cache_size_bytes,
                                               N_threads_per_core            =
                                                     L2_cache_and_threads_per_core$N_threads_per_core)
-        rule <-  list(N_chunks = sampling_equation_of_18_Oct$num_chunks_sampling,
+        ##
+        ## ---- Every CPU used: the equation's threads per chain and N_chunks ---------------------------------------------------------
+        ##
+        ## (when the chains are not given: the equation's threads per chain, 2 for a Stan-like tape and 1
+        ##  otherwise, and its N_chunks; otherwise the most threads per chain, a power of two, that the CPUs allow
+        ##  for the chains given, with the equation's N_chunks at 1 thread per chain)
+        threads_per_chain_from_equations <-  min(sampling_equation_of_18_Oct$n_threads_WCP_sampling,
+                                                 2^floor(log2(most_threads_per_chain)))
+        num_chunks_of_the_equation <-  sampling_equation_of_18_Oct$num_chunks_at_one_thread_per_chain /
+                                       threads_per_chain_from_equations
+        if (!is.null(n_chains_given)) {
+
+              threads_per_chain_from_equations <-  2^floor(log2(most_threads_per_chain))
+              num_chunks_of_the_equation <-  sampling_equation_of_18_Oct$num_chunks_at_one_thread_per_chain
+
+        }
+        rule <-  list(N_chunks = num_chunks_of_the_equation,
                       sampling_equation_of_18_Oct = sampling_equation_of_18_Oct)
-        most_num_chunks <-  Inf
+        # most_num_chunks <-  Inf
+        ## (at most N chunks: exactly N_chunks chunks run, none may be empty)
+        most_num_chunks <-  N_units
         n_chains_sampling_from_equations <-  fn_n_chains_of_threads_per_chain(threads_per_chain_from_equations)
         n_threads_WCP_sampling_from_equations <-  threads_per_chain_from_equations
         ## (N_chunks: the rule's N_chunks, rounded up to a power of two, at least one chunk per thread)
@@ -391,10 +413,14 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
               ## (the lp_grad time given, e.g. measured by the burn-in pick of the same model and data, or else
               ##  measured here, at the equations' sampling N_chunks, the layout the search starts from, never
               if (is.null(seconds_per_lp_grad_call) || !is.finite(seconds_per_lp_grad_call)) {
-                    Stan_data_list_of_lp_grad_timing <-  Stan_data_list
+                    # Stan_data_list_of_lp_grad_timing <-  Stan_data_list
                     # Stan_data_list_of_lp_grad_timing$chunk_size <-  as.integer(N_units)
-                    Stan_data_list_of_lp_grad_timing$chunk_size <-
-                          as.integer(ceiling(N_units / num_chunks_sampling_from_equations))
+                    # Stan_data_list_of_lp_grad_timing$chunk_size <-
+                    #       as.integer(ceiling(N_units / num_chunks_sampling_from_equations))
+                    Stan_data_list_of_lp_grad_timing <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                               Stan_data_list  = Stan_data_list,
+                                                               N_chunks        =
+                                                                     num_chunks_sampling_from_equations)
                     ## seconds_per_lp_grad_call <-  fn_seconds_per_lp_grad_call_of_compiled_Stan_model(
                     ##                                    model_so_file                   = model_so_file,
                     ##                                    JSON_text_of_Stan_data          =
@@ -425,6 +451,10 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
                     if (!is.null(data_file_of_init_object) &&
                         identical(as.integer(data_file_of_init_object$chunk_size),
                                   as.integer(Stan_data_list_of_lp_grad_timing$chunk_size)) &&
+                        ## (and, for data with blocks, the same N_blocks: one chunk_size can have other blocks)
+                        (is.null(Stan_data_list$N_blocks) ||
+                         identical(as.integer(Stan_data_list$N_blocks),
+                                   as.integer(Stan_data_list_of_lp_grad_timing$N_blocks))) &&
                         inherits(x = init_object$bs_model, what = "StanModel") &&
                         identical(normalizePath(init_object$bs_model$.__enclos_env__$private$lib,
                                                 mustWork = FALSE),
@@ -466,11 +496,17 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
                     lp_grad_timing <-  fn_seconds_per_lp_grad_call_of_compiled_Stan_model(
                                              model_so_file                   = model_so_file,
                                              JSON_text_of_Stan_data          =
-                                                   fn_JSON_text_of_Stan_data_list_with_chunk_size(
-                                                         JSON_text_of_Stan_data_list =
+                                                   # fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                                                   #       JSON_text_of_Stan_data_list =
+                                                   #             JSON_text_of_Stan_data_list,
+                                                   #       chunk_size                  =
+                                                   #             Stan_data_list_of_lp_grad_timing$chunk_size),
+                                                   fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                         JSON_text_of_Stan_data_list  =
                                                                JSON_text_of_Stan_data_list,
-                                                         chunk_size                  =
-                                                               Stan_data_list_of_lp_grad_timing$chunk_size),
+                                                         N                            = N_units,
+                                                         N_chunks                     =
+                                                               num_chunks_sampling_from_equations),
                                              stop_if_library_already_loaded  = FALSE,
                                              n_nuisance_owned_by_NicoStan    = n_nuisance_owned_by_NicoStan,
                                              BridgeStan_model_already_built_from_the_same_JSON_text =
@@ -533,8 +569,12 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
               if (is.null(Stan_data_list_of_model_without_chunking$N)) {
                     Stan_data_list_of_model_without_chunking$N <-  as.integer(N_units)
               }
-              Stan_data_list_of_model_without_chunking$chunk_size <-
-                    as.integer(Stan_data_list_of_model_without_chunking$N)
+              # Stan_data_list_of_model_without_chunking$chunk_size <-
+              #       as.integer(Stan_data_list_of_model_without_chunking$N)
+              Stan_data_list_of_model_without_chunking <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                                 Stan_data_list  =
+                                                                       Stan_data_list_of_model_without_chunking,
+                                                                 N_chunks        = 1)
         }
         ## fn_seconds_per_draw_of_model_without_chunking <-  function(n_chains) {
         ##       seconds_per_iteration <-  fn_time_sampling_of_Stan_model_for_each_layout(
@@ -747,6 +787,13 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
                                       timing_of_the_last_call$n_divergent_transitions_of_timed_calls[1],
                                 seconds_of_the_model_without_chunking_used  = FALSE)
                           attempt_columns <-  c(
+                                "L_of_the_timed_call",
+                                "seconds_cap",
+                                "predicted_seconds_of_timed_call",
+                                "actual_seconds_of_timed_call",
+                                "in_band",
+                                "used_longest_call_under_cap",
+                                "shortest_call_exceeds_cap",
                                 "n_timed_sampling_attempts",
                                 "total_seconds_of_timed_sampling_attempts",
                                 "total_wall_seconds_of_sampling_attempts",
@@ -922,7 +969,11 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
         return(list( n_chains_sampling                       = n_chains_sampling,
                      n_threads_WCP_sampling                  = n_threads_WCP_sampling,
                      num_chunks_sampling                     = num_chunks_sampling,
-                     chunk_size_sampling                     = ceiling(N_units / num_chunks_sampling),
+                     # chunk_size_sampling                     = ceiling(N_units / num_chunks_sampling),
+                     chunk_size_sampling                     =
+                           fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                 N         = N_units,
+                                 N_chunks  = num_chunks_sampling)$chunk_size,
                      use_model_without_chunking              = use_model_without_chunking,
                      mean_seconds_per_draw_of_one_chunk_of_this_model =
                            fn_mean_or_NA(seconds_per_draw_of_one_chunk_of_this_model),

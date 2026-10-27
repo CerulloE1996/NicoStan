@@ -724,6 +724,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         calibrate_eps_on_sampling_chains_before_sampling = TRUE,
                                         n_transitions_per_eps_calibration_block = 300,
                                         n_eps_calibration_blocks = 4,
+                                        max_n_iter_of_eps_calibration_call = 50,
                                         ## (NULL: never; c(lower, upper): see the documentation)
                                         repeat_sampling_with_eps_refitted_if_mean_acceptance_outside = NULL,
                                         n_eps_refits_and_repeated_samplings = 2,
@@ -741,6 +742,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         pooled_metric_signal_to_noise_centred = FALSE,
                                         metric_update_rescales_eps_and_tau = TRUE,
                                         # metric_update_rescales_eps_and_tau = FALSE,
+                                        M_update_rescale_guard,
                                         learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                         resident_burnin = TRUE,
                                         resident_burnin_joint_block = TRUE,
@@ -776,6 +778,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       "pooled_metric_weight_k_draws",
                       "pooled_metric_signal_to_noise_centred",
                       "metric_update_rescales_eps_and_tau",
+                      "M_update_rescale_guard",
                       "learning_rate_initial_n_tau_updates_held_from_tau_handover",
                       "resident_burnin",
                       "resident_burnin_joint_block",
@@ -1085,6 +1088,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##      nuisance vector, 0-based, which is how the sampler stores them) ------------------------
                 fn_positions_of_the_nuisance_values_to_track <- function(nuisance_to_track,
                                                                          nuisance_blocks,
+                                                                         names_of_the_nuisance_blocks_held_by_Stan,
                                                                          Stan_data_list,
                                                                          n_nuisance) {
                       ## (none: "none" or 0. NULL, the default, keeps every block NicoStan holds, in memory and
@@ -1104,6 +1108,31 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       }
                       if (!is.null(nuisance_to_track)) {
                             stopifnot(is.character(nuisance_to_track), length(nuisance_to_track) >= 1)
+                      }
+                      ##
+                      ## ---- The nuisance blocks held by Stan, declared first: every one kept, or none -------------------------------
+                      ##
+                      ## (param_constrain takes all the nuisance values of a draw, so no block is kept alone)
+                      if ((is.null(nuisance_blocks) || nrow(nuisance_blocks) == 0) &&
+                          length(names_of_the_nuisance_blocks_held_by_Stan) > 0) {
+
+                            ##
+                            ## ---- A subset of the blocks stops here -----------------------------------------------------------------
+                            ##
+                            if (!is.null(nuisance_to_track) &&
+                                !setequal(unique(nuisance_to_track), names_of_the_nuisance_blocks_held_by_Stan)) {
+
+                                  stop(paste0("$sample(nuisance_to_track = ): the nuisance blocks ",
+                                              paste(names_of_the_nuisance_blocks_held_by_Stan, collapse = ", "),
+                                              " are held by Stan, declared first: keep all of them, or \"none\"."))
+
+                            }
+                            message(paste0("nuisance_to_track: keeping all ", n_nuisance, " nuisance values of ",
+                                           "every draw in memory (never on disk), the blocks ",
+                                           paste(names_of_the_nuisance_blocks_held_by_Stan, collapse = ", "),
+                                           " (held by Stan, declared first)."))
+                            return(as.integer(seq_len(n_nuisance) - 1L))
+
                       }
                       if (is.null(nuisance_blocks) || nrow(nuisance_blocks) == 0) {
                             if (is.null(nuisance_to_track)) return(integer(0))
@@ -2143,7 +2172,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                       lib  = init_object$model_so_file,
                                       # data = init_object$json_file_path,
                                       data = json_file_path_for_the_starting_values,
-                                      seed = 123)
+                                      seed = 123,
+                                      auto_chunking = isTRUE(init_object$auto_chunking))
                           }
                           starting_values_given <-  R_fn_init_initial_values(
                                 Model_type                                 = Model_type,
@@ -2162,12 +2192,15 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                 fn_read_L3_cache_topology_of_available_CPUs()$CPU_ids_available))
                           column_of_each_timed_chain <-  ((seq_len(n_timed_chains_at_most) - 1) %%
                                                           length(init_lists_per_chain)) + 1
+                          ## (one column per chain, also with no nuisance: 0 rows, not 0 columns)
                           main_values_given <-  matrix(
                                 starting_values_given$theta_main_vectors_all_chains_input_from_R,
-                                nrow = init_object$n_params_main)
+                                nrow = init_object$n_params_main,
+                                ncol = length(init_lists_per_chain))
                           nuisance_values_given <-  matrix(
                                 starting_values_given$theta_nuisance_vectors_all_chains_input_from_R,
-                                nrow = init_object$n_nuisance)
+                                nrow = init_object$n_nuisance,
+                                ncol = length(init_lists_per_chain))
                           initial_values_of_the_chains_for_the_layout_timings <-  list(
                                 main      = main_values_given[, column_of_each_timed_chain, drop = FALSE],
                                 nuisance  = nuisance_values_given[, column_of_each_timed_chain, drop = FALSE])
@@ -2546,6 +2579,17 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                       nuisance_blocks_held_by_NicoStan_of_the_model <-
                             init_object$nuisance_blocks_held_by_NicoStan
                 }
+                ##
+                ## ---- A model that calls neither reduce_sum nor map_rect: the names of its nuisance blocks held by Stan -------------
+                ##
+                ## (declared first in its model file, kept by name through a rebuild)
+                names_of_the_nuisance_blocks_held_by_Stan_of_the_model <-  NULL
+                if (is.list(init_object)) {
+
+                      names_of_the_nuisance_blocks_held_by_Stan_of_the_model <-
+                            init_object$names_of_the_nuisance_blocks_of_a_regular_library
+
+                }
                 if (!is.null(nuisance_blocks_held_by_NicoStan_of_the_model)) {
                       options(NicoStan.reduce_sum_lean_slicing = TRUE, NicoStan.reduce_sum_nuisance_block = TRUE)
                       if (is.null(n_nuisance_override)) {
@@ -2625,6 +2669,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                  ##
                                                  sample_nuisance = sample_nuisance,
                                                  n_nuisance_override = n_nuisance_override,
+                                                 names_of_the_nuisance_blocks_of_a_regular_library =
+                                                       names_of_the_nuisance_blocks_held_by_Stan_of_the_model,
                                                  ##
                                                  model_args_list = model_args_list,
                                                  ##
@@ -2639,7 +2685,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                  Stan_cpp_user_header = Stan_cpp_user_header,
                                                  Stan_cpp_flags = Stan_cpp_flags,
                                                  stanc_args = stanc_args,
-                                                 make_args = make_args)
+                                                 make_args = make_args,
+                                                 auto_chunking = isTRUE(init_object$auto_chunking))
                 ##
                 ## (the writer's record of the nuisance blocks held by NicoStan, kept through the rebuild)
                 init_object$nuisance_blocks_held_by_NicoStan <-  nuisance_blocks_held_by_NicoStan_of_the_model
@@ -2717,6 +2764,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 positions_of_the_nuisance_values_to_keep <- fn_positions_of_the_nuisance_values_to_track(
                       nuisance_to_track = nuisance_to_track_user,
                       nuisance_blocks   = init_object$nuisance_blocks_held_by_NicoStan,
+                      names_of_the_nuisance_blocks_held_by_Stan =
+                            init_object$names_of_the_nuisance_blocks_of_a_regular_library,
                       Stan_data_list    = Stan_data_list,
                       n_nuisance        = n_nuisance)
                 ##
@@ -2988,6 +3037,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
                         pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
                         metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                        M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =
                               learning_rate_initial_n_tau_updates_held_from_tau_handover,
                         resident_burnin = resident_burnin,
@@ -3733,6 +3783,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              ##
                                                              sample_nuisance = sample_nuisance,
                                                              n_nuisance_override = n_nuisance_override,
+                                                             names_of_the_nuisance_blocks_of_a_regular_library =
+                                                                   names_of_the_nuisance_blocks_held_by_Stan_of_the_model,
                                                              ##
                                                              model_args_list = model_args_list,
                                                              ##
@@ -3747,7 +3799,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                                              Stan_cpp_user_header = Stan_cpp_user_header,
                                                              Stan_cpp_flags = Stan_cpp_flags,
                                                              stanc_args = stanc_args,
-                                                             make_args = make_args)
+                                                             make_args = make_args,
+                                                             auto_chunking = isTRUE(init_object$auto_chunking))
                             ##
                             ## (the writer's record of the nuisance blocks held by NicoStan, kept through the
                             ##  rebuild)
@@ -3766,6 +3819,8 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             positions_of_the_nuisance_values_to_keep <- fn_positions_of_the_nuisance_values_to_track(
                                   nuisance_to_track = nuisance_to_track_user,
                                   nuisance_blocks   = init_object$nuisance_blocks_held_by_NicoStan,
+                                  names_of_the_nuisance_blocks_held_by_Stan =
+                                        init_object$names_of_the_nuisance_blocks_of_a_regular_library,
                                   Stan_data_list    = Stan_data_list,
                                   n_nuisance        = n_nuisance)
                             n_nuisance_to_track <- length(positions_of_the_nuisance_values_to_keep)
@@ -4239,6 +4294,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
                         pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
                         metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                        M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =
                               learning_rate_initial_n_tau_updates_held_from_tau_handover,
                         resident_burnin = resident_burnin,
@@ -5011,6 +5067,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                       n_transitions_per_eps_calibration_block =
                                             n_transitions_per_eps_calibration_block,
                                       n_eps_calibration_blocks = n_eps_calibration_blocks,
+                                      max_n_iter_of_eps_calibration_call = max_n_iter_of_eps_calibration_call,
                                       max_eps_main = max_eps_main,
                                       max_eps_us = max_eps_us,
                                       seed = seed)

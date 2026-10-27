@@ -2,13 +2,14 @@
 #pragma once 
 
 
-#ifndef FAST_AND_APPROX_AVX512_AVX2_FNS_HPP
-#define FAST_AND_APPROX_AVX512_AVX2_FNS_HPP
+#ifndef NICO_AND_APPROX_AVX512_FNS_HPP
+#define NICO_AND_APPROX_AVX512_FNS_HPP
 
 
 #include "../nico_simd_intrinsics.hpp"   //// <immintrin.h> on x86-64; SIMDe (NEON) on ARM
 #include <cmath>
 #include "nico_exp_over_the_full_double_range.hpp"
+#include "nico_normal_constants.hpp"
 
 
 #if defined(__AVX512VL__) && defined(__AVX512F__)  && defined(__AVX512DQ__)  /// if have AVX-512
@@ -317,64 +318,64 @@ ALWAYS_INLINE    __m512d nico_exp_1_AVX512(const __m512d a) {
 
 
 ////// ------  log fn  --------   https://stackoverflow.com/a/65537754/9007125 // vectorized version of the answer by njuffa
-ALWAYS_INLINE       __m512d nico_log_1_wo_checks_AVX512(const __m512d a ) {
-
-          ALIGN64  __m512d const a_aligned = a;
-  
-          ALIGN64  __m512i const log_i1 =   _mm512_set1_epi64(0x3fe5555555555555);
-          ALIGN64  __m512i const log_i2 =   _mm512_set1_epi64(0xFFF0000000000000);
-          
-          ALIGN64  __m512d const log_c1 =   _mm512_set1_pd(0.000000000000000222044604925031308085);
-          ALIGN64  __m512d const log_c2 =   _mm512_set1_pd(-0.13031005859375);
-          ALIGN64  __m512d const log_c3 =   _mm512_set1_pd(0.140869140625);
-          ALIGN64  __m512d const log_c4 =   _mm512_set1_pd(-0.121483512222766876221);           
-          ALIGN64  __m512d const log_c5 =   _mm512_set1_pd(0.139814853668212890625);
-          ALIGN64  __m512d const log_c6 =   _mm512_set1_pd(-0.166846126317977905273);
-          ALIGN64  __m512d const log_c7 =   _mm512_set1_pd(0.200120344758033752441);
-          ALIGN64  __m512d const log_c8 =   _mm512_set1_pd(-0.249996200203895568848);
-          ALIGN64  __m512d const log_c9 =   _mm512_set1_pd(0.333331972360610961914);
-          ALIGN64  __m512d const log_c10 =  _mm512_set1_pd(-0.5);
-          ALIGN64  __m512d const log_c11 =  _mm512_set1_pd(0.693147182464599609375);
-          
-          ALIGN64  __m512i const aInt = _mm512_castpd_si512(a_aligned);
-  
-          //    e = (__double_as_int (a) - i1 )    &   i2   ;
-          ALIGN64  __m512i const e = _mm512_and_epi64( _mm512_sub_epi64(aInt, log_i1),  log_i2);
-          // 0x1.0p-52
-          ALIGN64  __m512d const i = _mm512_fmadd_pd ( _mm512_cvtepi64_pd(e), log_c1, _mm512_setzero_pd());
-          ALIGN64  __m512d const m =
-                  _mm512_sub_pd(_mm512_castsi512_pd( _mm512_sub_epi64(aInt, e)), _mm512_set1_pd(1.0)) ;
-          //   m = __int_as_double (__double_as_int (a) - e);  
-          //  m = _mm256_sub_pd(m, one) ; // m - 1.0;  /* m in [2/3, 4/3] */
-          // m = _mm512_sub_pd(m, one) ; // m - 1.0;  /* m in [2/3, 4/3] */
-          ALIGN64  __m512d const s = _mm512_mul_pd(m, m);
-  
-          /* Compute log1p(m) for m in [-1/3, 1/3] */
-          ALIGN64  __m512d r =             log_c2;  // -0x1.0ae000p-3
-          ALIGN64  __m512d t =             log_c3;  //  0x1.208000p-3
-          r = _mm512_fmadd_pd (r, s, log_c4); // -0x1.f198b2p-4
-          t = _mm512_fmadd_pd (t, s, log_c5); //  0x1.1e5740p-3
-          r = _mm512_fmadd_pd (r, s, log_c6); // -0x1.55b36cp-3
-          t = _mm512_fmadd_pd (t, s, log_c7); //  0x1.99d8b2p-3
-          r = _mm512_fmadd_pd (r, s, log_c8); // -0x1.fffe02p-3
-          r = _mm512_fmadd_pd (t, m, r);
-          r = _mm512_fmadd_pd (r, m, log_c9); //  0x1.5554fap-2
-          r = _mm512_fmadd_pd (r, m, log_c10); // -0x1.000000p-1
-          r = _mm512_fmadd_pd (r, s, m);
-  
-          return _mm512_fmadd_pd(i,  log_c11, r); //  0x1.62e430p-1 // log(2)
-
-}
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE       __m512d nico_log_1_wo_checks_AVX512(const __m512d a ) {
+//
+//           ALIGN64  __m512d const a_aligned = a;
+//
+//           ALIGN64  __m512i const log_i1 =   _mm512_set1_epi64(0x3fe5555555555555);
+//           ALIGN64  __m512i const log_i2 =   _mm512_set1_epi64(0xFFF0000000000000);
+//
+//           ALIGN64  __m512d const log_c1 =   _mm512_set1_pd(0.000000000000000222044604925031308085);
+//           ALIGN64  __m512d const log_c2 =   _mm512_set1_pd(-0.13031005859375);
+//           ALIGN64  __m512d const log_c3 =   _mm512_set1_pd(0.140869140625);
+//           ALIGN64  __m512d const log_c4 =   _mm512_set1_pd(-0.121483512222766876221);           
+//           ALIGN64  __m512d const log_c5 =   _mm512_set1_pd(0.139814853668212890625);
+//           ALIGN64  __m512d const log_c6 =   _mm512_set1_pd(-0.166846126317977905273);
+//           ALIGN64  __m512d const log_c7 =   _mm512_set1_pd(0.200120344758033752441);
+//           ALIGN64  __m512d const log_c8 =   _mm512_set1_pd(-0.249996200203895568848);
+//           ALIGN64  __m512d const log_c9 =   _mm512_set1_pd(0.333331972360610961914);
+//           ALIGN64  __m512d const log_c10 =  _mm512_set1_pd(-0.5);
+//           ALIGN64  __m512d const log_c11 =  _mm512_set1_pd(0.693147182464599609375);
+//
+//           ALIGN64  __m512i const aInt = _mm512_castpd_si512(a_aligned);
+//
+//           //    e = (__double_as_int (a) - i1 )    &   i2   ;
+//           ALIGN64  __m512i const e = _mm512_and_epi64( _mm512_sub_epi64(aInt, log_i1),  log_i2);
+//           // 0x1.0p-52
+//           ALIGN64  __m512d const i = _mm512_fmadd_pd ( _mm512_cvtepi64_pd(e), log_c1, _mm512_setzero_pd());
+//           ALIGN64  __m512d const m =
+//                   _mm512_sub_pd(_mm512_castsi512_pd( _mm512_sub_epi64(aInt, e)), _mm512_set1_pd(1.0)) ;
+//           //   m = __int_as_double (__double_as_int (a) - e);  
+//           //  m = _mm256_sub_pd(m, one) ; // m - 1.0;  /* m in [2/3, 4/3] */
+//           // m = _mm512_sub_pd(m, one) ; // m - 1.0;  /* m in [2/3, 4/3] */
+//           ALIGN64  __m512d const s = _mm512_mul_pd(m, m);
+//
+//           /* Compute log1p(m) for m in [-1/3, 1/3] */
+//           ALIGN64  __m512d r =             log_c2;  // -0x1.0ae000p-3
+//           ALIGN64  __m512d t =             log_c3;  //  0x1.208000p-3
+//           r = _mm512_fmadd_pd (r, s, log_c4); // -0x1.f198b2p-4
+//           t = _mm512_fmadd_pd (t, s, log_c5); //  0x1.1e5740p-3
+//           r = _mm512_fmadd_pd (r, s, log_c6); // -0x1.55b36cp-3
+//           t = _mm512_fmadd_pd (t, s, log_c7); //  0x1.99d8b2p-3
+//           r = _mm512_fmadd_pd (r, s, log_c8); // -0x1.fffe02p-3
+//           r = _mm512_fmadd_pd (t, m, r);
+//           r = _mm512_fmadd_pd (r, m, log_c9); //  0x1.5554fap-2
+//           r = _mm512_fmadd_pd (r, m, log_c10); // -0x1.000000p-1
+//           r = _mm512_fmadd_pd (r, s, m);
+//
+//           return _mm512_fmadd_pd(i,  log_c11, r); //  0x1.62e430p-1 // log(2)
+//
+// }
 
 
 //// ---- log, double precision (nico_log_1_double_precision_*): the fdlibm (Sun Microsystems, e_log.c) algorithm,
 ////      vectorised. a = 2^k (1 + f) with 1 + f in [sqrt(2)/2, sqrt(2)) (the exponent trick below, with sqrt(2)/2
 ////      as the split point); s = f / (2 + f), |s| <= 0.1716; R = s^2 (Lg1 + s^4 (Lg3 + s^4 (Lg5 + s^4 Lg7))) +
 ////      s^4 (Lg2 + s^4 (Lg4 + s^4 Lg6)); log(a) = k ln2_hi - ((hfsq - (s (hfsq + R) + k ln2_lo)) - f), hfsq =
-////      f^2 / 2 (ln 2 split into hi and lo parts). Below 1 ulp (measured 0.83 ulp), but one division per vector:
-////      slower than nico_log_1_wo_checks_* (njuffa's single-precision polynomial, about 1.5e-8 relative error),
-////      which therefore stays the default log. ---- reduction for a positive normal double: a = 2^k (1 + f) with
-////      1 + f in [sqrt(2)/2, sqrt(2)) (k exact, as a double)
+////      f^2 / 2 (ln 2 split into hi and lo parts). Below 1 ulp (measured 0.83 ulp); the only log (the single-
+////      precision one, about 1.5e-8 relative error, is commented out). ---- reduction for a positive normal
+////      double: a = 2^k (1 + f) with 1 + f in [sqrt(2)/2, sqrt(2)) (k exact, as a double)
 ALWAYS_INLINE void nico_log_reduce_AVX512(const __m512d a, __m512d& f, __m512d& k) {
 
         ALIGN64  __m512d const a_aligned = a;
@@ -436,31 +437,32 @@ ALWAYS_INLINE __m512d nico_log_1_double_precision_wo_checks_AVX512(const __m512d
  
  
 ///// compute log(1+x) without losing precision for small values of x. //  see: https://www.johndcook.com/cpp_log_one_plus_x.html
-ALWAYS_INLINE  __m512d nico_log1p_1_wo_checks_AVX512(const __m512d x)   {
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE  __m512d nico_log1p_1_wo_checks_AVX512(const __m512d x)   {
+//
+//           ALIGN64  __m512d const x_aligned = x;
+//
+//           ALIGN64  __m512d const small =  _mm512_set1_pd(1e-4);
+//           ALIGN64  __m512d const minus_one_half  =  _mm512_set1_pd(-0.50);
+//
+//           /// if abs(x) > small
+//           const __mmask8 is_abs_x_gr_1e_m_4 =      _mm512_cmp_pd_mask(_mm512_abs_pd(x_aligned), small,
+//                   _CMP_GT_OQ);
+//
+//           return       _mm512_mask_blend_pd(is_abs_x_gr_1e_m_4,
+//                                             _mm512_mul_pd(_mm512_fmadd_pd( minus_one_half, x_aligned,
+//                                                     _mm512_set1_pd(1.0)), x_aligned) ,
+//                                             ////  if fabs(x) > small
+//                                             nico_log_1_wo_checks_AVX512( _mm512_add_pd(x_aligned, _mm512_set1_pd(
+//                                                     1.0)) ) ) ;
+//
+// }
 
-          ALIGN64  __m512d const x_aligned = x;
-  
-          ALIGN64  __m512d const small =  _mm512_set1_pd(1e-4);
-          ALIGN64  __m512d const minus_one_half  =  _mm512_set1_pd(-0.50);
-  
-          /// if abs(x) > small
-          const __mmask8 is_abs_x_gr_1e_m_4 =      _mm512_cmp_pd_mask(_mm512_abs_pd(x_aligned), small,
-                  _CMP_GT_OQ);
-          
-          return       _mm512_mask_blend_pd(is_abs_x_gr_1e_m_4,
-                                            _mm512_mul_pd(_mm512_fmadd_pd( minus_one_half, x_aligned,
-                                                    _mm512_set1_pd(1.0)), x_aligned) ,
-                                            ////  if fabs(x) > small
-                                            nico_log_1_wo_checks_AVX512( _mm512_add_pd(x_aligned, _mm512_set1_pd(
-                                                    1.0)) ) ) ;
-          
-}
 
 
 
-
-//// ---- log1p, double precision (nico_log1p_1_double_precision_*; the default nico_log1p_1_* is the faster
-////      single- precision-accuracy version above). For x in [sqrt(2)/2 - 1, sqrt(2) - 1) the fdlibm core runs on
+//// ---- log1p, double precision (nico_log1p_1_double_precision_*; the only log1p: the 2-term + single-precision
+////      version above is commented out). For x in [sqrt(2)/2 - 1, sqrt(2) - 1) the fdlibm core runs on
 ////      f = x itself (k = 0): 1 + x is never rounded. Otherwise log(u), u = 1 + x, reduced as in nico_log_1,
 ////      plus (x - (u - 1)) / u, the rounding error of u to first order (a 14-bit reciprocal of u is ample for
 ////      that term). One core evaluation (one division) for any mix of lanes; the reciprocal only when a lane is
@@ -493,7 +495,7 @@ ALWAYS_INLINE      __m512d nico_log1m_1_wo_checks_AVX512(const __m512d x)   {
           ALIGN64  __m512d const x_aligned = x;
   
           ALIGN64  __m512d const neg_x = _mm512_sub_pd(_mm512_setzero_pd(), x_aligned);
-          return nico_log1p_1_wo_checks_AVX512(neg_x) ; // -x);
+          return nico_log1p_1_double_precision_wo_checks_AVX512(neg_x) ; // -x);
   
 }
 
@@ -517,7 +519,7 @@ ALWAYS_INLINE      __m512d nico_log1p_exp_1_wo_checks_AVX512(const __m512d x)   
           ALIGN64  __m512d const argument = _mm512_mask_blend_pd(is_x_gr_0_mask, x_aligned,
                                                          _mm512_sub_pd(_mm512_setzero_pd(), x_aligned));
           ALIGN64  __m512d const log1p_exp_of_argument =
-              nico_log1p_1_wo_checks_AVX512(nico_exp_1_wo_checks_AVX512(argument));
+              nico_log1p_1_double_precision_wo_checks_AVX512(nico_exp_1_wo_checks_AVX512(argument));
           return _mm512_mask_blend_pd(is_x_gr_0_mask, log1p_exp_of_argument,                      /// if x <= 0
                                       /// if x > 0
                                       _mm512_add_pd(x_aligned, log1p_exp_of_argument));
@@ -547,21 +549,22 @@ __attribute__((noinline, cold)) inline __m512d nico_log_exceptional_lanes_AVX512
 
 }
 
-ALWAYS_INLINE      __m512d nico_log_1_AVX512(const __m512d a ) {
-
-        ALIGN64  __m512d const a_aligned = a;
-
-        // The mantissa/exponent shortcut assumes a positive NORMAL double.
-        // A single unsigned interval test covers positive normal doubles, excluding infinity/NaN.
-        const __mmask8 ordinary_lanes = _mm512_cmp_epu64_mask(
-            _mm512_sub_epi64(_mm512_castpd_si512(a_aligned), _mm512_set1_epi64(0x0010000000000000)),
-            _mm512_set1_epi64(0x7fe0000000000000), _MM_CMPINT_LT);
-        ALIGN64  __m512d const result = nico_log_1_wo_checks_AVX512(a_aligned);
-        if (__builtin_expect(ordinary_lanes != 0xff, 0)) return nico_log_exceptional_lanes_AVX512(a_aligned,
-                result, ordinary_lanes);
-        return result;
-
-}
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE      __m512d nico_log_1_AVX512(const __m512d a ) {
+//
+//         ALIGN64  __m512d const a_aligned = a;
+//
+//         // The mantissa/exponent shortcut assumes a positive NORMAL double.
+//         // A single unsigned interval test covers positive normal doubles, excluding infinity/NaN.
+//         const __mmask8 ordinary_lanes = _mm512_cmp_epu64_mask(
+//             _mm512_sub_epi64(_mm512_castpd_si512(a_aligned), _mm512_set1_epi64(0x0010000000000000)),
+//             _mm512_set1_epi64(0x7fe0000000000000), _MM_CMPINT_LT);
+//         ALIGN64  __m512d const result = nico_log_1_wo_checks_AVX512(a_aligned);
+//         if (__builtin_expect(ordinary_lanes != 0xff, 0)) return nico_log_exceptional_lanes_AVX512(a_aligned,
+//                 result, ordinary_lanes);
+//         return result;
+//
+// }
 
 // double-precision log (fdlibm, one division per vector) with the same scalar repair of non-normal / non-positive lanes
 ALWAYS_INLINE __m512d nico_log_1_double_precision_AVX512(const __m512d a) {
@@ -582,31 +585,32 @@ ALWAYS_INLINE __m512d nico_log_1_double_precision_AVX512(const __m512d a) {
 
 ///////  compute log(1+x) without losing precision for small values of x.
 /////see: https://www.johndcook.com/cpp_log_one_plus_x.html 
-ALWAYS_INLINE      __m512d nico_log1p_1_AVX512(const __m512d x)   {
-
-  ALIGN64  __m512d const x_aligned = x;
-  
-  ALIGN64  __m512d const minus_one  =  _mm512_set1_pd(-1.0);
-  ALIGN64  __m512d const minus_one_half  =  _mm512_set1_pd(-0.50);
-  ALIGN64  __m512d const small =  _mm512_set1_pd(1e-4);
-  
-  /// if x <= -1.0
-  const __mmask8 is_x_le_or_eq_to_m1_mask =     _mm512_cmp_pd_mask(x_aligned,  minus_one, _CMP_LE_OQ);
-  //// if abs(x) > small
-  const __mmask8 is_abs_x_gr_1e_m_4_mask  =     _mm512_cmp_pd_mask(_mm512_abs_pd(x_aligned), small, _CMP_GT_OQ);
-  
-  return  _mm512_mask_blend_pd(is_x_le_or_eq_to_m1_mask,              // is x <= -1? (i.e., is x+1 <= 0?)
-                               _mm512_mask_blend_pd(is_abs_x_gr_1e_m_4_mask,
-                                                     // if "is_x_le_or_eq_to_m1_mask" is FALSE (i.e., x+1 > 0)
-                                                    _mm512_mul_pd(_mm512_fmadd_pd(minus_one_half, x_aligned,
-                                                            _mm512_set1_pd(1.0)), x_aligned),
-                                                    // if x > 1e-4 - evaluate using normal log fn!
-                                                    nico_log_1_AVX512(_mm512_add_pd(x_aligned,  _mm512_set1_pd(
-                                                            1.0)))),
-                               // if FALSE (i.e., x+1  > 0 ) then still pass onto normal log fn as this will handle NaNs etc!
-                               nico_log_1_AVX512(_mm512_add_pd(x_aligned,  _mm512_set1_pd(1.0)))) ;
-  
-}
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE      __m512d nico_log1p_1_AVX512(const __m512d x)   {
+//
+//   ALIGN64  __m512d const x_aligned = x;
+//
+//   ALIGN64  __m512d const minus_one  =  _mm512_set1_pd(-1.0);
+//   ALIGN64  __m512d const minus_one_half  =  _mm512_set1_pd(-0.50);
+//   ALIGN64  __m512d const small =  _mm512_set1_pd(1e-4);
+//
+//   /// if x <= -1.0
+//   const __mmask8 is_x_le_or_eq_to_m1_mask =     _mm512_cmp_pd_mask(x_aligned,  minus_one, _CMP_LE_OQ);
+//   //// if abs(x) > small
+//   const __mmask8 is_abs_x_gr_1e_m_4_mask  =     _mm512_cmp_pd_mask(_mm512_abs_pd(x_aligned), small, _CMP_GT_OQ);
+//
+//   return  _mm512_mask_blend_pd(is_x_le_or_eq_to_m1_mask,              // is x <= -1? (i.e., is x+1 <= 0?)
+//                                _mm512_mask_blend_pd(is_abs_x_gr_1e_m_4_mask,
+//                                                      // if "is_x_le_or_eq_to_m1_mask" is FALSE (i.e., x+1 > 0)
+//                                                     _mm512_mul_pd(_mm512_fmadd_pd(minus_one_half, x_aligned,
+//                                                             _mm512_set1_pd(1.0)), x_aligned),
+//                                                     // if x > 1e-4 - evaluate using normal log fn!
+//                                                     nico_log_1_AVX512(_mm512_add_pd(x_aligned,  _mm512_set1_pd(
+//                                                             1.0)))),
+//                                // if FALSE (i.e., x+1  > 0 ) then still pass onto normal log fn as this will handle NaNs etc!
+//                                nico_log_1_AVX512(_mm512_add_pd(x_aligned,  _mm512_set1_pd(1.0)))) ;
+//
+// }
 
 
 
@@ -649,7 +653,7 @@ ALWAYS_INLINE     __m512d nico_log1m_1_AVX512(const __m512d x)   {
   ALIGN64  __m512d const x_aligned = x;
    
   ALIGN64  __m512d const neg_x =  _mm512_sub_pd(_mm512_setzero_pd(), x_aligned);
-  return nico_log1p_1_AVX512(neg_x) ;  
+  return nico_log1p_1_double_precision_AVX512(neg_x) ;  
   
 } 
 
@@ -672,7 +676,7 @@ ALWAYS_INLINE      __m512d nico_log1p_exp_1_AVX512(const __m512d x)   {
           const __mmask8 is_x_gr_0_mask = _mm512_cmp_pd_mask(x_aligned, _mm512_setzero_pd(), _CMP_GT_OQ);
           ALIGN64  __m512d const argument = _mm512_mask_blend_pd(is_x_gr_0_mask, x_aligned,
                                                          _mm512_sub_pd(_mm512_setzero_pd(), x_aligned));
-          ALIGN64  __m512d const log1p_exp_of_argument = nico_log1p_1_AVX512(nico_exp_1_AVX512(argument));
+          ALIGN64  __m512d const log1p_exp_of_argument = nico_log1p_1_double_precision_AVX512(nico_exp_1_AVX512(argument));
           return _mm512_mask_blend_pd(is_x_gr_0_mask, log1p_exp_of_argument,                      /// if x <= 0
                                       /// if x > 0
                                       _mm512_add_pd(x_aligned, log1p_exp_of_argument));
@@ -700,7 +704,7 @@ ALWAYS_INLINE __m512d nico_log1m_exp_1_AVX512(const __m512d x) {
         ALIGN64  __m512d far_result  = _mm512_setzero_pd();
         ALIGN64  __m512d near_result = _mm512_setzero_pd();
         if (near_zero != 0xff) {
-            far_result = nico_log1p_1_AVX512(_mm512_sub_pd(_mm512_setzero_pd(), nico_exp_1_AVX512(x_aligned)));
+            far_result = nico_log1p_1_double_precision_AVX512(_mm512_sub_pd(_mm512_setzero_pd(), nico_exp_1_AVX512(x_aligned)));
         }
         if (near_zero != 0) {
             ALIGN64  __m512d const u = _mm512_mul_pd(x_aligned, x_aligned);
@@ -740,7 +744,7 @@ ALWAYS_INLINE     __m512d nico_logit_wo_checks_AVX512(const __m512d x)   {
 
    ALIGN64  __m512d const x_aligned = x;
    
-   ALIGN64  __m512d const log_x = nico_log_1_AVX512(x_aligned);
+   ALIGN64  __m512d const log_x = nico_log_1_double_precision_AVX512(x_aligned);
    ALIGN64  __m512d const log_1m_x =  nico_log1m_1_AVX512(x_aligned);
    return  log_x - log_1m_x;
    
@@ -752,7 +756,7 @@ ALWAYS_INLINE     __m512d nico_logit_AVX512(const __m512d x)   {
 
    ALIGN64  __m512d const x_aligned = x;
    
-   ALIGN64  __m512d const log_x = nico_log_1_AVX512(x_aligned);
+   ALIGN64  __m512d const log_x = nico_log_1_double_precision_AVX512(x_aligned);
    ALIGN64  __m512d const log_1m_x =  nico_log1m_1_AVX512(x_aligned);
    return  log_x - log_1m_x;
    
@@ -956,7 +960,7 @@ inline __m512d nico_log_inv_logit_for_x_pos_AVX512(const __m512d x) {
   
       ALIGN64  __m512d const m_x = _mm512_sub_pd(_mm512_setzero_pd(), x_aligned);  // -x
       ALIGN64  __m512d const exp_m_x = nico_exp_1_AVX512(m_x);             // exp(-x)
-      ALIGN64  __m512d const log_sum = nico_log1p_1_AVX512(exp_m_x);       // log(1 + exp(-x))
+      ALIGN64  __m512d const log_sum = nico_log1p_1_double_precision_AVX512(exp_m_x);       // log(1 + exp(-x))
       return _mm512_sub_pd(_mm512_setzero_pd(), log_sum);         // -log(1 + exp(-x))
   
 }
@@ -971,7 +975,7 @@ inline __m512d nico_log_inv_logit_for_x_neg_AVX512(const __m512d x) {
   
       ALIGN64  __m512d const log_eps = _mm512_set1_pd(-18.420680743952367);
       ALIGN64  __m512d const exp_x = nico_exp_1_AVX512(x_aligned);                 // exp(x)
-      ALIGN64  __m512d const log_sum = nico_log1p_1_AVX512(exp_x);        // log(1 + exp(x))
+      ALIGN64  __m512d const log_sum = nico_log1p_1_double_precision_AVX512(exp_x);        // log(1 + exp(x))
       ALIGN64  __m512d const result = _mm512_sub_pd(x_aligned, log_sum);          // x - log(1 + exp(x))
       
       // Blend based on x > log_eps 
@@ -1003,7 +1007,7 @@ inline __m512d nico_log_inv_logit_AVX512(const __m512d x) {
       const __mmask8 is_x_gr_log_eps = _mm512_cmp_pd_mask(x_aligned, _mm512_set1_pd(-18.420680743952367),
               _CMP_GT_OQ);
       ALIGN64  __m512d const log1p_exp_of_argument =
-          nico_log1p_1_AVX512(nico_exp_1_AVX512(_mm512_mask_blend_pd(is_x_ge_0, x_aligned,
+          nico_log1p_1_double_precision_AVX512(nico_exp_1_AVX512(_mm512_mask_blend_pd(is_x_ge_0, x_aligned,
                                                     _mm512_sub_pd(_mm512_setzero_pd(), x_aligned))));
       //// x - log(1 + exp(x)) (x < 0, x > log_eps), x (x <= log_eps), -log(1 + exp(-x)) (x >= 0)
       ALIGN64  __m512d const result_of_x_neg = _mm512_mask_blend_pd(is_x_gr_log_eps, x_aligned,
@@ -1073,7 +1077,7 @@ inline     __m512d  nico_log_inv_logit_for_x_neg_wo_checks_AVX512(const __m512d 
         /// if x > log_eps = -18.420680743952367
         return _mm512_mask_blend_pd(_mm512_cmp_pd_mask(x_aligned,  log_eps, _CMP_GT_OQ),
                                     x_aligned,
-                                    _mm512_sub_pd(x_aligned,   nico_log1p_1_wo_checks_AVX512(
+                                    _mm512_sub_pd(x_aligned,   nico_log1p_1_double_precision_wo_checks_AVX512(
                                             nico_exp_1_wo_checks_AVX512(x_aligned))));
         
 }
@@ -1097,7 +1101,7 @@ inline __m512d nico_log_inv_logit_wo_checks_AVX512(const __m512d x) {
       const __mmask8 is_x_gr_log_eps = _mm512_cmp_pd_mask(x_aligned, _mm512_set1_pd(-18.420680743952367),
               _CMP_GT_OQ);
       ALIGN64  __m512d const log1p_exp_of_argument =
-          nico_log1p_1_wo_checks_AVX512(nico_exp_1_wo_checks_AVX512(_mm512_mask_blend_pd(is_x_ge_0, x_aligned,
+          nico_log1p_1_double_precision_wo_checks_AVX512(nico_exp_1_wo_checks_AVX512(_mm512_mask_blend_pd(is_x_ge_0, x_aligned,
                                                     _mm512_sub_pd(_mm512_setzero_pd(), x_aligned))));
       //// x - log(1 + exp(x)) (x < 0, x > log_eps), x (x <= log_eps), -log(1 + exp(-x)) (x >= 0)
       ALIGN64  __m512d const result_of_x_neg = _mm512_mask_blend_pd(is_x_gr_log_eps, x_aligned,
@@ -1158,13 +1162,13 @@ inline     __m512d  nico_inv_Phi_approx_wo_checks_AVX512(const __m512d x )  {
         
         // logit first
         ALIGN64  __m512d const m_logit_p =
-                nico_log_1_wo_checks_AVX512( _mm512_sub_pd(_mm512_div_pd(_mm512_set1_pd(1.0),  x_aligned),
+                nico_log_1_double_precision_wo_checks_AVX512( _mm512_sub_pd(_mm512_div_pd(_mm512_set1_pd(1.0),  x_aligned),
                         _mm512_set1_pd(1.0) ) );
         // -0.34176618822627863*m_logit_p;
         ALIGN64  __m512d const x_i =  _mm512_mul_pd(m_logit_p, inv_Phi_approx_c1) ;
         // now do arc_sinh part
         ALIGN64  __m512d const asinh_stuff_div_3 =
-                _mm512_mul_pd(  one_third,  nico_log_1_wo_checks_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
+                _mm512_mul_pd(  one_third,  nico_log_1_double_precision_wo_checks_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
         ALIGN64  __m512d const exp_x_i = nico_exp_1_wo_checks_AVX512(asinh_stuff_div_3);
         
         return _mm512_mul_pd(inv_Phi_approx_c2,   _mm512_div_pd(_mm512_sub_pd(_mm512_mul_pd(exp_x_i, exp_x_i), _mm512_set1_pd(1.0)), exp_x_i) );
@@ -1203,12 +1207,12 @@ inline     __m512d  nico_inv_Phi_approx_AVX512(const __m512d x )  {
         
         // log((1-p)/p), stable near 1
         ALIGN64  __m512d const m_logit_p =
-                nico_log_1_AVX512(_mm512_div_pd(_mm512_sub_pd(_mm512_set1_pd(1.0), x_aligned), x_aligned));
+                nico_log_1_double_precision_AVX512(_mm512_div_pd(_mm512_sub_pd(_mm512_set1_pd(1.0), x_aligned), x_aligned));
         // -0.34176618822627863*m_logit_p;
         ALIGN64  __m512d const x_i =  _mm512_mul_pd(m_logit_p, inv_Phi_approx_c1) ;
         // now do arc_sinh part
         ALIGN64  __m512d const asinh_stuff_div_3 =
-                _mm512_mul_pd( one_third,  nico_log_1_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
+                _mm512_mul_pd( one_third,  nico_log_1_double_precision_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
         ALIGN64  __m512d const exp_x_i = nico_exp_1_AVX512(asinh_stuff_div_3);
         
         return    _mm512_mul_pd(inv_Phi_approx_c2,   _mm512_div_pd(_mm512_sub_pd(_mm512_mul_pd(exp_x_i, exp_x_i), _mm512_set1_pd(1.0)), exp_x_i) );
@@ -1239,7 +1243,7 @@ inline      __m512d  nico_inv_Phi_approx_from_logit_prob_wo_checks_AVX512(const 
         ALIGN64  __m512d const x_i =   _mm512_mul_pd(logit_p_aligned, inv_Phi_approx_c1) ;
         // now do arc_sinh part
         ALIGN64  __m512d const asinh_stuff_div_3 =
-                _mm512_mul_pd(one_third,  nico_log_1_wo_checks_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
+                _mm512_mul_pd(one_third,  nico_log_1_double_precision_wo_checks_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
         ALIGN64  __m512d const exp_x_i = nico_exp_1_wo_checks_AVX512(asinh_stuff_div_3);
         
         return _mm512_mul_pd(inv_Phi_approx_c2,   _mm512_div_pd(_mm512_sub_pd(_mm512_mul_pd(exp_x_i, exp_x_i), _mm512_set1_pd(1.0)), exp_x_i) );
@@ -1261,7 +1265,7 @@ inline      __m512d  nico_inv_Phi_approx_from_logit_prob_AVX512(const __m512d lo
         ALIGN64  __m512d const x_i =   _mm512_mul_pd(logit_p_aligned,  inv_Phi_approx_c1) ;
         // now do arc_sinh part
         ALIGN64  __m512d const asinh_stuff_div_3 =
-                _mm512_mul_pd(one_third,  nico_log_1_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
+                _mm512_mul_pd(one_third,  nico_log_1_double_precision_AVX512(  _mm512_add_pd(x_i, (  _mm512_sqrt_pd(  _mm512_fmadd_pd(x_i, x_i, _mm512_set1_pd(1.0)) ) )  ) ) ) ;
         ALIGN64  __m512d const exp_x_i = nico_exp_1_AVX512(asinh_stuff_div_3);
         
         return _mm512_mul_pd(inv_Phi_approx_c2,   _mm512_div_pd(_mm512_sub_pd(_mm512_mul_pd(exp_x_i, exp_x_i), _mm512_set1_pd(1.0)), exp_x_i) );
@@ -1343,7 +1347,7 @@ ALWAYS_INLINE       __m512d    nico_tanh_wo_checks_AVX512( const  __m512d x  )  
 
 
 // from: https://stackoverflow.com/questions/57870896/writing-a-portable-sse-avx-version-of-stdcopysign
-ALWAYS_INLINE     __m512d CopySign( const __m512d srcSign, 
+ALWAYS_INLINE     __m512d nico_copy_sign( const __m512d srcSign, 
                                     const __m512d srcValue) {
 
         ALIGN64  __m512d const srcSign_aligned = srcSign;
@@ -1924,7 +1928,7 @@ ALWAYS_INLINE __m512d nico_inv_Phi_wo_checks_case_2_AVX512( const __m512d p,
         const __mmask8 q_pos = _mm512_cmp_pd_mask(q_aligned, zero, _CMP_GT_OQ);
         // q>0 -> 1-p, else p
         ALIGN64  __m512d r = _mm512_mask_blend_pd(q_pos, p_aligned, _mm512_sub_pd(one, p_aligned));
-        r = _mm512_sqrt_pd(_mm512_sub_pd(zero, nico_log_1_AVX512(r)));
+        r = _mm512_sqrt_pd(_mm512_sub_pd(zero, nico_log_1_double_precision_AVX512(r)));
         const __mmask8 r_gr_5 = _mm512_cmp_pd_mask(r, _mm512_set1_pd(5.0), _CMP_GT_OQ);
         ALIGN64  __m512d val = nico_inv_Phi_wo_checks_case_2a_AVX512(p_aligned, r);                // r <= 5
         // No need to evaluate the extreme-tail polynomial unless a lane will actually use it.
@@ -2157,16 +2161,16 @@ ALWAYS_INLINE __m512d nico_log_Phi_AVX512(const __m512d x) {
       const __mmask8 is_tail  = _mm512_cmp_pd_mask(x_aligned, _mm512_sub_pd(_mm512_setzero_pd(), thresh),
               _CMP_LT_OQ);
       // no tail lane: body only
-      if (is_tail == 0) return nico_log_1_AVX512(nico_Phi_AVX512(x_aligned));
+      if (is_tail == 0) return nico_log_1_double_precision_AVX512(nico_Phi_AVX512(x_aligned));
       ALIGN64  __m512d const ax       = _mm512_abs_pd(x_aligned);
       ALIGN64  __m512d const R        = _mm512_div_pd(_mm512_set1_pd(1.0),
                                               nico_inverse_mills_ratio_tail_AVX512(_mm512_max_pd(ax, thresh)));
       ALIGN64  __m512d const log_tail = _mm512_add_pd(_mm512_fnmadd_pd(_mm512_set1_pd(0.5), _mm512_mul_pd(
               x_aligned, x_aligned),
                                                                _mm512_set1_pd(NEG_HALF_LOG_2PI)),
-                                              nico_log_1_AVX512(R));
+                                              nico_log_1_double_precision_AVX512(R));
       if (is_tail == 0xff) return log_tail;                                            // every lane in the tail
-      ALIGN64  __m512d const log_body = nico_log_1_AVX512(nico_Phi_AVX512(x_aligned));
+      ALIGN64  __m512d const log_body = nico_log_1_double_precision_AVX512(nico_Phi_AVX512(x_aligned));
       return _mm512_mask_blend_pd(is_tail, log_body, log_tail);
 
 }
@@ -2309,18 +2313,18 @@ using nico::math::nico_ldexp;
 using nico::math::nico_exp_1_wo_checks_AVX512;
 using nico::math::nico_exp_exceptional_lanes_AVX512;
 using nico::math::nico_exp_1_AVX512;
-using nico::math::nico_log_1_wo_checks_AVX512;
+// using nico::math::nico_log_1_wo_checks_AVX512;
 using nico::math::nico_log_reduce_AVX512;
 using nico::math::nico_log_fdlibm_core_AVX512;
 using nico::math::nico_log_1_double_precision_wo_checks_AVX512;
-using nico::math::nico_log1p_1_wo_checks_AVX512;
+// using nico::math::nico_log1p_1_wo_checks_AVX512;
 using nico::math::nico_log1p_1_double_precision_wo_checks_AVX512;
 using nico::math::nico_log1m_1_wo_checks_AVX512;
 using nico::math::nico_log1p_exp_1_wo_checks_AVX512;
 using nico::math::nico_log_exceptional_lanes_AVX512;
-using nico::math::nico_log_1_AVX512;
+// using nico::math::nico_log_1_AVX512;
 using nico::math::nico_log_1_double_precision_AVX512;
-using nico::math::nico_log1p_1_AVX512;
+// using nico::math::nico_log1p_1_AVX512;
 using nico::math::nico_log1p_exceptional_lanes_AVX512;
 using nico::math::nico_log1p_1_double_precision_AVX512;
 using nico::math::nico_log1m_1_AVX512;
@@ -2350,7 +2354,7 @@ using nico::math::nico_log_Phi_approx_wo_checks_AVX512;
 using nico::math::nico_log_Phi_approx_AVX512;
 using nico::math::nico_tanh_AVX512;
 using nico::math::nico_tanh_wo_checks_AVX512;
-using nico::math::CopySign;
+using nico::math::nico_copy_sign;
 using nico::math::nico_Phi_wo_checks_AVX512;
 using nico::math::nico_Phi_AVX512;
 using nico::math::nico_inv_Phi_wo_checks_case_2a_AVX512;

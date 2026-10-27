@@ -63,7 +63,109 @@ namespace nico::math {
 namespace fused_weibull {
 
 // ---- SIMD helpers, of the same width as the kernels: 8 lanes (AVX-512) or 4 lanes (AVX2)
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+using simd_mask_t = bool;
+ALWAYS_INLINE simd_t simd_set1(const double x) {
+
+    return x;
+
+}
+ALWAYS_INLINE simd_t simd_add(const simd_t a,
+                              const simd_t b) {
+
+    return a + b;
+
+}
+ALWAYS_INLINE simd_t simd_sub(const simd_t a,
+                              const simd_t b) {
+
+    return a - b;
+
+}
+ALWAYS_INLINE simd_t simd_mul(const simd_t a,
+                              const simd_t b) {
+
+    return a * b;
+
+}
+ALWAYS_INLINE simd_t simd_div(const simd_t a,
+                              const simd_t b) {
+
+    return a / b;
+
+}
+ALWAYS_INLINE simd_t simd_fmsub(simd_t a,
+                                simd_t b,
+                                simd_t c) {
+
+    return std::fma(a, b, -c);
+
+}
+ALWAYS_INLINE simd_t simd_fnmadd(simd_t a,
+                                 simd_t b,
+                                 simd_t c) {
+
+    return std::fma(-a, b, c);
+
+}
+ALWAYS_INLINE double simd_sum_of_lanes(const simd_t a) {
+
+    return a;
+
+}
+ALWAYS_INLINE simd_mask_t simd_mask_of_all_lanes() {
+
+    return true;
+
+}
+ALWAYS_INLINE simd_mask_t simd_mask_of_no_lanes() {
+
+    return false;
+
+}
+ALWAYS_INLINE simd_mask_t simd_mask_and(const simd_mask_t a,
+                                        const simd_mask_t b) {
+
+    return a && b;
+
+}
+ALWAYS_INLINE simd_mask_t simd_mask_or(const simd_mask_t a,
+                                       const simd_mask_t b) {
+
+    return a || b;
+
+}
+ALWAYS_INLINE bool simd_mask_is_all_lanes(const simd_mask_t m) {
+
+    return m;
+
+}
+ALWAYS_INLINE bool simd_mask_is_any_lane(const simd_mask_t m) {
+
+    return m;
+
+}
+ALWAYS_INLINE simd_mask_t simd_lanes_finite(const simd_t x) {
+
+    return std::fabs(x) < INFINITY;
+
+}
+ALWAYS_INLINE simd_mask_t simd_lanes_positive_and_finite(const simd_t x) {
+
+    return (x > 0.0) && (x < INFINITY);
+
+}
+ALWAYS_INLINE simd_mask_t simd_lanes_nonnegative(const simd_t x) {
+
+    return x >= 0.0;
+
+}
+ALWAYS_INLINE simd_mask_t simd_lanes_negative(const simd_t x) {
+
+    return x < 0.0;
+
+}
+#elif BMVP_LANES == 8
 using simd_mask_t = __mmask8;                                   // bit k: lane k
 ALWAYS_INLINE simd_t simd_set1(const double x)                               { return _mm512_set1_pd(x); }
 ALWAYS_INLINE simd_t simd_add(const simd_t a, const simd_t b)                { return _mm512_add_pd(a, b); }
@@ -152,7 +254,7 @@ ALWAYS_INLINE simd_mask_t simd_lanes_negative(const simd_t x) {
 //      double-precision nico_log_1_double_precision (below 1 ulp). Compiled with
 //      -DBAYESMVP_FUSED_WEIBULL_USE_STD_LOG_AND_EXP, lane-wise std::log / std::exp are used instead (slow): the
 //      correctness check of the fused algebra and partials against Stan, without the kernels' approximation.
-#ifdef BAYESMVP_FUSED_WEIBULL_USE_STD_LOG_AND_EXP
+#if defined(BAYESMVP_FUSED_WEIBULL_USE_STD_LOG_AND_EXP) || defined(NICO_SIMD_SCALAR_KERNELS)
 ALWAYS_INLINE simd_t simd_log(const simd_t x) {
 
     alignas(64) double lanes[BMVP_LANES];

@@ -24,7 +24,7 @@
 //         (d) reduce_sum_static on a thread whose arena has 1 thread (NicoStan's arena of a chain with 1 thread
 //             per chain, NICOSTAN_PER_CHAIN_TBB_ARENA=1): the chunks, the bodies and the joins in exactly the
 //             tree of TBB's parallel_deterministic_reduce with its simple_partitioner (the range halved until a
-//             piece has at most grainsize terms; the left half keeps the body, the right half gets a new body,
+//             piece has at most chunk_size terms; the left half keeps the body, the right half gets a new body,
 //             then left.join(right)), on the thread itself, without TBB's tasks;
 //         every value and every adjoint is added in the same order as before, so the log density and the
 //         gradient are the same to the last bit;
@@ -885,7 +885,7 @@ struct reduce_sum_impl<ReduceFunction, require_var_t<ReturnType>, ReturnType,
   /**
    * reduce_sum_static on a thread whose arena has 1 thread: the chunks, the bodies and the joins of TBB's
    *  parallel_deterministic_reduce with its simple_partitioner, in its own tree, on this thread (TBB 2020:
-   *  simple_partition_type::execute halves the range while it has more than grainsize terms; at each halving
+   *  simple_partition_type::execute halves the range while it has more than chunk_size terms; at each halving
    *  the left half keeps the body and the right half gets a new body split from it, and the finish task does
    *  left.join(right) after both halves are done). The sum and the adjoints are added in exactly the same order.
    */
@@ -1143,22 +1143,22 @@ struct reduce_sum_impl<ReduceFunction, require_var_t<ReturnType>, ReturnType,
    * instances. Results are stored as precomputed varis in the autodiff tree.
    *
    * If auto partitioning is true, break work into pieces automatically,
-   *  taking grainsize as a recommended work size. The partitioning is
+   *  taking chunk_size as a recommended work size. The partitioning is
    *  not deterministic nor is the order guaranteed in which partial
    *  sums are accumulated. Due to floating point imprecisions this will likely
    *  lead to slight differences in the accumulated results between
    *  multiple runs. If false, break work deterministically into pieces smaller
-   *  than or equal to grainsize and accumulate all the partial sums
+   *  than or equal to chunk_size and accumulate all the partial sums
    *  in the same order. This still may not achieve bitwise reproducibility.
    *
    * @param vmapped Vector containing one element per term of sum
    * @param auto_partitioning Work partitioning style
-   * @param grainsize Suggested grainsize for tbb
+   * @param chunk_size Suggested chunk_size for tbb
    * @param[in, out] msgs The print stream for warning messages
    * @param args Shared arguments used in every sum term
    * @return Summation of all terms
    */
-  inline var operator()(Vec&& vmapped, bool auto_partitioning, int grainsize,
+  inline var operator()(Vec&& vmapped, bool auto_partitioning, int chunk_size,
                         std::ostream* msgs, Args&&... args) const {
 
     if (vmapped.empty()) {
@@ -1195,7 +1195,7 @@ struct reduce_sum_impl<ReduceFunction, require_var_t<ReturnType>, ReturnType,
 #if NICOSTAN_REDUCE_SUM_WITH_LESS_FIXED_WORK_PER_CHUNK
       worker.copy_the_shared_arguments_in_each_chunk_ = !auto_partitioning;
       if (!auto_partitioning && tbb::this_task_arena::max_concurrency() == 1) {
-        tbb::blocked_range<std::size_t> range(0, num_terms, grainsize);
+        tbb::blocked_range<std::size_t> range(0, num_terms, chunk_size);
         nicostan_reduce_in_the_tree_of_tbbs_deterministic_reduce_on_this_thread(range, worker);
       } else {
 #endif
@@ -1208,11 +1208,11 @@ struct reduce_sum_impl<ReduceFunction, require_var_t<ReturnType>, ReturnType,
       tbb::this_task_arena::isolate([&] {
         if (auto_partitioning) {
           tbb::parallel_reduce(
-              tbb::blocked_range<std::size_t>(0, num_terms, grainsize), worker);
+              tbb::blocked_range<std::size_t>(0, num_terms, chunk_size), worker);
         } else {
           tbb::simple_partitioner partitioner;
           tbb::parallel_deterministic_reduce(
-              tbb::blocked_range<std::size_t>(0, num_terms, grainsize), worker,
+              tbb::blocked_range<std::size_t>(0, num_terms, chunk_size), worker,
               partitioner);
         }
       });

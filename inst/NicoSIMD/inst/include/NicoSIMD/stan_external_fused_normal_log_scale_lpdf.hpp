@@ -102,7 +102,9 @@ inline void copy_values(const Values& values, std::size_t n,
 
 inline simd_t simd_set1(double value) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+  return value;
+#elif BMVP_LANES == 8
   return _mm512_set1_pd(value);
 #else
   return _mm256_set1_pd(value);
@@ -110,9 +112,12 @@ inline simd_t simd_set1(double value) {
 
 }
 
-inline simd_t simd_sub(simd_t left, simd_t right) {
+inline simd_t simd_sub(simd_t left,
+                       simd_t right) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+  return left - right;
+#elif BMVP_LANES == 8
   return _mm512_sub_pd(left, right);
 #else
   return _mm256_sub_pd(left, right);
@@ -120,9 +125,12 @@ inline simd_t simd_sub(simd_t left, simd_t right) {
 
 }
 
-inline simd_t simd_mul(simd_t left, simd_t right) {
+inline simd_t simd_mul(simd_t left,
+                       simd_t right) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+  return left * right;
+#elif BMVP_LANES == 8
   return _mm512_mul_pd(left, right);
 #else
   return _mm256_mul_pd(left, right);
@@ -130,9 +138,12 @@ inline simd_t simd_mul(simd_t left, simd_t right) {
 
 }
 
-inline simd_t simd_div(simd_t left, simd_t right) {
+inline simd_t simd_div(simd_t left,
+                       simd_t right) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+  return left / right;
+#elif BMVP_LANES == 8
   return _mm512_div_pd(left, right);
 #else
   return _mm256_div_pd(left, right);
@@ -140,15 +151,44 @@ inline simd_t simd_div(simd_t left, simd_t right) {
 
 }
 
-inline simd_t simd_add(simd_t left, simd_t right) {
+inline simd_t simd_add(simd_t left,
+                       simd_t right) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+  return left + right;
+#elif BMVP_LANES == 8
   return _mm512_add_pd(left, right);
 #else
   return _mm256_add_pd(left, right);
 #endif
 
 }
+
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+inline simd_t simd_exp(const simd_t x) {
+
+  return std::exp(x);
+
+}
+
+inline simd_t simd_log(const simd_t x) {
+
+  return std::log(x);
+
+}
+#else
+inline simd_t simd_exp(const simd_t x) {
+
+  return BMVP_KERNEL_NAME(nico_exp_1)(x);
+
+}
+
+inline simd_t simd_log(const simd_t x) {
+
+  return BMVP_KERNEL_NAME(nico_log_1_double_precision)(x);
+
+}
+#endif
 
 inline double simd_sum(simd_t values) {
 
@@ -366,7 +406,7 @@ inline double primitive_lpdf(const YValues& y_values, const MuValues& mu_values,
             scale_values, i, scale_buffer);
         sum_log_scale_vector = simd_add(sum_log_scale_vector,
                                         log_scale_values);
-        inverse_scale = BMVP_KERNEL_NAME(nico_exp_1)(
+        inverse_scale = simd_exp(
             simd_sub(simd_set1(0.0), log_scale_values));
       } else {
         inverse_scale = simd_set1(std::exp(-scalar_scale));
@@ -376,7 +416,7 @@ inline double primitive_lpdf(const YValues& y_values, const MuValues& mu_values,
           scale_values, i, scale_buffer);
       inverse_scale = simd_div(simd_set1(1.0), scale);
       sum_log_scale_vector = simd_add(
-          sum_log_scale_vector, BMVP_KERNEL_NAME(nico_log_1)(scale));
+          sum_log_scale_vector, simd_log(scale));
     } else {
       inverse_scale = simd_set1(1.0 / scalar_scale);
     }
@@ -702,7 +742,7 @@ inline stan::return_type_t<T_y, T_loc, T_scale> reverse_lpdf_custom(
             scale_values, i, scale_buffer);
         sum_log_scale_vector = simd_add(sum_log_scale_vector,
                                         log_scale_values);
-        inverse_scale = BMVP_KERNEL_NAME(nico_exp_1)(
+        inverse_scale = simd_exp(
             simd_sub(simd_set1(0.0), log_scale_values));
       } else {
         inverse_scale = simd_set1(std::exp(-scalar_scale_value));
@@ -712,7 +752,7 @@ inline stan::return_type_t<T_y, T_loc, T_scale> reverse_lpdf_custom(
           scale_values, i, scale_buffer);
       inverse_scale = simd_div(simd_set1(1.0), scale_values_block);
       sum_log_scale_vector = simd_add(
-          sum_log_scale_vector, BMVP_KERNEL_NAME(nico_log_1)(
+          sum_log_scale_vector, simd_log(
               scale_values_block));
     } else {
       inverse_scale = simd_set1(1.0 / scalar_scale_value);
@@ -847,7 +887,7 @@ inline stan::return_type_t<T_y, T_loc, T_scale> reverse_lpdf_legacy(
             scale_values, i, scale_buffer);
         sum_log_scale_vector = simd_add(sum_log_scale_vector,
                                         log_scale_values);
-        inverse_scale = BMVP_KERNEL_NAME(nico_exp_1)(
+        inverse_scale = simd_exp(
             simd_sub(simd_set1(0.0), log_scale_values));
       } else {
         inverse_scale = simd_set1(std::exp(-scalar_scale_value));
@@ -857,7 +897,7 @@ inline stan::return_type_t<T_y, T_loc, T_scale> reverse_lpdf_legacy(
           scale_values, i, scale_buffer);
       inverse_scale = simd_div(simd_set1(1.0), scale_values_block);
       sum_log_scale_vector = simd_add(
-          sum_log_scale_vector, BMVP_KERNEL_NAME(nico_log_1)(
+          sum_log_scale_vector, simd_log(
               scale_values_block));
     } else {
       inverse_scale = simd_set1(1.0 / scalar_scale_value);

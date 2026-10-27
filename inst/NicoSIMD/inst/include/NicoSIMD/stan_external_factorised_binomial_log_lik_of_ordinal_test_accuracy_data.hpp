@@ -43,9 +43,10 @@
 //                      (log choose(n, x)), as safe_binomial_lpmf.
 //
 // Phi and inv_logit with BayesMVP's SIMD kernels over every element at once (the same kernels as nico_Phi and
-// nico_inv_logit), the logs of the probabilities of all the terms with the log and log1m kernels (as
-// nico_binomial_lpmf), and log choose(n, x) from nico_binomial_lpmf's table of log factorials. The latent values
-// are computed with the same arithmetic, in the same order, as the Stan functions (so they are the same doubles).
+// nico_inv_logit), the logs of the probabilities of all the terms with the log kernel and the double-precision
+// log1m (as nico_binomial_lpmf), and log choose(n, x) from nico_binomial_lpmf's table of log factorials. The
+// latent values are computed with the same arithmetic, in the same order, as the Stan functions (so they are the
+// same doubles).
 //
 // Declared in the Stan functions block (no body; stanc --allow-undefined) as any of
 //
@@ -194,13 +195,13 @@ inline std::vector<std::vector<Eigen::Matrix<double, -1, -1>>> factorised_binomi
             }
         }
     }
-    //// (the log probabilities of all the terms at once, with the log and log1m kernels)
+    //// (the log probabilities of all the terms at once, with the log kernel and the double-precision log1m)
     const int n_terms = static_cast<int>(p_of_each_term.size());
     log_p_of_each_term = p_of_each_term;
     log1m_p_of_each_term = p_of_each_term;
     if (n_terms > 0) {
         nico::math::k_log(log_p_of_each_term.data(), n_terms);
-        nico::math::k_log1m(log1m_p_of_each_term.data(), n_terms);
+        binomial::log1m_in_double_precision(log1m_p_of_each_term.data(), n_terms);
     }
     const double* table = binomial::table_of_log_factorials();
     for (int i = 0; i < n_terms; ++i) {

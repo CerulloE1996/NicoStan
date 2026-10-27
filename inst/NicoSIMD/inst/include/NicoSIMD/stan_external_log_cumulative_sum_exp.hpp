@@ -116,6 +116,10 @@ inline double values_and_factors(const double* x, const int M, const double log_
         const simd_t maximum = nico_load_prefix_packet(L + first, lanes, 0.0);
         const simd_t sum = nico_load_prefix_packet(share + first, lanes, 1.0);
         const simd_t argument = nico_load_prefix_packet(x + first, lanes, 0.0);
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+        const simd_t value = maximum + std::log(sum);
+        const simd_t share_value = nico_exp_of_nonpositive_prefix_argument(argument - maximum) / sum;
+#else
         const simd_t log_sum = BMVP_KERNEL_NAME(nico_log_1_double_precision_wo_checks)(sum);
 #if BMVP_LANES == 8
         const simd_t value = _mm512_add_pd(maximum, log_sum);
@@ -125,6 +129,7 @@ inline double values_and_factors(const double* x, const int M, const double log_
         const simd_t value = _mm256_add_pd(maximum, log_sum);
         const simd_t share_value = _mm256_div_pd(
               nico_exp_of_nonpositive_prefix_argument(_mm256_sub_pd(argument, maximum)), sum);
+#endif
 #endif
         nico_store_prefix_packet(L + first, lanes, value);
         nico_store_prefix_packet(share + first, lanes, share_value);

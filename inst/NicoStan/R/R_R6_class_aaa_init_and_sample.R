@@ -132,6 +132,8 @@ MVP_model <- R6Class("MVP_model",
                           stanc_args = NULL,
                           #'@field make_args C++/make arguments used to compile the generated C++ of the Stan model (e.g. list("STAN_THREADS=true")); distinct from stanc_args.
                           make_args = NULL,
+                          #'@field auto_chunking TRUE (the default): AUTO-CHUNKING of the model's own Stan file; FALSE: off
+                          auto_chunking = NULL,
                           #'@field Stan_cpp_user_header User C++ header file path
                           Stan_cpp_user_header = NULL,
                           #'@field Stan_cpp_flags C++ compiler flags
@@ -371,6 +373,7 @@ MVP_model <- R6Class("MVP_model",
                                                 Stan_cpp_flags = NULL,
                                                 stanc_args = NULL,
                                                 make_args = NULL,
+                                                auto_chunking = TRUE,
                                                 ##
                                                 Stan_model_math_functions = "Stan_math",
                                                 BayesMVP_AVX_headers_folder = NULL,
@@ -421,6 +424,7 @@ MVP_model <- R6Class("MVP_model",
                                     self$Stan_cpp_flags <- Stan_cpp_flags
                                     self$stanc_args <- stanc_args
                                     self$make_args <- make_args
+                                    self$auto_chunking <- auto_chunking
                                     ##
                                     self$Stan_model_math_functions <-  Stan_model_math_functions
                                     self$BayesMVP_AVX_headers_folder <-  BayesMVP_AVX_headers_folder
@@ -455,6 +459,7 @@ MVP_model <- R6Class("MVP_model",
                                                                                     Stan_cpp_flags = Stan_cpp_flags,
                                                                                     stanc_args = stanc_args,
                                                                                     make_args = make_args,
+                                                                                    auto_chunking = auto_chunking,
                                                                                     ##
                                                                                     Stan_model_math_functions =
                                                                                       Stan_model_math_functions,
@@ -481,6 +486,7 @@ MVP_model <- R6Class("MVP_model",
                                       self$Stan_cpp_flags <- self$init_object$Stan_cpp_flags
                                       self$stanc_args <- self$init_object$stanc_args
                                       self$make_args <- self$init_object$make_args
+                                      self$auto_chunking <- self$init_object$auto_chunking
                                       ##
                                       ## (the AVX version of the Stan model, kept here: the init_object which
                                       ##  $sample() returns compiles the AVX version as it is given, so it does
@@ -883,6 +889,9 @@ MVP_model <- R6Class("MVP_model",
                           #'chains, 19 of 16 chains).
                           #'@param n_eps_calibration_blocks Number of calibration blocks (default 4): the eps of
                           #'each block after the first comes from the curve fitted to the blocks before it.
+                          #'@param max_n_iter_of_eps_calibration_call Most iterations of the calibration call
+                          #'(default 50): its blocks are cut to this many iterations in all, whatever the number
+                          #'of sampling chains (e.g. 8 iterations of 180 chains, 50 of 4 chains).
                           #'@param repeat_sampling_with_eps_refitted_if_mean_acceptance_outside NULL (default) or
                           #'c(lower, upper): when the mean sampling acceptance probability (over every sampling
                           #'chain and iteration) is outside these bounds, the sampling eps is refitted from the
@@ -936,6 +945,9 @@ MVP_model <- R6Class("MVP_model",
                           ## @param metric_update_rescales_eps_and_tau TRUE (default): each metric update
                           ## rescales eps and tau, so that the leapfrog steps per trajectory do not change with
                           ## the scale of the metric; FALSE: no rescale.
+                          ## @param M_update_rescale_guard c(0.5, 2.0) (default): a metric update's rescale of
+                          ## eps and tau is applied only when its factor lies within these inclusive bounds; a
+                          ## factor outside them skips that rescale, and the metric update itself still happens.
                           #'@param learning_rate_initial_n_tau_updates_held_from_tau_handover NULL (default) = no
                           #'hold; a whole number k holds the tau learning rate at learning_rate_initial for the
                           #'first k tau updates after the handover.
@@ -1280,6 +1292,7 @@ MVP_model <- R6Class("MVP_model",
                                               calibrate_eps_on_sampling_chains_before_sampling = TRUE,
                                               n_transitions_per_eps_calibration_block = 300,
                                               n_eps_calibration_blocks = 4,
+                                              max_n_iter_of_eps_calibration_call = 50,
                                               repeat_sampling_with_eps_refitted_if_mean_acceptance_outside = NULL,
                                               n_eps_refits_and_repeated_samplings = 2,
                                               set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains =
@@ -1301,6 +1314,7 @@ MVP_model <- R6Class("MVP_model",
                                               metric_update_rescales_eps_and_tau = TRUE,
                                               ## (FALSE: the setting is not used)
                                               # metric_update_rescales_eps_and_tau = FALSE,
+                                              M_update_rescale_guard = c(0.5, 2.0),
                                               learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                               resident_burnin = TRUE,
                                               resident_burnin_joint_block = TRUE,
@@ -1377,6 +1391,7 @@ MVP_model <- R6Class("MVP_model",
                                                                         Stan_cpp_flags = self$Stan_cpp_flags,
                                                                         stanc_args = self$stanc_args,
                                                                         make_args = self$make_args,
+                                                                        auto_chunking = self$auto_chunking,
                                                                         ##
                                                                         Stan_model_math_functions =
                                                                           Stan_model_math_functions,
@@ -1394,6 +1409,7 @@ MVP_model <- R6Class("MVP_model",
                               self$Stan_cpp_flags <- self$init_object$Stan_cpp_flags
                               self$stanc_args <- self$init_object$stanc_args
                               self$make_args <- self$init_object$make_args
+                              self$auto_chunking <- self$init_object$auto_chunking
                               ##
                               self$BayesMVP_AVX_version_of_Stan_model <-
                                     self$init_object$BayesMVP_AVX_version_of_Stan_model
@@ -1491,6 +1507,7 @@ MVP_model <- R6Class("MVP_model",
                               calibrate_eps_on_sampling_chains_before_sampling,
                         n_transitions_per_eps_calibration_block = n_transitions_per_eps_calibration_block,
                         n_eps_calibration_blocks = n_eps_calibration_blocks,
+                        max_n_iter_of_eps_calibration_call = max_n_iter_of_eps_calibration_call,
                         repeat_sampling_with_eps_refitted_if_mean_acceptance_outside =
                               repeat_sampling_with_eps_refitted_if_mean_acceptance_outside,
                         n_eps_refits_and_repeated_samplings = n_eps_refits_and_repeated_samplings,
@@ -1514,6 +1531,7 @@ MVP_model <- R6Class("MVP_model",
                         pooled_metric_weight_k_draws = pooled_metric_weight_k_draws,
                         pooled_metric_signal_to_noise_centred = pooled_metric_signal_to_noise_centred,
                         metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
+                        M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =
                               learning_rate_initial_n_tau_updates_held_from_tau_handover,
                         resident_burnin = resident_burnin,

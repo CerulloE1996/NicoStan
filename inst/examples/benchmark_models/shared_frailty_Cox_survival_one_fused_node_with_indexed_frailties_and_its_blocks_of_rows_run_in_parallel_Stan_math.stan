@@ -22,9 +22,9 @@
 // with every computation whose cost or tape grows with N vectorised and inside the chunks, and nothing whose
 // size grows with N on the main tape or shared by the chunks. The observations, sorted by decreasing time once
 // (transformed data), are split into N_blocks = ceiling(N / chunk_size) blocks of chunk_size consecutive
-// positions (the last one possibly shorter): the units of reduce_sum_static, with grainsize 1 (one block per
+// positions (the last one possibly shorter): the units of reduce_sum_static, with chunk size 1 (one block per
 // chunk). The units are the blocks, not the observations, so that each chunk starts at a block, whose offset
-// from (2) below is known (with grainsize chunk_size over the observations, reduce_sum_static's chunks need not
+// from (2) below is known (with chunk size chunk_size over the observations, reduce_sum_static's chunks need not
 // start at the blocks).
 // As in LC_MVP_bin_PartialLog_v5_reduce_sum_static.stan: the sliced argument is one single name holding
 // everything per unit, packed_of_block (one row per block, packed once on the main tape: copies of the
@@ -94,7 +94,7 @@
 //   (1) map_rect computes the log of the sum of exp(eta) over each block before the last one, from beta (shared)
 //       and the block's log frailties (its job parameters);
 //   (2) a scan over these N_blocks - 1 block totals gives each block its offset (O(N_blocks) on the main tape);
-//   (3) reduce_sum_static, over log_frailty_of_block with grainsize 1 (one block per chunk), computes each
+//   (3) reduce_sum_static, over log_frailty_of_block with chunk size 1 (one block per chunk), computes each
 //       block's eta again, its numerators, and its own part of the scan from its offset with the scalar
 //       log_sum_exp recursion (one node per observation, as in shared_frailty_Cox_survival.stan), and its
 //       denominators.
@@ -110,7 +110,7 @@
 //       and log_sum_exp on its own nested autodiff tape; one node per block on the main tape);
 //   (2) a scan over these N_blocks - 1 block totals gives each block its offset, the log of the sum of exp(eta)
 //       over every observation before it (O(N_blocks) on the main tape);
-//   (3) reduce_sum_static, over the block indices with grainsize 1 (one block per chunk), computes each block's
+//   (3) reduce_sum_static, over the block indices with chunk size 1 (one block per chunk), computes each block's
 //       eta again, its numerators, its own part of the scan started from its offset, and its denominators.
 // The partial likelihood is written as a weighted sum over the positions in decreasing order of time,
 // sum(event * eta) - sum(w * log_cumulative_risk), with w[k] the number of events whose risk set ends at
@@ -149,7 +149,7 @@
 // The tape-chunked model of NicoStan's O(N^2) example is kept below, commented out; its header was (the next five
 // lines):
 // Tape-chunked version of Frailty_surv_shared_frailty_Cox.stan: the same log density, with the
-// partial likelihood summed over the events by reduce_sum_static, in chunks of grainsize events (data), so that
+// partial likelihood summed over the events by reduce_sum_static, in chunks of chunk_size events (data), so that
 // each chunk's autodiff tape is built, differentiated and released before the next one (the
 // chunking paper's chunking;
 // N_chunks from NicoStan::fn_compute_initial_N_chunks()). Each event's term is computed exactly as in the
@@ -227,7 +227,7 @@ functions {
         return append_array(columns_as_array_of_vectors(m, first, middle),
                             columns_as_array_of_vectors(m, middle + 1, last));
     }
-    // (3) the terms of the blocks start to end (one block per chunk with grainsize 1; any range of consecutive
+    // (3) the terms of the blocks start to end (one block per chunk with chunk size 1; any range of consecutive
     // blocks gives the same sum), with whole-vector calls over their observations, which are consecutive in
     // decreasing order of time: the blocks' packed rows as the rows of one matrix; the observations' eta (the
     // rows' first chunk_size values, row after row, without the last block's padding, times sigma_frailty); the
@@ -468,7 +468,7 @@ data {
     array[N] int<lower=0,upper=1> event;     // event indicator
     array[N] int<lower=1,upper=J> group;     // group assignment
     array[N] int<lower=0> at_risk_count;     // number at risk at each event time
-    // int<lower=1> grainsize;            // events per chunk (reduce_sum_static)
+    // int<lower=1> chunk_size;            // events per chunk (reduce_sum_static)
     int<lower=1> chunk_size;           // observations per chunk (reduce_sum_static)
 }
 
@@ -569,8 +569,8 @@ transformed data {
 
     // the blocks: N_blocks = ceiling(N / chunk_size) blocks of chunk_size consecutive positions in decreasing
     // order of time (the last one possibly shorter), each one chunk of reduce_sum_static (whose sliced argument
-    // is block_index, with grainsize 1), and the sum of w over each block
-    // (now: the sliced argument is packed_of_block, below, with grainsize 1; block_index and w_sum_of_block are
+    // is block_index, with chunk size 1), and the sum of w over each block
+    // (now: the sliced argument is packed_of_block, below, with chunk size 1; block_index and w_sum_of_block are
     //  no longer used, kept commented out)
     int N_blocks = (N + chunk_size - 1) %/% chunk_size;
     // array[N_blocks] int block_index;
@@ -890,7 +890,7 @@ model {
     }
 
     // // partial likelihood for Cox model with frailties (summed over the events, in chunks)
-    // target += reduce_sum_static(partial_sum_events, event_index, grainsize, X, beta, frailty, t);
+    // target += reduce_sum_static(partial_sum_events, event_index, chunk_size, X, beta, frailty, t);
 }
 
 

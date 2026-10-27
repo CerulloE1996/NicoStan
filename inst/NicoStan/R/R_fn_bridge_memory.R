@@ -135,6 +135,11 @@ R_fn_bridge_memory_reduce_sum_patch_lines <-  function(patch_inc = NULL) {
       readLines(con = normalizePath(path = patch_inc, mustWork = TRUE), warn = FALSE)
 }
 
+##
+## ---- Stan's own name of reduce_sum's chunk-size argument, which the patches rename to chunk_size --------------------------------
+##
+Stan_name_of_the_chunk_size <-  paste0("grain", "size")
+
 R_fn_bridge_memory_patch_reduce_sum <-  function(reduce_sum_file, patch_lines) {
       lines <-  readLines(con = reduce_sum_file, warn = FALSE)
       if (any(grepl(pattern = "nicostan_parallel_precomputed_gradients_vari", x = lines, fixed = TRUE))) {
@@ -158,9 +163,14 @@ R_fn_bridge_memory_patch_reduce_sum <-  function(reduce_sum_file, patch_lines) {
       lines[save_anchor] <-  "    internal::nicostan_save_varis_of_sliced_terms(varis, vmapped, num_vars_per_term);"
       lines[return_anchor] <-  "    return var(new nicostan_parallel_precomputed_gradients_vari("
       lines[return_anchor + 1] <-  "        worker.sum_, num_vars_sliced_terms, num_vars_sliced_terms + num_vars_shared_terms, varis,"
-      lines <-  append(x = lines, values = c("#else", "    internal::nicostan_reduce_sum_openmp(worker, num_terms, grainsize);", "#endif"),
+      lines <-  append(x = lines, values = c("#else",
+                                             paste0("    internal::nicostan_reduce_sum_openmp(worker, ",
+                                                    "num_terms, chunk_size);"),
+                                             "#endif"),
                        after = isolate_end)
       lines <-  append(x = lines, values = "#if !defined(NICOSTAN_REDUCE_SUM_OPENMP)", after = isolate_anchor - 1)
+      ## (the chunk size is called chunk_size in every line of the file)
+      lines <-  gsub(pattern = Stan_name_of_the_chunk_size, replacement = "chunk_size", x = lines, fixed = TRUE)
       lines <-  append(x = lines, values = patch_lines, after = namespace_anchor - 1)
       writeLines(text = lines, con = reduce_sum_file, useBytes = TRUE)
       invisible(reduce_sum_file)
@@ -308,8 +318,9 @@ R_fn_bridge_memory_build_controls_allow_unit_proof <-  function(make_args) {
                         "-Wno-deprecated-declarations", "-Wno-ignored-attributes", "-Wno-sign-compare",
                         "-fno-math-errno", "-fno-signed-zeros", "-fno-trapping-math")
       known_defines <-  c("BAYESMVP_FORCE_AVX2", "_REENTRANT", "NICOSTAN_REDUCE_SUM_OPENMP", "NDEBUG",
-                          "BOOST_DISABLE_ASSERTS")
+                          "BOOST_DISABLE_ASSERTS", "NICO_GPC_COVARIANCE_EXP_DEGREE_13")
       known_flags <-  c(known_flags, paste0("-D", known_defines), paste0("-D", known_defines, "=1"))
+      known_flags <-  c(known_flags, "-DBAYESMVP_SIZE_OF_THE_TILES_OF_THE_GP_NODES=256")
       for (index in seq_along(arguments)) {
             value <-  sub(pattern = "^[^=]*=", replacement = "", x = arguments[index])
             value <-  sub(pattern = "^(['\"])(.*)\\1$", replacement = "\\2", x = value, perl = TRUE)
@@ -525,6 +536,13 @@ R_fn_bridge_memory_proof_of_unit_upstream <-  function(model_file, make_args) {
       calls <-  calls[calls > 0]
       proof <-  list(proven = FALSE, number_of_calls = length(calls),
                      reason = "a reduction is not proved to have unit upstream")
+      ##
+      ## ---- Keep the source-specific constructor requirement ------------------------------------------------------------------------
+      ##
+      if (R_fn_Cox_source_uses_checked_indices(
+                  code = code)) {
+            proof$Cox_checked_indices <- TRUE
+      }
       proof$map_rect_chunked <-  grepl(pattern = "\\bmap_rect\\s*\\(", x = code, perl = TRUE)
       controls <-  R_fn_bridge_memory_build_controls_allow_unit_proof(make_args = make_args)
       if (!isTRUE(controls)) {
@@ -745,6 +763,26 @@ R_fn_bridge_memory_patch_reduce_sum_nuisance_block <-  function(reduce_sum_file,
       lines <-  append(x = lines, values = patch_lines, after = namespace_anchor - 1)
       writeLines(text = lines, con = reduce_sum_file, useBytes = TRUE)
       invisible(reduce_sum_file)
+}
+
+## ---- nico_map_rect with Stan's reduce_sum: the declarations of reduce_sum_nuisance_block_owned_by_NicoStan.inc
+##      only, put where R_fn_bridge_memory_patch_reduce_sum_nuisance_block puts them; reduce_sum's own chunks stay
+##      BridgeStan's
+R_fn_bridge_memory_patch_reduce_sum_with_the_declarations_of_the_nuisance_block <-  function(reduce_sum_file,
+                                                                                            patch_lines) {
+
+      lines <-  readLines(con = reduce_sum_file, warn = FALSE)
+      if (any(grepl(pattern = "nicostan_nuisance_block_t", x = lines, fixed = TRUE))) {
+            stop("BridgeStan reduce_sum.hpp already carries NicoStan's nuisance block: ", reduce_sum_file)
+      }
+      namespace_anchor <-  which(lines == "namespace stan {")[1]
+      if (is.na(namespace_anchor)) {
+            stop("Unexpected BridgeStan reduce_sum.hpp nuisance block anchors: ", reduce_sum_file)
+      }
+      lines <-  append(x = lines, values = patch_lines, after = namespace_anchor - 1)
+      writeLines(text = lines, con = reduce_sum_file, useBytes = TRUE)
+      invisible(reduce_sum_file)
+
 }
 
 ## ---- part of the nuisance block patch: BridgeStan's gradient call adds the adjoints of the nuisance values read
@@ -1412,7 +1450,7 @@ R_fn_bridge_memory_patch_generated_map_calls <-  function(generated_file, automa
                   replacements
             }
             ## (a helper given to reduce_sum is called through its functor, as stan::math::reduce_sum<
-            ##  helper_lpdf_rsfunctor__<propto__>>(slice, grainsize, pstream__, ..., marker): the marker is its
+            ##  helper_lpdf_rsfunctor__<propto__>>(slice, chunk_size, pstream__, ..., marker): the marker is its
             ##  last argument)
             fn_reduce_sum_callback_replacements <-  function(function_names,
                                                               scope,
@@ -1551,6 +1589,50 @@ R_fn_bridge_memory_generate_Stan_model <-  function(arguments, automatic_header)
       invisible(generated_file)
 }
 
+## ---- R_fn_bridge_memory_patch_generated_map_calls with Stan's own map_rect (options(NicoStan.map_rect_method =
+##      "Stan") with nico_reduce_sum): keeps the nuisance readers and the reduce_sum rewrite; leaves out the job
+##      preparation, the map call rewrite, the map header include and the two map messages
+R_fn_bridge_memory_Stan_map_rect_version_of_patch_generated_map_calls <-  function(patch_generated_map_calls) {
+
+      changes <-  c(job_preparation = 0, map_calls = 0, map_include = 0, messages = 0)
+      fn_retain_the_Stan_map <-  function(expression) {
+
+            if (!is.call(expression)) return(expression)
+            assignment <-  identical(expression[[1]], as.name("<-"))
+            if (assignment && identical(expression[[2]], as.name("code")) &&
+                is.call(expression[[3]]) && identical(expression[[3]][[1]], as.name("gsub")) &&
+                identical(expression[[3]]$pattern, as.name("eager_jobs"))) {
+                  changes[["job_preparation"]] <<-  changes[["job_preparation"]] + 1
+                  return(quote(invisible(NULL)))
+            }
+            if (identical(expression[[1]], as.name("for")) &&
+                identical(expression[[3]], quote(rev(seq_along(calls))))) {
+                  changes[["map_calls"]] <<-  changes[["map_calls"]] + 1
+                  return(quote(invisible(NULL)))
+            }
+            if (assignment && identical(expression[[2]], as.name("lines")) &&
+                is.call(expression[[3]]) && identical(expression[[3]][[1]], as.name("append")) &&
+                any(grepl("automatic_header", deparse(expression[[3]]), fixed = TRUE))) {
+                  changes[["map_include"]] <<-  changes[["map_include"]] + 1
+                  return(quote(invisible(NULL)))
+            }
+            if (identical(expression[[1]], as.name("message"))) {
+                  changes[["messages"]] <<-  changes[["messages"]] + 1
+                  return(quote(invisible(NULL)))
+            }
+            for (index in seq_along(expression)[-1]) {
+                  expression[[index]] <-  fn_retain_the_Stan_map(expression[[index]])
+            }
+            return(expression)
+
+      }
+      modified <-  patch_generated_map_calls
+      body(modified) <-  fn_retain_the_Stan_map(body(modified))
+      stopifnot(identical(unname(changes), c(1, 1, 1, 2)))
+      return(modified)
+
+}
+
 R_fn_bridge_memory_patch_map_generation <-  function(runtime_path, automatic_header) {
       make_file <-  file.path(runtime_path, "Makefile")
       lines <-  readLines(con = make_file, warn = FALSE)
@@ -1642,6 +1724,16 @@ R_fn_bridge_memory_prepare_runtime <-  function(
             stop("Configured BridgeStan source has no stack_alloc.hpp: ", stack_alloc_file)
       }
       original_stack_alloc_md5 <-  unname(obj = tools::md5sum(files = stack_alloc_file))
+      Cox_generation <- NULL
+      ##
+      ## ---- Select the checked constructor for its source ---------------------------------------------------------------------------
+      ##
+      if (isTRUE(unit_upstream_proof$Cox_checked_indices)) {
+            Cox_generation <- R_fn_Cox_checked_generation_hooks(
+                  generate_Stan_model = R_fn_bridge_memory_generate_Stan_model,
+                  patch_map_generation = R_fn_bridge_memory_patch_map_generation,
+                  check_generated_model = R_fn_Cox_checked_indices_in_generated_model)
+      }
       patch_lines <-  R_fn_bridge_memory_page_release_patch_lines(
             allocator_methods = allocator_methods)
       ## (the reduce_sum patch is applied when options(NicoStan.reduce_sum_parallel_bookkeeping = TRUE); OFF by
@@ -1662,12 +1754,38 @@ R_fn_bridge_memory_prepare_runtime <-  function(
       if (apply_nuisance_block_patch && !apply_lean_slicing_patch) {
             stop("NicoStan.reduce_sum_nuisance_block needs NicoStan.reduce_sum_lean_slicing = TRUE.")
       }
-      apply_map_rect_patch <-  apply_nuisance_block_patch && isTRUE(unit_upstream_proof$map_rect_chunked)
+      ## (the map method of a source that calls map_rect, set apart from the sum method:
+      ##  options(NicoStan.map_rect_method = "Stan") or options(NicoStan.map_rect_method = "nico"); unset, the
+      ##  map method follows the sum method as before: nico_map_rect with the nuisance block, Stan's without it)
+      map_rect_method <-  getOption("NicoStan.map_rect_method")
+      if (!is.null(map_rect_method) &&
+          !(is.character(map_rect_method) && length(map_rect_method) == 1 &&
+            map_rect_method %in% c("Stan", "nico"))) {
+            stop("options(NicoStan.map_rect_method) must be \"Stan\" or \"nico\".")
+      }
+      if (is.null(map_rect_method)) {
+            map_rect_method <-  if (apply_nuisance_block_patch) "nico" else "Stan"
+      }
+      apply_map_rect_patch <-  apply_nuisance_block_patch && isTRUE(unit_upstream_proof$map_rect_chunked) &&
+            identical(map_rect_method, "nico")
+      apply_Stan_map_rect_with_the_nuisance_block <-  apply_nuisance_block_patch &&
+            isTRUE(unit_upstream_proof$map_rect_chunked) && identical(map_rect_method, "Stan")
+      ## (nico_map_rect with Stan's reduce_sum: reduce_sum.hpp gets only the declarations of the nuisance block,
+      ##  none of its chunk edits, and the map calls go to NicoStan's scheduler with no nuisance block held)
+      apply_nico_map_rect_with_Stan_reduce_sum <-  !apply_nuisance_block_patch &&
+            isTRUE(unit_upstream_proof$map_rect_chunked) && identical(map_rect_method, "nico")
+      if (apply_nico_map_rect_with_Stan_reduce_sum && (apply_reduce_sum_patch || apply_lean_slicing_patch)) {
+            stop("nico_map_rect with Stan's reduce_sum keeps BridgeStan's own reduce_sum: no reduce_sum patch.")
+      }
       map_rect_header <-  NULL
       automatic_map_header <-  NULL
       if (apply_nuisance_block_patch) {
             automatic_map_header <-  normalizePath(path = file.path(dirname(release_header),
                   "map_rect_with_the_automatic_scalar_type_of_the_model.hpp"), mustWork = TRUE)
+      }
+      if (apply_nico_map_rect_with_Stan_reduce_sum) {
+            automatic_map_header <-  normalizePath(path = file.path(dirname(release_header),
+                  "map_rect_with_the_scheduler_of_NicoStan_and_Stan_reduce_sum.hpp"), mustWork = TRUE)
       }
       if (apply_map_rect_patch) {
             map_rect_header <-  normalizePath(path = file.path(dirname(release_header),
@@ -1768,7 +1886,33 @@ R_fn_bridge_memory_prepare_runtime <-  function(
                   deparse(R_fn_bridge_memory_generate_Stan_model),
                   deparse(R_fn_bridge_memory_patch_map_rect_chunked),
                   deparse(R_fn_bridge_memory_patch_generated_map_calls),
-                  deparse(R_fn_bridge_memory_patch_map_generation)))
+                  deparse(R_fn_bridge_memory_patch_map_generation),
+                  ## (only with Stan's map_rect and the nuisance block, so that every key already made stays)
+                  if (apply_Stan_map_rect_with_the_nuisance_block) {
+                        c("---- Stan's map_rect with the nuisance block ----",
+                          deparse(R_fn_bridge_memory_Stan_map_rect_version_of_patch_generated_map_calls))
+                  },
+                  if (apply_nico_map_rect_with_Stan_reduce_sum) {
+                        c("---- nico_map_rect with Stan's reduce_sum ----",
+                          readLines(con = automatic_map_header, warn = FALSE),
+                          R_fn_bridge_memory_reduce_sum_nuisance_block_patch_lines(),
+                          deparse(
+                                R_fn_bridge_memory_patch_reduce_sum_with_the_declarations_of_the_nuisance_block))
+                  }))
+      }
+      ##
+      ## ---- Separate only the checked model runtime ---------------------------------------------------------------------------------
+      ##
+      if (!is.null(Cox_generation)) {
+            patch_md5 <- R_fn_bridge_memory_patch_md5(
+                  patch_lines = c(
+                        patch_md5,
+                        "---- checked affine indices ----",
+                        deparse(Cox_generation$generate_Stan_model),
+                        deparse(Cox_generation$patch_map_generation),
+                        deparse(R_fn_Cox_checked_indices_in_generated_model),
+                        deparse(R_fn_Cox_checked_generation_hooks),
+                        deparse(R_fn_Cox_source_uses_checked_indices)))
       }
       existing_marker_path <-  file.path(original_bridgestan_path,
                                         ".nicostan_page_release_ready")
@@ -1838,6 +1982,11 @@ R_fn_bridge_memory_prepare_runtime <-  function(
             R_fn_bridge_memory_patch_reduce_sum(reduce_sum_file = copied_reduce_sum_file,
                                                 patch_lines = reduce_sum_patch_lines)
       }
+      if (apply_nico_map_rect_with_Stan_reduce_sum) {
+            R_fn_bridge_memory_patch_reduce_sum_with_the_declarations_of_the_nuisance_block(
+                  reduce_sum_file = copied_reduce_sum_file,
+                  patch_lines     = R_fn_bridge_memory_reduce_sum_nuisance_block_patch_lines())
+      }
       if (apply_lean_slicing_patch) {
             R_fn_bridge_memory_patch_reduce_sum_lean_slicing(reduce_sum_file = copied_reduce_sum_file,
                                                              patch_lines = lean_slicing_patch_lines)
@@ -1868,8 +2017,37 @@ R_fn_bridge_memory_prepare_runtime <-  function(
                         bridgestan_file = file.path(temporary_path, "src", "bridgestan.cpp"))
             }
       }
-      R_fn_bridge_memory_patch_map_generation(runtime_path = temporary_path,
-                                               automatic_header = automatic_map_header)
+      ##
+      ## ---- Retain the existing generator for other sources -------------------------------------------------------------------------
+      ##
+      if (is.null(Cox_generation)) {
+            R_fn_bridge_memory_patch_map_generation(
+                  runtime_path = temporary_path,
+                  automatic_header = automatic_map_header)
+      } else {
+            Cox_generation$patch_map_generation(
+                  runtime_path = temporary_path,
+                  automatic_header = automatic_map_header)
+      }
+      ## (Stan's map_rect with the nuisance block: the generation script uses the Stan map_rect version of the
+      ##  map call patch; map_rect_concurrent.hpp stays BridgeStan's own)
+      if (apply_Stan_map_rect_with_the_nuisance_block) {
+            script_file <-  file.path(temporary_path, "src", "nicostan_map_rect_generated_calls.R")
+            script <-  readLines(con = script_file, warn = FALSE)
+            call_line <-  length(script)
+            if (!startsWith(script[call_line], "R_fn_bridge_memory_generate_Stan_model(")) {
+                  stop("Unrecognised private Stan generation script; no map change made.")
+            }
+            Stan_map_lines <-  deparse(R_fn_bridge_memory_Stan_map_rect_version_of_patch_generated_map_calls)
+            Stan_map_lines[1] <-  paste0("R_fn_bridge_memory_Stan_map_rect_version_of_patch_generated_map_calls",
+                                         " <- ", Stan_map_lines[1])
+            script <-  append(x = script, values = c(Stan_map_lines, "",
+                  paste0("R_fn_bridge_memory_patch_generated_map_calls <- ",
+                         "R_fn_bridge_memory_Stan_map_rect_version_of_patch_generated_map_calls(\n",
+                         "      patch_generated_map_calls = R_fn_bridge_memory_patch_generated_map_calls)"), ""),
+                  after = call_line - 1)
+            writeLines(text = script, con = script_file, useBytes = TRUE)
+      }
       if (apply_map_rect_patch) {
             R_fn_bridge_memory_patch_map_rect_chunked(
                   map_rect_file = file.path(temporary_path, "stan", "lib", "stan_math", "stan", "math",

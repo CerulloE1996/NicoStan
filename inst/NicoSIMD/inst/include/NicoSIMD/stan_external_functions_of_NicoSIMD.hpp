@@ -1,32 +1,12 @@
 #pragma once
-//
-// -| --------- NicoSIMD: the AVX2 / AVX-512 math, fused log densities and fused general functions, exposed to Stan
-// -| --------- as external functions (the one file a Stan model's user header includes) ------------------------
-//
-// Every function here is a nico_ function: the same C++ as the BayesMVP function of the same name with fast_ in
-// place of nico_ (e.g. nico_normal_id_glm_lpdf is nico_normal_id_glm_lpdf), so that the log density and the
-// gradient of a model are bit for bit those of its BayesMVP version. The list of every function, its header, kind
-// and overloads: list_of_every_function_moved_from_BayesMVP_to_NicoSIMD.csv (in the outer package folder).
-//
-// Declared in the Stan functions block as e.g.   vector nico_Phi(vector x);   (no body), and compiled with
-// stanc --allow-undefined and this file as the user header (NicoSIMD's
-// fn_include_folder_Stan_user_header_and_build_arguments_of_NicoSIMD_for_this_CPU() gives the path, the compiler
-// flags and the stanc argument).
-//
-// Kernel dispatch, at compile time (as in BayesMVP): AVX-512 (8 lanes) with -mavx512f -mavx512vl -mavx512dq, else
-// AVX2 (4 lanes) with -mavx2; anything less is a compile error. -DBAYESMVP_FORCE_AVX2 selects the AVX2 kernels on
-// an AVX-512 CPU (the flag keeps its BayesMVP name, so that the build arguments of both packages are the same);
-// bmvp_simd_lanes() returns 4 or 8.
-//
-// One translation unit includes either BayesMVP's stan_external_functions.hpp or this file, never both: the
-// internal C++ (namespace nico::math, the SIMD kernels fast_*_AVX2 / fast_*_AVX512 and the BMVP_* macros) is
-// the same in both, and only the Stan-facing names differ.
-//
-// ---------------------------------------------------------------------------------------------------------------
+// ---- Native scalar and SIMD math, densities and general functions exposed to Stan:
 
-// ---- the elementwise math, the fused log densities and the fused general functions that BayesMVP's
-//      stan_external_functions.hpp includes (the same file, with the nico_ names)
 #include "stan_external_functions.hpp"
+#include "stan_external_scalar_functions.hpp"
+#include "stan_external_lognormal_lpdf.hpp"
+//
+// (lub_constrain of a matrix of vars on the NicoSIMD kernels: only when NICOSIMD_SIMD_LUB_CONSTRAIN is defined)
+#include "stan_external_lub_constrain.hpp"
 
 // ---- the general functions written in NicoSIMD itself (every new general function is NicoSIMD's only)
 //
@@ -45,6 +25,13 @@
 // (the induced-Dirichlet prior of ordered cutpoints, probit or logit: any cumulative-link ordinal model with an
 //  induced-Dirichlet prior on its cutpoints)
 #include "stan_external_induced_dirichlet_prior_of_ordered_cutpoints.hpp"
+#include "stan_external_dirichlet_cutpoint_median.hpp"
+//
+// (the Dirichlet, Beta and LKJ-Cholesky log densities: e.g. the Dirichlet and Beta priors on the category and
+//  cutpoint probabilities of ordinal models, LKJ priors on correlation matrices)
+#include "stan_external_dirichlet_lpdf.hpp"
+#include "stan_external_beta_lpdf.hpp"
+#include "stan_external_lkj_corr_cholesky_lpdf.hpp"
 //
 // (the log determinant of the Jacobian of ordered cutpoints built from the first one plus the exp, or softplus,
 //  of raw differences: any cumulative-link ordinal model with cutpoints parameterised this way)

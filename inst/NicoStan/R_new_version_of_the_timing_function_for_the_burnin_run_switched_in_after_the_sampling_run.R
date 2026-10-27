@@ -1,37 +1,15 @@
 ##
 ## ==== R_fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend.R ===============================
 ##
-## ---- The fastest burn-in layout AND the fastest sampling layout of a Stan model (NicoStan's N / chunk_size data
-##      contract for reduce_sum_static), separately for each math backend (Stan math, AVX2 and AVX-512) and
-##      each N, with Paper 1's method -
-##
-## For each math backend and N:
-##   (1) the model's library (built beforehand: a library that is missing, or older than its .stan file, stops the
-##       timings at once; nothing is compiled here) is initialised with the arguments of its build;
-##   (2) M_bytes/chain (the full data as one piece) gives Paper 1's equations' N_chunks
-##       (fn_compute_sampling_num_chunks_for_CPUs_of_this_process()) for each number of threads per chain;
-##   (3) the seconds of one lp_grad call give the leapfrog steps (L = 10) and the iterations of each timed call
-##       (about target_seconds_of_timed_call; fn_L_and_N_iter_of_each_timed_call_from_seconds_per_lp_grad_call());
-##   (4) the sampling layouts (n_chains_sampling chains, one per CPU: 180 on the local-HPC and 16 on the laptop,
-##       as in Paper 1; N_threads/chain = 1): N_chunks = 1 (no chunking) and the equations' N_chunks times
-##       2^(-3, ..., 3), doubled again while the largest is the fastest;
-##       each timed by NicoStan's one-call timing in the sampler of the sampling phase (untimed, then timed
-##       iterations in one C++ call, timed by the chains' own seconds;
-##       fn_time_sampling_of_Stan_model_for_each_layout());
-##   (5) the burn-in layouts (n_chains_burnin = 4 chains, as in Paper 1; N_threads/chain from
-##       threads_per_chain_of_burnin_grid, at most n_CPUs / n_chains_burnin, i.e. WCP and chunking):
-##       N_chunks = 1, N_chunks = N_threads/chain and the equations' N_chunks, each timed in NicoStan's
-##       persistent burn-in worker,
-##       whose chains wait for each other at every iteration, as in the burn-in
-##       (fn_time_burnin_iteration_for_each_num_chunks(), one untimed iteration first).
-## phases_to_time = "sampling" times the sampling layouts only (the preliminary AVX check: each math backend's own
-## optimal sampling N_chunks); the real benchmarks time both phases (the default).
-## Layouts are ranked by the total throughput TP_iter = N_chains N_iter / T_e (iterations per second over all
-## chains; 1 / the seconds per draw over all chains). The counter snapshots (e.g. of Paper 1's pmc_stat) are taken
-## just before and just after each timed call when fn_snapshot_hardware_counters is given. One CSV row is written
-## per layout, as soon as it is timed. Before any timing, the predicted total time is printed, and the timings
-## stop when it is more than most_minutes_of_everything. With dry_run = TRUE, only the checks of the libraries and
-## data and the prediction are made (nothing is built, loaded or timed).
+## ---- The fastest burn-in layout AND the fastest sampling layout of a Stan model, separately for each math
+##      backend and each N, with Paper 1's method:
+##   (1) the model's library (built beforehand; nothing is compiled here), initialised with its build's arguments;
+##   (2) M_bytes/chain gives the equations' N_chunks for each number of threads per chain;
+##   (3) the seconds of one lp_grad call give L and the iterations of each timed call;
+##   (4) the sampling layouts: N_chunks = 1 and the equations' N_chunks times 2^(-3, ..., 3), doubled again while
+##       the largest is the fastest, each timed by NicoStan's one-call timing;
+##   (5) the burn-in layouts (n_chains_burnin chains, WCP and chunking), timed in the persistent burn-in worker.
+## Layouts are ranked by TP_iter = N_chains N_iter / T_e; one CSV row per layout, written as soon as it is timed.
 ##
 ##
 ##
@@ -46,51 +24,33 @@
 #' @param output_file The CSV file (one row per layout; rows are appended).
 #' @param n_CPUs The CPUs of the timings (default: those of this process).
 #' @param n_chains_burnin The burn-in chains (default 4).
-#' @param n_chains_sampling The sampling chains with one thread each (default n_CPUs: 180 on the local-HPC, 16 on
-#'   the laptop, as in Paper 1); with N_threads/chain threads each, n_chains_sampling / N_threads/chain chains, so
-#'   that every CPU is used.
-#' @param threads_per_chain_of_sampling_grid The N_threads/chain of the sampling layouts (default c(1, 2, 4):
-#'   WCP and chunking are searched in the sampling phase too, never chunking only).
+#' @param n_chains_sampling The sampling chains with one thread each (default n_CPUs); with N_threads/chain
+#'   threads each, n_chains_sampling / N_threads/chain chains.
+#' @param threads_per_chain_of_sampling_grid The N_threads/chain of the sampling layouts (default c(1, 2, 4)).
 #' @param threads_per_chain_of_burnin_grid Default c(1, 2, 4, 8, 16, 32), and n_CPUs / n_chains_burnin.
-#' @param phases_to_time The phases whose layouts are timed: "sampling" and / or "burnin" (default both; the
-#'   preliminary AVX check uses "sampling" only).
+#' @param phases_to_time "sampling" and / or "burnin" (default both).
 #' @param multipliers_of_equations_num_chunks Default 2^(-3:3).
 #' @param most_num_chunks_of_grid Default 2048.
 #' @param fewest_num_chunks_of_grid The fewest N_chunks of every grid (default 1: the unchunked layouts too).
 #' @param L_preferred The leapfrog steps of each iteration (default 10).
-#' @param L_may_be_lowered_when_the_fewest_iterations_last_longer_than_the_target Default TRUE; FALSE keeps
-#'   L_preferred for every math backend (the ground truth: throughputs compared at the same L).
+#' @param L_may_be_lowered_when_the_fewest_iterations_last_longer_than_the_target Default TRUE.
 #' @param target_seconds_of_timed_call Default 0.2.
-#' @param minimum_seconds_of_timed_call Each timed call lasts at least this (default 0: no minimum); a shorter one
-#'   is timed again with more iterations, which the case's later layouts of that phase then use.
-#' @param predicted_seconds_of_setup_of_each_layout The start-up of each layout's timing, for the prediction
-#'   (default 0.3).
+#' @param minimum_seconds_of_timed_call Each timed call lasts at least this (default 0: no minimum).
+#' @param predicted_seconds_of_setup_of_each_layout The start-up of each layout, for the prediction (default 0.3).
 #' @param most_minutes_of_everything Default 60.
-#' @param fn_snapshot_hardware_counters A function without arguments that snapshots the counters and returns the
-#'   number of its snapshot (default NULL: none).
+#' @param fn_snapshot_hardware_counters A function without arguments that snapshots the counters (default NULL).
 #' @param dry_run TRUE: checks and prediction only (default FALSE).
 #' @param initial_values_of_the_chains_of_each_N A named list (names: N) of the starting values of the sampling
-#'   chains, as initial_values_of_the_chains of fn_time_sampling_of_Stan_model_for_each_layout() (default NULL:
-#'   its default); the burn-in layouts use the first n_chains_burnin of them.
-#' @param n_nuisance_owned_by_NicoStan_of_each_N For libraries in NicoStan's nuisance-block form: a named list
-#'   (names: N) of the size of the nuisance block that NicoStan samples (default NULL: no such library).
+#'   chains; the burn-in layouts use the first n_chains_burnin of them.
+#' @param n_nuisance_owned_by_NicoStan_of_each_N A named list (names: N) of the size of the nuisance block.
 #' @param nuisance_metric_of_the_sampling_timings nuisance_metric_of_the_timings of
 #'   fn_time_sampling_of_Stan_model_for_each_layout(): "identity" (default) or "diagonal".
-#' @param L_of_the_untimed_warm_up_iteration The leapfrog steps of each layout's untimed iteration before its
-#'   timed iterations (default NULL: L, as the timed iterations; 1, since the untimed iteration only starts the
-#'   threads, builds the tapes and touches the memory). Saved in every row.
+#' @param L_of_the_untimed_warm_up_iteration The leapfrog steps of each layout's untimed iteration (NULL: L).
 #' @param seconds_of_the_short_call_that_screens_each_layout The seconds of a short timed call that every chunked
-#'   layout gets first (default 0: none, every layout gets the full timed call). A layout whose short call is more
-#'   than fraction_slower_than_the_fastest_so_far_above_which_a_layout_keeps_its_short_call_only slower than the
-#'   fastest full call so far of its phase, N and math backend keeps its short call (its row says so); every other
-#'   layout, and every unchunked layout, gets the full timed call.
-#' @param fraction_slower_than_the_fastest_so_far_above_which_a_layout_keeps_its_short_call_only Default 0.3
-#'   (30%). Sampling is compared by seconds per draw over all chains, burn-in by seconds per
-#'   iteration (over every chain count timed so far in this R process). Every row of a layout that had a short
-#'   call saves its measure (seconds per draw over all chains for sampling, seconds per iteration for burn-in).
+#'   layout gets first (0: none); a layout much slower than the fastest so far keeps its short call only.
+#' @param fraction_slower_than_the_fastest_so_far_above_which_a_layout_keeps_its_short_call_only Default 0.3.
 #' @return The data frame of every layout timed (invisibly), or the prediction when dry_run = TRUE.
 #' @noRd
-## (no default arguments: every caller passes every argument)
 fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  function(
         arguments_of_build_of_each_math_backend,
         Stan_data_list_of_each_N,
@@ -164,8 +124,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                             (length(threads_per_chain_of_sampling_layouts) +
                                              length(threads_per_chain_of_burnin_layouts))
         n_cases <-  length(arguments_of_build_of_each_math_backend) * length(Stan_data_list_of_each_N)
-        ## (each layout: one untimed iteration and the timed call, plus its start-up; each case: initialisation,
-        ##  M_bytes/chain and the lp_grad timing, about 5 s)
+        ## (each layout: one untimed iteration and the timed call, plus its start-up; each case about 5 s)
         predicted_seconds_of_everything <-  n_cases * (5 + n_layouts_of_each_N_and_backend *
                                                        (max(2 * target_seconds_of_timed_call,
                                                             1.2 * minimum_seconds_of_timed_call) +
@@ -207,9 +166,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               utils::write.csv(rows, output_file, row.names = FALSE)
         }
 
-        ## (the fastest burn-in seconds per iteration of the full calls saved by this R process for an N and math
-        ##  backend: the calls of the other chain counts, made before this one in the same process, are in the
-        ##  output file; rows saved before this process started are left out)
+        ## (the fastest burn-in seconds per iteration of the full calls saved by this R process)
         time_this_R_process_started <-  Sys.time() - proc.time()[["elapsed"]] - 1
         fn_fastest_seconds_per_iteration_of_burnin_saved_by_this_process <-  function(N, math_backend) {
 
@@ -233,19 +190,11 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
         most_ratio_to_the_fastest_for_the_full_call <-  1 +
               fraction_slower_than_the_fastest_so_far_above_which_a_layout_keeps_its_short_call_only
         ##
-        ## (the ground truth: every full timed call lasts between fewest_seconds_of_each_ground_truth_timed_call
-        ##  and most_seconds_of_each_ground_truth_timed_call; its iterations and L come from the layout's own
-        ##  short call, aiming at the middle; a full call outside them is a hard error that stops everything)
+        ## (the ground truth: every full timed call lasts within its window)
         stopifnot(mode_of_the_timings %in% c("ground_truth", "not_ground_truth"))
         is_the_ground_truth <-  identical(mode_of_the_timings, "ground_truth")
         seconds_aimed_at_by_each_ground_truth_timed_call <-  (fewest_seconds_of_each_ground_truth_timed_call +
                                                               most_seconds_of_each_ground_truth_timed_call) / 2
-        ## (no short calls in the ground truth, every call lasts 0.5 to 1 s; each layout's call is sized from
-        ##  the measured speed of the layout timed before it, aiming at the middle of the window)
-        # if (is_the_ground_truth && !screening_is_on) {
-        #       stop(paste0("The ground truth needs seconds_of_the_short_call_that_screens_each_layout > 0: each ",
-        #                   "layout's own short call sizes its full timed call."))
-        # }
         fn_N_iter_and_L_of_a_ground_truth_timed_call <-  function(seconds_per_iteration_at_L, L, what) {
 
               seconds_per_leapfrog_step <-  seconds_per_iteration_at_L / L
@@ -280,8 +229,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
         }
 
         ##
-        ## (the N_chunks of a grid: none, one chunk per thread, and the equations' N_chunks times each multiplier;
-        ##  powers of two, at least one chunk per thread, at most most_num_chunks)
+        ## (the N_chunks of a grid: none, one chunk per thread, and the equations' N_chunks times each multiplier)
         fn_num_chunks_of_grid <-  function(threads_per_chain, num_chunks_from_equations, most_num_chunks) {
 
               num_chunks <-  c(1, threads_per_chain,
@@ -289,8 +237,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               num_chunks <-  2^round(log2(pmax(1, num_chunks)))
               num_chunks <-  pmin(most_num_chunks, pmax(threads_per_chain, num_chunks))
               if (threads_per_chain == 1) num_chunks <-  c(1, num_chunks)
-              ## (no layout with fewer than fewest_num_chunks_of_grid chunks, e.g. none unchunked at a large N,
-              ##  where those layouts are far too slow to time)
+              ## (no layout with fewer than fewest_num_chunks_of_grid chunks)
               num_chunks <-  pmax(fewest_num_chunks_of_grid, num_chunks)
               return(sort(unique(num_chunks)))
         }
@@ -311,8 +258,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               ##
               ## ---- (1) the library, initialised with the arguments of its build (never rebuilt):
               ##
-              ## (a library in NicoStan's nuisance-block form: the size of its nuisance block, which NicoStan
-              ##  samples; 0 for every other library)
+              ## (the size of the nuisance block that NicoStan samples; 0 for every other library)
               n_nuisance_owned_by_NicoStan <-  if (is.null(n_nuisance_owned_by_NicoStan_of_each_N)) 0 else
                                                      n_nuisance_owned_by_NicoStan_of_each_N[[N_name]]
               init_object <-  initialise_model( Model_type            = "Stan",
@@ -350,9 +296,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                      L_preferred                  = L_preferred,
                                      L_may_be_lowered_when_the_fewest_iterations_last_longer_than_the_target =
                                      L_may_be_lowered_when_the_fewest_iterations_last_longer_than_the_target)
-              ## (the iterations of each phase's timed calls: from the lp_grad time, then more if a call is
-              ##  shorter than minimum_seconds_of_timed_call at full load)
-              ## (a bounded call is sized from one iteration at full load, not a serial speed estimate)
+              ## (the iterations of each phase's timed calls)
               N_iter_of_sampling_calls <-  if (is.finite(maximum_seconds_of_each_sampling_timed_call)) 1 else
                                                 L_and_N_iter$N_iter_of_long_call
               N_iter_of_burnin_calls <-  L_and_N_iter$N_iter_of_long_call
@@ -361,15 +305,14 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               if (!is.null(L_of_the_untimed_warm_up_iteration)) {
                     L_of_the_untimed_warm_up_iteration_of_the_rows <-  L_of_the_untimed_warm_up_iteration
               }
-              ## (the fastest full calls so far of this N and math backend, for the screening by a short call)
+              ## (the fastest full calls so far of this N and math backend)
               fastest_seconds_per_draw_of_sampling_so_far <-  Inf
               fastest_seconds_per_iteration_of_burnin_so_far <-
                     fn_fastest_seconds_per_iteration_of_burnin_saved_by_this_process(N, math_backend)
               ##
               ## ---- (4) the sampling layouts (n_chains_sampling / N_threads/chain chains: every CPU is used):
               ##
-              ## (the memory available now, from /proc/meminfo on Linux: a layout whose gradients cannot fit in
-              ##  it is not timed, see below; Inf where it cannot be read)
+              ## (the memory available now, from /proc/meminfo; Inf where it cannot be read)
               bytes_of_memory_available <-  Inf
               if (file.exists("/proc/meminfo")) {
                     line_of_memory_available <-  grep("^MemAvailable:", readLines("/proc/meminfo"), value = TRUE)
@@ -380,7 +323,6 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
               }
               for (threads_per_chain in threads_per_chain_of_sampling_layouts) {
 
-                    # n_chains <-  n_chains_sampling
                     n_chains <-  n_chains_sampling / threads_per_chain
                     equations <-  fn_compute_sampling_num_chunks_for_CPUs_of_this_process(
                                         M_bytes_per_chain       = M_bytes,
@@ -396,10 +338,8 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           layout <-  data.frame( n_chains       = n_chains,
                                                  n_threads_WCP  = threads_per_chain,
                                                  num_chunks     = num_chunks_of_grid[index_of_num_chunks])
-                          ## (a layout whose chains' gradients need more than 70% of the memory available, i.e.
-                          ##  N_chains x M_bytes_per_chain / N_chunks, is not timed, so that the machine never
-                          ##  runs out of memory, e.g. the unchunked Stan math layouts with 180 chains at
-                          ##  N = 200,000; it is named in the log and has no row)
+                          ## (a layout whose chains' gradients need more than 70% of the memory available is
+                          ##  not timed)
                           bytes_of_the_gradients_of_the_layout <-  n_chains * M_bytes / layout$num_chunks
                           if (bytes_of_the_gradients_of_the_layout > 0.7 * bytes_of_memory_available) {
                                 message(paste0("  ", n_chains, " x ", threads_per_chain, " / ", layout$num_chunks,
@@ -409,29 +349,18 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                 index_of_num_chunks <-  index_of_num_chunks + 1
                                 next
                           }
-                          ## (the leapfrog steps of this layout's timed call: L, fewer only when one iteration at
-                          ##  L lasts longer than maximum_seconds_of_each_sampling_timed_call; see below)
+                          ## (the leapfrog steps of this layout's timed call)
                           L_of_the_timed_call <-  L_and_N_iter$L
-                          ## (the screening: a chunked layout first gets a short call, and keeps it only when it
-                          ##  is more than the fraction slower than the fastest full call so far; otherwise it
-                          ##  gets the full timed call below, its iterations sized from the short call's speed)
+                          ## (the screening: a chunked layout first gets a short call)
                           timed_with_the_short_call_only <-  FALSE
                           seconds_spent_on_the_short_call <-  0
-                          ## (the short call's own measure, saved for every layout that had one, so that the short
-                          ##  and the full call of each layout timed both ways can be compared)
+                          ## (the short call's own measure)
                           seconds_per_draw_or_iteration_of_the_short_call <-  NA_real_
-                          ## (in the ground truth every layout gets its short call, which sizes its full call; it
-                          ##  screens as above only when a full call is already timed)
-                          # if (screening_is_on && (layout$num_chunks > 1) &&
-                          #     is.finite(fastest_seconds_per_draw_of_sampling_so_far)) {
+                          ## (in the ground truth every layout gets its short call, which sizes its full call)
                           if (screening_is_on &&
                               (is_the_ground_truth || ((layout$num_chunks > 1) &&
                                                        is.finite(fastest_seconds_per_draw_of_sampling_so_far)))) {
-                                # N_iter_of_the_short_call <-  max(1, floor(N_iter_of_sampling_calls *
-                                #                                           seconds_of_short_call /
-                                #                                           target_seconds_of_timed_call))
-                                ## (the ground truth: one untimed iteration of this layout at full load sizes its
-                                ##  timed call; it is never a result, and every layout still gets its timed call)
+                                ## (the ground truth: one untimed iteration sizes the timed call)
                                 N_iter_of_the_short_call <-  if (is_the_ground_truth) 1 else
                                                                   max(1, floor(N_iter_of_sampling_calls *
                                                                                seconds_of_short_call /
@@ -443,7 +372,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                       layouts                               = layout,
                                       time_layout_in_one_call               = TRUE,
                                       n_iterations_of_long_call             = N_iter_of_the_short_call,
-                                      n_iterations_of_untimed_warm_up_call  = 0,  ## (no warm-up: Enzo)
+                                      n_iterations_of_untimed_warm_up_call  = 0,
                                       L_main                                = L_of_the_timed_call,
                                       JSON_text_of_Stan_data_list           = JSON_text,
                                       fn_snapshot_hardware_counters         = fn_snapshot_hardware_counters,
@@ -474,10 +403,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                       timing <-  short_timing
                                       timed_with_the_short_call_only <-  TRUE
                                 } else if (is_the_ground_truth) {
-                                      ## (a second untimed sizing call of about 0.25 s, so that every chain runs
-                                      ##  beside the others as in the timed call: one iteration alone overlaps too
-                                      ##  little, e.g. 0.08 s against 0.23 s per iteration at full load, hierarchical
-                                      ##  N = 50,000, 180 x 1 / 1; it is never a result)
+                                      ## (a second untimed sizing call of about 0.25 s)
                                       N_iter_of_the_second_sizing_call <-  max(1, round(0.25 /
                                                                                   short_timing$seconds_per_iteration))
                                       short_timing <-  fn_time_sampling_of_Stan_model_for_each_layout(
@@ -486,7 +412,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                             layouts                               = layout,
                                             time_layout_in_one_call               = TRUE,
                                             n_iterations_of_long_call             = N_iter_of_the_second_sizing_call,
-                                            n_iterations_of_untimed_warm_up_call  = 0,  ## (no warm-up: Enzo)
+                                            n_iterations_of_untimed_warm_up_call  = 0,
                                             L_main                                = L_of_the_timed_call,
                                             JSON_text_of_Stan_data_list           = JSON_text,
                                             fn_snapshot_hardware_counters         = fn_snapshot_hardware_counters,
@@ -524,7 +450,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                  layouts                               = layout,
                                                  time_layout_in_one_call               = TRUE,
                                                  n_iterations_of_long_call             = N_iter_of_sampling_calls,
-                                                 n_iterations_of_untimed_warm_up_call  = 0,  ## (no warm-up: Enzo)
+                                                 n_iterations_of_untimed_warm_up_call  = 0,
                                                  L_main                                = L_of_the_timed_call,
                                                  JSON_text_of_Stan_data_list           = JSON_text,
                                                  fn_snapshot_hardware_counters         =
@@ -535,8 +461,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                        nuisance_metric_of_the_sampling_timings,
                                                  L_of_the_untimed_iterations           =
                                                        L_of_the_untimed_warm_up_iteration)
-                                ## (not a single divergent transition is allowed: one makes the timing invalid and
-                                ##  stops the timings of this model)
+                                ## (not a single divergent transition is allowed)
                                 if (!isTRUE(all(timing$n_divergent_transitions_of_timed_calls == 0))) {
                                       stop(paste0(math_backend, ", N = ", N, ", sampling ", n_chains, " x ",
                                                   threads_per_chain, ", ", layout$num_chunks, " chunks: ",
@@ -544,8 +469,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                   " divergent transition(s) in the timed calls."))
                                 }
                                 seconds_of_timed_call <-  timing$seconds_per_iteration * N_iter_of_sampling_calls
-                                ## (the ground truth: the call is printed with its seconds, and one outside 0.5 to
-                                ##  1 s stops everything; it is never timed again with other iterations)
+                                ## (the ground truth: a call outside its window stops everything)
                                 if (is_the_ground_truth) {
                                       fn_stop_if_a_ground_truth_timed_call_lasted_too_long_or_too_short(
                                             seconds_of_the_call  = seconds_of_timed_call,
@@ -556,28 +480,16 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                                           L_of_the_timed_call))
                                       break
                                 }
-                                ## (a call too short for the chains' clock measures 0 s, e.g. one iteration of a
-                                ##  model whose iteration lasts under a millisecond: the call is made 10 times
-                                ##  longer and timed again, so that no number of iterations is divided by 0 s)
+                                ## (a call too short for the chains' clock measures 0 s: made 10 times longer)
                                 if (!isTRUE(seconds_of_timed_call > 0)) {
                                       N_iter_of_sampling_calls <-  10 * N_iter_of_sampling_calls
                                       next
                                 }
                                 if (seconds_of_timed_call > maximum_seconds_of_each_sampling_timed_call) {
-                                      ## (one iteration is already longer than the most a timed call may last,
-                                      ##  e.g. a layout with too few chunks at a large N: the layout is timed
-                                      ##  again with fewer leapfrog steps, so that its call lasts about
-                                      ##  target_seconds_of_timed_call; its seconds per iteration are scaled
-                                      ##  back to L steps below, each step being one gradient)
+                                      ## (one iteration is longer than a timed call may last: fewer leapfrog
+                                      ##  steps, scaled back to L steps below)
                                       if (N_iter_of_sampling_calls == 1) {
-                                            # if (L_of_the_timed_call == 1) {
-                                            #       stop(paste0("One timed iteration at L = 1 exceeds ",
-                                            #                   "maximum_seconds_of_each_sampling_timed_call; the ",
-                                            #                   "measured call is retained in the run log."))
-                                            # }
-                                            ## (one iteration at L = 1 still lasts longer: that call is the
-                                            ##  measurement of this layout, being longer than the call it
-                                            ##  replaces, e.g. the unchunked layout at a large N)
+                                            ## (one iteration at L = 1 still lasts longer: that call counts)
                                             if (L_of_the_timed_call == 1) {
                                                   message(paste0("  ", n_chains, " x ", threads_per_chain, " / ",
                                                                  layout$num_chunks, ": one iteration at L = 1 ",
@@ -599,8 +511,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                                      minimum_seconds_of_timed_call /
                                                                      seconds_of_timed_call)
                           }
-                          ## (a layout timed with fewer leapfrog steps: its seconds per iteration and per draw
-                          ##  scaled back to L steps, so that every layout of this N is compared at the same L)
+                          ## (a layout timed with fewer leapfrog steps: scaled back to L steps)
                           timing$L_of_the_timed_call <-  L_of_the_timed_call
                           timing$seconds_of_the_timed_call <-  timing$seconds_per_iteration *
                                                                timing$n_iterations_of_long_call
@@ -610,10 +521,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                 timing$seconds_per_draw_over_all_chains <-
                                       timing$seconds_per_draw_over_all_chains * scale_to_L
                           }
-                          ## (the next layout's timed call: its iterations from this layout's measured speed,
-                          ##  so that it lasts about target_seconds_of_timed_call and is rarely timed twice)
-                          # N_iter_of_sampling_calls <-  max(1, ceiling(target_seconds_of_timed_call /
-                          #                                             timing$seconds_per_iteration))
+                          ## (the next layout's timed call: its iterations from this layout's measured speed)
                           seconds_aimed_at_by_the_next_call <-  if (is_the_ground_truth)
                                                                       seconds_aimed_at_by_each_ground_truth_timed_call
                                                                 else target_seconds_of_timed_call
@@ -669,21 +577,15 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                     index_of_num_chunks <-  1
                     while (index_of_num_chunks <= length(num_chunks_of_grid)) {
                           num_chunks <-  num_chunks_of_grid[index_of_num_chunks]
-                          ## (the screening, as for the sampling layouts: by seconds per iteration)
+                          ## (the screening, as for the sampling layouts)
                           timed_with_the_short_call_only <-  FALSE
                           seconds_spent_on_the_short_call <-  0
                           seconds_per_draw_or_iteration_of_the_short_call <-  NA_real_
-                          ## (the leapfrog steps of this layout's burn-in call: L, fewer only in the ground truth
-                          ##  when one iteration at L lasts longer than a ground-truth timed call may last)
+                          ## (the leapfrog steps of this layout's burn-in call)
                           L_of_the_burnin_call <-  L_and_N_iter$L
-                          # if (screening_is_on && (num_chunks > 1) &&
-                          #     is.finite(fastest_seconds_per_iteration_of_burnin_so_far)) {
                           if (screening_is_on &&
                               (is_the_ground_truth || ((num_chunks > 1) &&
                                                        is.finite(fastest_seconds_per_iteration_of_burnin_so_far)))) {
-                                # N_iter_of_the_short_call <-  max(1, floor(N_iter_of_burnin_calls *
-                                                                          # seconds_of_short_call /
-                                                                          # target_seconds_of_timed_call))
                                 N_iter_of_the_short_call <-  if (is_the_ground_truth) 1 else
                                                                   max(1, floor(N_iter_of_burnin_calls *
                                                                                seconds_of_short_call /
@@ -762,7 +664,6 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                         n_timed_iterations                  =
                                                               N_iter_of_burnin_calls,
                                                         minimum_seconds_per_timing          = 0,
-                                                        # L_main                              = L_and_N_iter$L,
                                                         L_main                              = L_of_the_burnin_call,
                                                         JSON_text_of_Stan_data_list         = JSON_text,
                                                         n_untimed_iterations_before_timing  = 1,
@@ -773,8 +674,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                               L_of_the_untimed_warm_up_iteration)
                           )[["elapsed"]]
                           snapshot_after <-  fn_snapshot_or_NA()
-                          ## (not a single divergent transition is allowed: the burn-in timing stops at the first,
-                          ##  in its untimed and its timed iterations; its count of them is saved in every row)
+                          ## (not a single divergent transition is allowed)
                           n_divergent_transitions_of_burnin_calls <-
                                 burnin_timing$n_divergent_transitions_of_timed_iterations[1]
                           n_transitions_of_burnin_calls <-  burnin_timing$n_transitions_of_timed_iterations[1]
@@ -786,8 +686,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           }
                           seconds_per_iteration <-  burnin_timing$median_seconds_per_burnin_iteration[1]
                           seconds_of_timed_call <-  seconds_per_iteration * N_iter_of_burnin_calls
-                          ## (the ground truth: the call is printed with its seconds, one outside 0.5 to 1 s stops
-                          ##  everything; a call with fewer leapfrog steps is scaled back to L steps)
+                          ## (the ground truth: a call outside its window stops everything)
                           if (is_the_ground_truth) {
                                 fn_stop_if_a_ground_truth_timed_call_lasted_too_long_or_too_short(
                                       seconds_of_the_call  = seconds_of_timed_call,
@@ -844,15 +743,6 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           fn_write_rows(timing)
                           all_rows[[length(all_rows) + 1]] <-  timing
                           ## (the next layout's timed call: its iterations from this layout's measured speed)
-                          # N_iter_of_burnin_calls <-  max(1, ceiling(target_seconds_of_timed_call /
-                          #                                           seconds_per_iteration))
-                          ## (never divided by 0 s: a layout whose timing measured 0 s gives the next one 10
-                          ##  times its iterations)
-                          # N_iter_of_burnin_calls <-  if (isTRUE(seconds_per_iteration > 0)) {
-                          #                                  max(1, ceiling(target_seconds_of_timed_call /
-                          #                                                 seconds_per_iteration))
-                          #                            } else 10 * N_iter_of_burnin_calls
-                          ## (the ground truth aims at the middle of its 0.5 to 1 s window)
                           seconds_aimed_at_by_the_next_call <-  if (is_the_ground_truth)
                                                                       seconds_aimed_at_by_each_ground_truth_timed_call
                                                                 else target_seconds_of_timed_call

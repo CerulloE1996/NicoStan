@@ -2,13 +2,14 @@
 #pragma once 
 
 
-#ifndef FAST_AND_APPROX_AVX2_FNS_HPP
-#define FAST_AND_APPROX_AVX2_FNS_HPP
+#ifndef NICO_AND_APPROX_AVX2_FNS_HPP
+#define NICO_AND_APPROX_AVX2_FNS_HPP
 
 
 #include "../nico_simd_intrinsics.hpp"   //// <immintrin.h> on x86-64; SIMDe (NEON) on ARM
 #include <cmath>
 #include "nico_exp_over_the_full_double_range.hpp"
+#include "nico_normal_constants.hpp"
   
   
 // #include <R_ext/Print.h>  // For REprintf
@@ -506,59 +507,59 @@ ALWAYS_INLINE __m256d avx2_cvtepi64_pd VECTORCALL(const __m256i e) {
 //   
 // }
 //// https://stackoverflow.com/a/65537754/9007125 // vectorized version of the answer by njuffa
-ALWAYS_INLINE __m256d nico_log_1_wo_checks_AVX2 VECTORCALL(const __m256d a) {
-
-      ALIGN32  __m256d const a_aligned = a;
-    
-      ALIGN32 __m256i const log_i1  = _mm256_set1_epi64x(0x3fe5555555555555);
-      ALIGN32 __m256i const log_i2  = _mm256_set1_epi64x(0xFFF0000000000000);
-    
-      ALIGN32 __m256d const log_c1  = _mm256_set1_pd(0.000000000000000222044604925031308085); // 2^-52
-      ALIGN32 __m256d const log_c2  = _mm256_set1_pd(-0.13031005859375);                      // -0x1.0ae000p-3
-      ALIGN32 __m256d const log_c3  = _mm256_set1_pd(0.140869140625);                         //  0x1.208000p-3
-      ALIGN32 __m256d const log_c4  = _mm256_set1_pd(-0.121483512222766876221);               // -0x1.f198b2p-4  <-- was -0.121483256...
-      ALIGN32 __m256d const log_c5  = _mm256_set1_pd(0.139814853668212890625);                //  0x1.1e5740p-3
-      ALIGN32 __m256d const log_c6  = _mm256_set1_pd(-0.166846126317977905273);               // -0x1.55b36cp-3
-      ALIGN32 __m256d const log_c7  = _mm256_set1_pd(0.200120344758033752441);                //  0x1.99d8b2p-3
-      ALIGN32 __m256d const log_c8  = _mm256_set1_pd(-0.249996200203895568848);               // -0x1.fffe02p-3
-      ALIGN32 __m256d const log_c9  = _mm256_set1_pd(0.333331972360610961914);                //  0x1.5554fap-2
-      ALIGN32 __m256d const log_c10 = _mm256_set1_pd(-0.5);
-      ALIGN32 __m256d const log_c11 = _mm256_set1_pd(0.693147182464599609375);                //  0x1.62e430p-1
-    
-      ALIGN32 __m256i const aInt = _mm256_castpd_si256(a_aligned);
-      ALIGN32 __m256i const e    = _mm256_and_si256(_mm256_sub_epi64(aInt, log_i1),
-                                                    log_i2); // <-- was the _mm256_and_epi64 macro
-      ALIGN32 __m256d const i    = _mm256_fmadd_pd(avx2_cvtepi64_pd(e), log_c1, _mm256_setzero_pd());
-      ALIGN32 __m256d const m    = _mm256_sub_pd(_mm256_castsi256_pd(_mm256_sub_epi64(aInt, e)),
-                                                 _mm256_set1_pd(1.0)); // m in [-1/3, 1/3]
-      ALIGN32 __m256d const s    = _mm256_mul_pd(m, m);
-    
-      ALIGN32 __m256d r, t;
-      r = log_c2;
-      t = log_c3;
-      r = _mm256_fmadd_pd(r, s, log_c4);
-      t = _mm256_fmadd_pd(t, s, log_c5);
-      r = _mm256_fmadd_pd(r, s, log_c6);
-      t = _mm256_fmadd_pd(t, s, log_c7);
-      r = _mm256_fmadd_pd(r, s, log_c8);
-      r = _mm256_fmadd_pd(t, m, r);
-      r = _mm256_fmadd_pd(r, m, log_c9);
-      r = _mm256_fmadd_pd(r, m, log_c10);
-      r = _mm256_fmadd_pd(r, s, m);
-    
-      return _mm256_fmadd_pd(i, log_c11, r);
-  
-}
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE __m256d nico_log_1_wo_checks_AVX2 VECTORCALL(const __m256d a) {
+//
+//       ALIGN32  __m256d const a_aligned = a;
+//
+//       ALIGN32 __m256i const log_i1  = _mm256_set1_epi64x(0x3fe5555555555555);
+//       ALIGN32 __m256i const log_i2  = _mm256_set1_epi64x(0xFFF0000000000000);
+//
+//       ALIGN32 __m256d const log_c1  = _mm256_set1_pd(0.000000000000000222044604925031308085); // 2^-52
+//       ALIGN32 __m256d const log_c2  = _mm256_set1_pd(-0.13031005859375);                      // -0x1.0ae000p-3
+//       ALIGN32 __m256d const log_c3  = _mm256_set1_pd(0.140869140625);                         //  0x1.208000p-3
+//       ALIGN32 __m256d const log_c4  = _mm256_set1_pd(-0.121483512222766876221);               // -0x1.f198b2p-4  <-- was -0.121483256...
+//       ALIGN32 __m256d const log_c5  = _mm256_set1_pd(0.139814853668212890625);                //  0x1.1e5740p-3
+//       ALIGN32 __m256d const log_c6  = _mm256_set1_pd(-0.166846126317977905273);               // -0x1.55b36cp-3
+//       ALIGN32 __m256d const log_c7  = _mm256_set1_pd(0.200120344758033752441);                //  0x1.99d8b2p-3
+//       ALIGN32 __m256d const log_c8  = _mm256_set1_pd(-0.249996200203895568848);               // -0x1.fffe02p-3
+//       ALIGN32 __m256d const log_c9  = _mm256_set1_pd(0.333331972360610961914);                //  0x1.5554fap-2
+//       ALIGN32 __m256d const log_c10 = _mm256_set1_pd(-0.5);
+//       ALIGN32 __m256d const log_c11 = _mm256_set1_pd(0.693147182464599609375);                //  0x1.62e430p-1
+//
+//       ALIGN32 __m256i const aInt = _mm256_castpd_si256(a_aligned);
+//       ALIGN32 __m256i const e    = _mm256_and_si256(_mm256_sub_epi64(aInt, log_i1),
+//                                                     log_i2); // <-- was the _mm256_and_epi64 macro
+//       ALIGN32 __m256d const i    = _mm256_fmadd_pd(avx2_cvtepi64_pd(e), log_c1, _mm256_setzero_pd());
+//       ALIGN32 __m256d const m    = _mm256_sub_pd(_mm256_castsi256_pd(_mm256_sub_epi64(aInt, e)),
+//                                                  _mm256_set1_pd(1.0)); // m in [-1/3, 1/3]
+//       ALIGN32 __m256d const s    = _mm256_mul_pd(m, m);
+//
+//       ALIGN32 __m256d r, t;
+//       r = log_c2;
+//       t = log_c3;
+//       r = _mm256_fmadd_pd(r, s, log_c4);
+//       t = _mm256_fmadd_pd(t, s, log_c5);
+//       r = _mm256_fmadd_pd(r, s, log_c6);
+//       t = _mm256_fmadd_pd(t, s, log_c7);
+//       r = _mm256_fmadd_pd(r, s, log_c8);
+//       r = _mm256_fmadd_pd(t, m, r);
+//       r = _mm256_fmadd_pd(r, m, log_c9);
+//       r = _mm256_fmadd_pd(r, m, log_c10);
+//       r = _mm256_fmadd_pd(r, s, m);
+//
+//       return _mm256_fmadd_pd(i, log_c11, r);
+//
+// }
 
 
 //// ---- log, double precision (nico_log_1_double_precision_*): the fdlibm (Sun Microsystems, e_log.c) algorithm,
 ////      vectorised. a = 2^k (1 + f) with 1 + f in [sqrt(2)/2, sqrt(2)) (the exponent trick below, with sqrt(2)/2
 ////      as the split point); s = f / (2 + f), |s| <= 0.1716; R = s^2 (Lg1 + s^4 (Lg3 + s^4 (Lg5 + s^4 Lg7))) +
 ////      s^4 (Lg2 + s^4 (Lg4 + s^4 Lg6)); log(a) = k ln2_hi - ((hfsq - (s (hfsq + R) + k ln2_lo)) - f), hfsq =
-////      f^2 / 2 (ln 2 split into hi and lo parts). Below 1 ulp (measured 0.83 ulp), but one division per vector:
-////      slower than nico_log_1_wo_checks_* (njuffa's single-precision polynomial, about 1.5e-8 relative error),
-////      which therefore stays the default log. ---- reduction for a positive normal double: a = 2^k (1 + f) with
-////      1 + f in [sqrt(2)/2, sqrt(2)) (k exact, as a double)
+////      f^2 / 2 (ln 2 split into hi and lo parts). Below 1 ulp (measured 0.83 ulp); the only log (the single-
+////      precision one, about 1.5e-8 relative error, is commented out). ---- reduction for a positive normal
+////      double: a = 2^k (1 + f) with 1 + f in [sqrt(2)/2, sqrt(2)) (k exact, as a double)
 ALWAYS_INLINE void nico_log_reduce_AVX2(const __m256d a, __m256d& f, __m256d& k) {
 
       ALIGN32  __m256d const a_aligned = a;
@@ -617,32 +618,33 @@ ALWAYS_INLINE __m256d nico_log_1_double_precision_wo_checks_AVX2 VECTORCALL(cons
 
 
 
-ALWAYS_INLINE __m256d nico_log1p_1_wo_checks_AVX2 VECTORCALL(const __m256d x) {
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE __m256d nico_log1p_1_wo_checks_AVX2 VECTORCALL(const __m256d x) {
+//
+//       ALIGN32  __m256d const x_aligned = x;
+//
+//       ALIGN32  __m256d const small =  _mm256_set1_pd(1e-4);
+//       ALIGN32  __m256d const minus_one_half  =  _mm256_set1_pd(-0.50);
+//
+//       // Create mask using _mm256_cmp_pd
+//       ALIGN32  __m256d const mask = _mm256_cmp_pd(_mm256_abs_pd(x_aligned), small, _CMP_GT_OQ);
+//
+//       ALIGN32  __m256d const res =  _mm256_blendv_pd(
+//                                     _mm256_mul_pd(_mm256_fmadd_pd(minus_one_half, x_aligned,  _mm256_set1_pd(
+//                                             1.0)), x_aligned),
+//                                     nico_log_1_wo_checks_AVX2(_mm256_add_pd(x_aligned,  _mm256_set1_pd(1.0))),
+//                                     mask
+//                                   );
+//
+//       return res;
+//
+// }
 
-      ALIGN32  __m256d const x_aligned = x;
-    
-      ALIGN32  __m256d const small =  _mm256_set1_pd(1e-4);
-      ALIGN32  __m256d const minus_one_half  =  _mm256_set1_pd(-0.50);
-    
-      // Create mask using _mm256_cmp_pd
-      ALIGN32  __m256d const mask = _mm256_cmp_pd(_mm256_abs_pd(x_aligned), small, _CMP_GT_OQ);
-      
-      ALIGN32  __m256d const res =  _mm256_blendv_pd(
-                                    _mm256_mul_pd(_mm256_fmadd_pd(minus_one_half, x_aligned,  _mm256_set1_pd(
-                                            1.0)), x_aligned),
-                                    nico_log_1_wo_checks_AVX2(_mm256_add_pd(x_aligned,  _mm256_set1_pd(1.0))),
-                                    mask
-                                  );
-      
-      return res;
-  
-}
 
 
 
-
-//// ---- log1p, double precision (nico_log1p_1_double_precision_*; the default nico_log1p_1_* is the faster
-////      single- precision-accuracy version above). For x in [sqrt(2)/2 - 1, sqrt(2) - 1) the fdlibm core runs on
+//// ---- log1p, double precision (nico_log1p_1_double_precision_*; the only log1p: the 2-term + single-precision
+////      version above is commented out). For x in [sqrt(2)/2 - 1, sqrt(2) - 1) the fdlibm core runs on
 ////      f = x itself (k = 0): 1 + x is never rounded. Otherwise log(u), u = 1 + x, reduced as in nico_log_1,
 ////      plus (x - (u - 1)) / u, the rounding error of u to first order (a 12-bit single-precision reciprocal of
 ////      u is ample for that term). One core evaluation (one division) for any mix of lanes; the reciprocal only
@@ -678,7 +680,7 @@ ALWAYS_INLINE __m256d nico_log1m_1_wo_checks_AVX2 VECTORCALL(const __m256d x) {
 
      ALIGN32  __m256d const x_aligned = x;
   
-     ALIGN32  __m256d const res =  nico_log1p_1_wo_checks_AVX2(_mm256_sub_pd(_mm256_setzero_pd(), x_aligned));
+     ALIGN32  __m256d const res =  nico_log1p_1_double_precision_wo_checks_AVX2(_mm256_sub_pd(_mm256_setzero_pd(), x_aligned));
      return res;
   
 } 
@@ -710,7 +712,7 @@ ALWAYS_INLINE __m256d nico_log1p_exp_1_wo_checks_AVX2 VECTORCALL(const __m256d x
        ALIGN32  __m256d const argument = _mm256_blendv_pd(x_aligned, _mm256_sub_pd(_mm256_setzero_pd(),
                x_aligned), is_x_gr_0);
        ALIGN32  __m256d const log1p_exp_of_argument =
-           nico_log1p_1_wo_checks_AVX2(nico_exp_1_wo_checks_AVX2(argument));
+           nico_log1p_1_double_precision_wo_checks_AVX2(nico_exp_1_wo_checks_AVX2(argument));
        return _mm256_blendv_pd(log1p_exp_of_argument,                                             // if x <= 0
                                // if x > 0
                                _mm256_add_pd(x_aligned, log1p_exp_of_argument), is_x_gr_0);
@@ -738,21 +740,22 @@ __attribute__((noinline, cold)) inline __m256d nico_log_exceptional_lanes_AVX2(c
 
 }
 
-ALWAYS_INLINE __m256d nico_log_1_AVX2 VECTORCALL(const __m256d a) {
-
-      ALIGN32  __m256d const a_aligned = a;
-
-      // The mantissa/exponent shortcut assumes a positive NORMAL double.
-      ALIGN32  __m256d const ordinary_lanes = _mm256_and_pd(
-          _mm256_cmp_pd(a_aligned, _mm256_set1_pd(std::numeric_limits<double>::min()), _CMP_GE_OQ),
-          _mm256_cmp_pd(a_aligned, _mm256_set1_pd(INFINITY), _CMP_LT_OQ));
-      const int ordinary_mask = _mm256_movemask_pd(ordinary_lanes);
-      ALIGN32  __m256d const result = nico_log_1_wo_checks_AVX2(a_aligned);
-      if (__builtin_expect(ordinary_mask != 0xf, 0)) return nico_log_exceptional_lanes_AVX2(a_aligned, result,
-              ordinary_mask);
-      return result;
-  
-}
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE __m256d nico_log_1_AVX2 VECTORCALL(const __m256d a) {
+//
+//       ALIGN32  __m256d const a_aligned = a;
+//
+//       // The mantissa/exponent shortcut assumes a positive NORMAL double.
+//       ALIGN32  __m256d const ordinary_lanes = _mm256_and_pd(
+//           _mm256_cmp_pd(a_aligned, _mm256_set1_pd(std::numeric_limits<double>::min()), _CMP_GE_OQ),
+//           _mm256_cmp_pd(a_aligned, _mm256_set1_pd(INFINITY), _CMP_LT_OQ));
+//       const int ordinary_mask = _mm256_movemask_pd(ordinary_lanes);
+//       ALIGN32  __m256d const result = nico_log_1_wo_checks_AVX2(a_aligned);
+//       if (__builtin_expect(ordinary_mask != 0xf, 0)) return nico_log_exceptional_lanes_AVX2(a_aligned, result,
+//               ordinary_mask);
+//       return result;
+//
+// }
 
 // double-precision log (fdlibm, one division per vector) with the same scalar repair of non-normal / non-positive lanes
 ALWAYS_INLINE __m256d nico_log_1_double_precision_AVX2 VECTORCALL(const __m256d a) {
@@ -776,29 +779,30 @@ ALWAYS_INLINE __m256d nico_log_1_double_precision_AVX2 VECTORCALL(const __m256d 
 
 // //  compute log(1+x) without losing precision for small values of x.
 // //  see: https://www.johndcook.com/cpp_log_one_plus_x.html
-ALWAYS_INLINE __m256d nico_log1p_1_AVX2 VECTORCALL(const __m256d x) {
-
-      ALIGN32  __m256d const x_aligned = x;
-  
-      ALIGN32  __m256d const minus_1 =  _mm256_set1_pd(-1.0);
-      ALIGN32  __m256d const neg_half = _mm256_set1_pd(-0.5);
-      ALIGN32  __m256d const sign_bit = _mm256_set1_pd(-0.0);
-      
-      ALIGN32  __m256d const res =  _mm256_blendv_pd(
-                                    _mm256_blendv_pd(
-                                      _mm256_mul_pd(_mm256_fmadd_pd(neg_half, x_aligned,  _mm256_set1_pd(1.0)),
-                                              x_aligned),
-                                      nico_log_1_AVX2(_mm256_add_pd(x_aligned,  _mm256_set1_pd(1.0))),
-                                      _mm256_cmp_pd(_mm256_andnot_pd(sign_bit, x_aligned), _mm256_set1_pd(1e-4),
-                                              _CMP_GT_OQ)
-                                    ), 
-                                    nico_log_1_AVX2(_mm256_add_pd(x_aligned,  _mm256_set1_pd(1.0))),
-                                    _mm256_cmp_pd(x_aligned, minus_1, _CMP_LE_OQ)
-                                  );
-      
-      return res;
-  
-} 
+// single-precision log, commented out: every caller uses the double-precision kernel
+// ALWAYS_INLINE __m256d nico_log1p_1_AVX2 VECTORCALL(const __m256d x) {
+//
+//       ALIGN32  __m256d const x_aligned = x;
+//
+//       ALIGN32  __m256d const minus_1 =  _mm256_set1_pd(-1.0);
+//       ALIGN32  __m256d const neg_half = _mm256_set1_pd(-0.5);
+//       ALIGN32  __m256d const sign_bit = _mm256_set1_pd(-0.0);
+//
+//       ALIGN32  __m256d const res =  _mm256_blendv_pd(
+//                                     _mm256_blendv_pd(
+//                                       _mm256_mul_pd(_mm256_fmadd_pd(neg_half, x_aligned,  _mm256_set1_pd(1.0)),
+//                                               x_aligned),
+//                                       nico_log_1_AVX2(_mm256_add_pd(x_aligned,  _mm256_set1_pd(1.0))),
+//                                       _mm256_cmp_pd(_mm256_andnot_pd(sign_bit, x_aligned), _mm256_set1_pd(1e-4),
+//                                               _CMP_GT_OQ)
+//                                     ), 
+//                                     nico_log_1_AVX2(_mm256_add_pd(x_aligned,  _mm256_set1_pd(1.0))),
+//                                     _mm256_cmp_pd(x_aligned, minus_1, _CMP_LE_OQ)
+//                                   );
+//
+//       return res;
+//
+// } 
 
 
 
@@ -845,7 +849,7 @@ ALWAYS_INLINE __m256d nico_log1m_1_AVX2 VECTORCALL(const __m256d x) {
 
       ALIGN32  __m256d const x_aligned = x;
   
-      ALIGN32  __m256d const res =  nico_log1p_1_AVX2(_mm256_sub_pd(_mm256_setzero_pd(), x_aligned));
+      ALIGN32  __m256d const res =  nico_log1p_1_double_precision_AVX2(_mm256_sub_pd(_mm256_setzero_pd(), x_aligned));
       return res;
   
 }  
@@ -875,7 +879,7 @@ ALWAYS_INLINE __m256d nico_log1p_exp_1_AVX2 VECTORCALL(const __m256d x) {
        ALIGN32  __m256d const is_x_gr_0 = _mm256_cmp_pd(x_aligned, _mm256_setzero_pd(), _CMP_GT_OQ);
        ALIGN32  __m256d const argument = _mm256_blendv_pd(x_aligned, _mm256_sub_pd(_mm256_setzero_pd(),
                x_aligned), is_x_gr_0);
-       ALIGN32  __m256d const log1p_exp_of_argument = nico_log1p_1_AVX2(nico_exp_1_AVX2(argument));
+       ALIGN32  __m256d const log1p_exp_of_argument = nico_log1p_1_double_precision_AVX2(nico_exp_1_AVX2(argument));
        return _mm256_blendv_pd(log1p_exp_of_argument,                                             // if x <= 0
                                // if x > 0
                                _mm256_add_pd(x_aligned, log1p_exp_of_argument), is_x_gr_0);
@@ -905,7 +909,7 @@ ALWAYS_INLINE __m256d nico_log1m_exp_1_AVX2 VECTORCALL(const __m256d x) {
       ALIGN32  __m256d far_result  = _mm256_setzero_pd();
       ALIGN32  __m256d near_result = _mm256_setzero_pd();
       if (near_lanes != 0xf) {
-          far_result = nico_log1p_1_AVX2(_mm256_sub_pd(_mm256_setzero_pd(), nico_exp_1_AVX2(x_aligned)));
+          far_result = nico_log1p_1_double_precision_AVX2(_mm256_sub_pd(_mm256_setzero_pd(), nico_exp_1_AVX2(x_aligned)));
       }
       if (near_lanes != 0) {
           ALIGN32  __m256d const u = _mm256_mul_pd(x_aligned, x_aligned);
@@ -933,7 +937,7 @@ ALWAYS_INLINE     __m256d nico_logit_wo_checks_AVX2 VECTORCALL(const __m256d x) 
 
       ALIGN32  __m256d const x_aligned = x;
   
-      ALIGN32  __m256d const log_x = nico_log_1_AVX2(x_aligned);
+      ALIGN32  __m256d const log_x = nico_log_1_double_precision_AVX2(x_aligned);
       ALIGN32  __m256d const log_1m_x =  nico_log1m_1_AVX2(x_aligned);
       ALIGN32  __m256d const res =   log_x - log_1m_x;
       return res;
@@ -947,7 +951,7 @@ ALWAYS_INLINE     __m256d nico_logit_AVX2 VECTORCALL(const __m256d x)   {
 
       ALIGN32  __m256d const x_aligned = x;
   
-      ALIGN32  __m256d const log_x = nico_log_1_AVX2(x_aligned);
+      ALIGN32  __m256d const log_x = nico_log_1_double_precision_AVX2(x_aligned);
       ALIGN32  __m256d const log_1m_x =  nico_log1m_1_AVX2(x_aligned);
       ALIGN32  __m256d const res =   log_x - log_1m_x;
       return res;
@@ -1167,7 +1171,7 @@ inline __m256d nico_log_inv_logit_for_x_pos_AVX2 VECTORCALL(const __m256d x) {
   
       ALIGN32 __m256d const m_x     = _mm256_sub_pd(_mm256_setzero_pd(), x_aligned);   // -x
       ALIGN32 __m256d const exp_m_x = nico_exp_1_AVX2(m_x);                    // exp(-x)
-      ALIGN32 __m256d const log_sum = nico_log1p_1_AVX2(exp_m_x);              // log(1 + exp(-x))
+      ALIGN32 __m256d const log_sum = nico_log1p_1_double_precision_AVX2(exp_m_x);              // log(1 + exp(-x))
       return _mm256_sub_pd(_mm256_setzero_pd(), log_sum);                      // -log(1 + exp(-x))
       
 }
@@ -1182,7 +1186,7 @@ inline     __m256d  nico_log_inv_logit_for_x_neg_AVX2 VECTORCALL(const __m256d x
       ALIGN32  __m256d const  log_eps  =   _mm256_set1_pd(-18.420680743952367);
     
       ALIGN32  __m256d const res = _mm256_blendv_pd(    x_aligned,
-                                  _mm256_sub_pd(x_aligned,   nico_log1p_1_AVX2(nico_exp_1_AVX2(x_aligned))),
+                                  _mm256_sub_pd(x_aligned,   nico_log1p_1_double_precision_AVX2(nico_exp_1_AVX2(x_aligned))),
                                   _mm256_cmp_pd(x_aligned,  log_eps, _CMP_GT_OQ));
       return res;
     
@@ -1208,7 +1212,7 @@ inline     __m256d  nico_log_inv_logit_AVX2 VECTORCALL(const __m256d x )  {
       ALIGN32  __m256d const is_x_gr_log_eps = _mm256_cmp_pd(x_aligned, _mm256_set1_pd(-18.420680743952367),
               _CMP_GT_OQ);
       ALIGN32  __m256d const log1p_exp_of_argument =
-          nico_log1p_1_AVX2(nico_exp_1_AVX2(_mm256_blendv_pd(x_aligned, _mm256_sub_pd(_mm256_setzero_pd(),
+          nico_log1p_1_double_precision_AVX2(nico_exp_1_AVX2(_mm256_blendv_pd(x_aligned, _mm256_sub_pd(_mm256_setzero_pd(),
                   x_aligned),
                                                              is_x_ge_0)));
       //// x - log(1 + exp(x)) (x < 0, x > log_eps), x (x <= log_eps), -log(1 + exp(-x)) (x >= 0)
@@ -1244,7 +1248,7 @@ inline     __m256d  nico_log_inv_logit_for_x_neg_wo_checks_AVX2 VECTORCALL(const
       ALIGN32  __m256d const  log_eps  =   _mm256_set1_pd(-18.420680743952367);
     
       ALIGN32  __m256d const res = _mm256_blendv_pd( x_aligned,
-                                  _mm256_sub_pd(x_aligned,   nico_log1p_1_wo_checks_AVX2(
+                                  _mm256_sub_pd(x_aligned,   nico_log1p_1_double_precision_wo_checks_AVX2(
                                           nico_exp_1_wo_checks_AVX2(x_aligned))),
                                   _mm256_cmp_pd(x_aligned,  log_eps, _CMP_GT_OQ));
       return res;
@@ -1271,7 +1275,7 @@ inline     __m256d  nico_log_inv_logit_wo_checks_AVX2 VECTORCALL(const __m256d x
       ALIGN32  __m256d const is_x_gr_log_eps = _mm256_cmp_pd(x_aligned, _mm256_set1_pd(-18.420680743952367),
               _CMP_GT_OQ);
       ALIGN32  __m256d const log1p_exp_of_argument =
-          nico_log1p_1_wo_checks_AVX2(nico_exp_1_wo_checks_AVX2(
+          nico_log1p_1_double_precision_wo_checks_AVX2(nico_exp_1_wo_checks_AVX2(
               _mm256_blendv_pd(x_aligned, _mm256_sub_pd(_mm256_setzero_pd(), x_aligned), is_x_ge_0)));
       //// x - log(1 + exp(x)) (x < 0, x > log_eps), x (x <= log_eps), -log(1 + exp(-x)) (x >= 0)
       ALIGN32  __m256d const result_of_x_neg = _mm256_blendv_pd(x_aligned, _mm256_sub_pd(x_aligned,
@@ -1334,11 +1338,11 @@ inline      __m256d  nico_inv_Phi_approx_wo_checks_AVX2 VECTORCALL(const __m256d
       ALIGN32  __m256d const  one_third =  _mm256_set1_pd(0.33333333333333331483);
       
       // logit first
-      ALIGN32  __m256d const  m_logit_p = nico_log_1_wo_checks_AVX2( _mm256_sub_pd(_mm256_div_pd( _mm256_set1_pd(
+      ALIGN32  __m256d const  m_logit_p = nico_log_1_double_precision_wo_checks_AVX2( _mm256_sub_pd(_mm256_div_pd( _mm256_set1_pd(
               1.0),  x_aligned),  _mm256_set1_pd(1.0) ) );
       ALIGN32  __m256d const  x_i =  _mm256_mul_pd(m_logit_p,
                                                    inv_Phi_approx_c1) ; // -0.34176618822627863*m_logit_p;
-      ALIGN32  __m256d const  asinh_stuff_div_3 =  _mm256_mul_pd( one_third,  nico_log_1_wo_checks_AVX2(  _mm256_add_pd(x_i, (  _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ) ;          // now do arc_sinh part
+      ALIGN32  __m256d const  asinh_stuff_div_3 =  _mm256_mul_pd( one_third,  nico_log_1_double_precision_wo_checks_AVX2(  _mm256_add_pd(x_i, (  _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ) ;          // now do arc_sinh part
       ALIGN32  __m256d const  exp_x_i = nico_exp_1_wo_checks_AVX2(asinh_stuff_div_3);
       
       ALIGN32  __m256d const res = _mm256_mul_pd(  inv_Phi_approx_c2,   _mm256_div_pd(_mm256_sub_pd(_mm256_mul_pd(exp_x_i, exp_x_i),  _mm256_set1_pd(1.0)), exp_x_i) ) ;    //   now do sinh parth part
@@ -1375,10 +1379,10 @@ inline     __m256d  nico_inv_Phi_approx_AVX2 VECTORCALL(const __m256d x )  {
       ALIGN32  __m256d const  one_third =  _mm256_set1_pd(0.33333333333333331483);
       
       // log((1-p)/p), stable near 1
-      ALIGN32  __m256d const m_logit_p = nico_log_1_AVX2(_mm256_div_pd(_mm256_sub_pd(_mm256_set1_pd(1.0),
+      ALIGN32  __m256d const m_logit_p = nico_log_1_double_precision_AVX2(_mm256_div_pd(_mm256_sub_pd(_mm256_set1_pd(1.0),
               x_aligned), x_aligned));
       ALIGN32  __m256d const x_i =  _mm256_mul_pd(m_logit_p, _mm256_set1_pd(-0.34176618822627863)) ; // -0.34176618822627863*m_logit_p;
-      ALIGN32  __m256d const asinh_stuff_div_3 =  _mm256_mul_pd(  one_third,  nico_log_1_AVX2(  _mm256_add_pd(x_i, (  _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ) ;          // now do arc_sinh part
+      ALIGN32  __m256d const asinh_stuff_div_3 =  _mm256_mul_pd(  one_third,  nico_log_1_double_precision_AVX2(  _mm256_add_pd(x_i, (  _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ) ;          // now do arc_sinh part
       ALIGN32  __m256d const exp_x_i = nico_exp_1_AVX2(asinh_stuff_div_3);
       
       ALIGN32  __m256d const res = _mm256_mul_pd(  _mm256_set1_pd(2.7472242570765295),   _mm256_div_pd( _mm256_sub_pd(_mm256_mul_pd(exp_x_i, exp_x_i),  _mm256_set1_pd(1.0)), exp_x_i) ) ;    //   now do sinh parth part
@@ -1400,7 +1404,7 @@ inline      __m256d  nico_inv_Phi_approx_from_logit_prob_wo_checks_AVX2 VECTORCA
       ALIGN32  __m256d const  one_third =  _mm256_set1_pd(0.33333333333333331483);
       
       ALIGN32  __m256d const  x_i =  _mm256_mul_pd(logit_p_aligned,  inv_Phi_approx_c1) ;
-      ALIGN32  __m256d const  asinh_stuff_div_3 =  _mm256_mul_pd(  one_third,  nico_log_1_wo_checks_AVX2( _mm256_add_pd(x_i  , _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ;          // now do arc_sinh part
+      ALIGN32  __m256d const  asinh_stuff_div_3 =  _mm256_mul_pd(  one_third,  nico_log_1_double_precision_wo_checks_AVX2( _mm256_add_pd(x_i  , _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ;          // now do arc_sinh part
       ALIGN32  __m256d const  exp_x_i = nico_exp_1_wo_checks_AVX2(asinh_stuff_div_3);
       
       ALIGN32  __m256d const res = _mm256_mul_pd(inv_Phi_approx_c2,   _mm256_div_pd(_mm256_sub_pd( _mm256_mul_pd(exp_x_i, exp_x_i),  _mm256_set1_pd(1.0)), exp_x_i) ) ;   //   now do sinh parth part
@@ -1422,7 +1426,7 @@ inline     __m256d  nico_inv_Phi_approx_from_logit_prob_AVX2 VECTORCALL(const __
       ALIGN32  __m256d const  one_third =  _mm256_set1_pd(0.33333333333333331483);
       
       ALIGN32  __m256d const  x_i =  _mm256_mul_pd(logit_p_aligned,  inv_Phi_approx_c1) ;
-      ALIGN32  __m256d const  asinh_stuff_div_3 =  _mm256_mul_pd( one_third,  nico_log_1_AVX2( _mm256_add_pd(x_i  , _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ;          // now do arc_sinh part
+      ALIGN32  __m256d const  asinh_stuff_div_3 =  _mm256_mul_pd( one_third,  nico_log_1_double_precision_AVX2( _mm256_add_pd(x_i  , _mm256_sqrt_pd(  _mm256_fmadd_pd(x_i, x_i,  _mm256_set1_pd(1.0)) ) )  ) ) ;          // now do arc_sinh part
       ALIGN32  __m256d const  exp_x_i = nico_exp_1_AVX2(asinh_stuff_div_3);
       
       ALIGN32  __m256d const res = _mm256_mul_pd(inv_Phi_approx_c2,   _mm256_div_pd(_mm256_sub_pd( _mm256_mul_pd(exp_x_i, exp_x_i),  _mm256_set1_pd(1.0)), exp_x_i) ) ;   //   now do sinh parth part
@@ -1509,7 +1513,7 @@ ALWAYS_INLINE      __m256d    nico_tanh_wo_checks_AVX2 VECTORCALL(const   __m256
 
 
 // from: https://stackoverflow.com/questions/57870896/writing-a-portable-sse-avx-version-of-stdcopysign
-ALWAYS_INLINE    __m256d CopySign VECTORCALL(  const __m256d srcSign, 
+ALWAYS_INLINE    __m256d nico_copy_sign VECTORCALL(  const __m256d srcSign, 
                                                const __m256d srcValue) {
 
       ALIGN32  __m256d const srcSign_aligned = srcSign;
@@ -1829,7 +1833,7 @@ ALWAYS_INLINE __m256d nico_inv_Phi_wo_checks_case_2_AVX2 VECTORCALL( const __m25
       ALIGN32 __m256d const q_pos = _mm256_cmp_pd(q_aligned, zero, _CMP_GT_OQ);
       // q>0 -> 1-p, else p
       ALIGN32 __m256d r = _mm256_blendv_pd(p_aligned, _mm256_sub_pd(one, p_aligned), q_pos);
-      r = _mm256_sqrt_pd(_mm256_sub_pd(zero, nico_log_1_AVX2(r)));
+      r = _mm256_sqrt_pd(_mm256_sub_pd(zero, nico_log_1_double_precision_AVX2(r)));
 
       ALIGN32 __m256d const r_gr_5 = _mm256_cmp_pd(r, five, _CMP_GT_OQ);
       ALIGN32 __m256d val = nico_inv_Phi_wo_checks_case_2a_AVX2(p_aligned, r);                 // r <= 5
@@ -2041,16 +2045,16 @@ ALWAYS_INLINE __m256d nico_log_Phi_AVX2 VECTORCALL(const __m256d x) {
               _CMP_LT_OQ);
       const int     tail_lanes = _mm256_movemask_pd(is_tail);
       // no tail lane: body only
-      if (tail_lanes == 0) return nico_log_1_AVX2(nico_Phi_AVX2(x_aligned));
+      if (tail_lanes == 0) return nico_log_1_double_precision_AVX2(nico_Phi_AVX2(x_aligned));
       ALIGN32  __m256d const ax       = _mm256_abs_pd(x_aligned);
       ALIGN32  __m256d const R        = _mm256_div_pd(_mm256_set1_pd(1.0),
                                              nico_inverse_mills_ratio_tail_AVX2(_mm256_max_pd(ax, thresh)));
       ALIGN32  __m256d const log_tail = _mm256_add_pd(_mm256_fnmadd_pd(_mm256_set1_pd(0.5), _mm256_mul_pd(
               x_aligned, x_aligned),
                                                               _mm256_set1_pd(NEG_HALF_LOG_2PI)),
-                                             nico_log_1_AVX2(R));
+                                             nico_log_1_double_precision_AVX2(R));
       if (tail_lanes == 0xf) return log_tail;                                           // every lane in the tail
-      ALIGN32  __m256d const log_body = nico_log_1_AVX2(nico_Phi_AVX2(x_aligned));
+      ALIGN32  __m256d const log_body = nico_log_1_double_precision_AVX2(nico_Phi_AVX2(x_aligned));
       return _mm256_blendv_pd(log_body, log_tail, is_tail);
 
 }
@@ -2176,18 +2180,18 @@ using nico::math::nico_exp_1_wo_checks_AVX2;
 using nico::math::nico_exp_exceptional_lanes_AVX2;
 using nico::math::nico_exp_1_AVX2;
 using nico::math::avx2_cvtepi64_pd;
-using nico::math::nico_log_1_wo_checks_AVX2;
+// using nico::math::nico_log_1_wo_checks_AVX2;
 using nico::math::nico_log_reduce_AVX2;
 using nico::math::nico_log_fdlibm_core_AVX2;
 using nico::math::nico_log_1_double_precision_wo_checks_AVX2;
-using nico::math::nico_log1p_1_wo_checks_AVX2;
+// using nico::math::nico_log1p_1_wo_checks_AVX2;
 using nico::math::nico_log1p_1_double_precision_wo_checks_AVX2;
 using nico::math::nico_log1m_1_wo_checks_AVX2;
 using nico::math::nico_log1p_exp_1_wo_checks_AVX2;
 using nico::math::nico_log_exceptional_lanes_AVX2;
-using nico::math::nico_log_1_AVX2;
+// using nico::math::nico_log_1_AVX2;
 using nico::math::nico_log_1_double_precision_AVX2;
-using nico::math::nico_log1p_1_AVX2;
+// using nico::math::nico_log1p_1_AVX2;
 using nico::math::nico_log1p_exceptional_lanes_AVX2;
 using nico::math::nico_log1p_1_double_precision_AVX2;
 using nico::math::nico_log1m_1_AVX2;
@@ -2217,7 +2221,7 @@ using nico::math::nico_log_Phi_approx_wo_checks_AVX2;
 using nico::math::nico_log_Phi_approx_AVX2;
 using nico::math::nico_tanh_AVX2;
 using nico::math::nico_tanh_wo_checks_AVX2;
-using nico::math::CopySign;
+using nico::math::nico_copy_sign;
 using nico::math::nico_Phi_wo_checks_AVX2;
 using nico::math::nico_Phi_AVX2;
 using nico::math::nico_inv_Phi_wo_checks_case_2a_AVX2;

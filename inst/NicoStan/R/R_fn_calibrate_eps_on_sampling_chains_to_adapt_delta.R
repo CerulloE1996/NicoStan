@@ -258,8 +258,9 @@ fn_calibrate_eps_on_sampling_chains_to_adapt_delta <-  function( fn_run_sampling
 ## ---- The one-call version (the calibration that $sample() uses)
 ##
 ## One sampling call of every sampling chain, from the initial states of the sampling (the burn-in's final
-## states), at the eps handed over by the burn-in, without any nuisance trace: its first
-## ceiling(n_transitions_per_eps_calibration_block / n_chains_sampling) iterations (one block) are discarded,
+## states), at the eps handed over by the burn-in, without any nuisance trace, of n_eps_calibration_blocks blocks
+## of ceiling(n_transitions_per_eps_calibration_block / n_chains_sampling) iterations, cut to at most
+## max_n_iter_of_eps_calibration_call iterations in all: its first block of iterations is discarded,
 ## whilst the chains move away from their few distinct starting states (one per burn-in chain), and the mean
 ## acceptance probability of the next (n_eps_calibration_blocks - 1) blocks, alpha_bar, gives c of the curve
 ## alpha(eps) = 2 Phi(-c eps^2) (as above) and the sampling eps
@@ -300,6 +301,9 @@ fn_next_eps_of_an_uninformative_call <-  function(eps_accepted_almost_always,
 #' @param n_transitions_per_eps_calibration_block Transitions (iterations x sampling chains) of each block of the
 #'   call, at least; the first block is discarded.
 #' @param n_eps_calibration_blocks Number of blocks in the call, the discarded first one included.
+#' @param max_n_iter_of_eps_calibration_call Most iterations of each call: the blocks are cut to this many
+#'   iterations in all, and the first ceiling(n_iter_of_call / n_eps_calibration_blocks) of the call's
+#'   n_iter_of_call iterations are discarded.
 #' @return As above; blocks has one row per call (block = the call's number, n_iter = all its iterations,
 #'   n_iter_discarded, n_chains, eps_main, mean_acceptance_main (over the iterations after the discarded ones),
 #'   eps_us, mean_acceptance_us, used_in_fit).
@@ -313,6 +317,7 @@ fn_calibrate_eps_on_sampling_chains_from_one_call_to_adapt_delta <-  function(
                                                            n_chains_sampling,
                                                            n_transitions_per_eps_calibration_block,
                                                            n_eps_calibration_blocks,
+                                                           max_n_iter_of_eps_calibration_call,
                                                            max_eps_main,
                                                            max_eps_us,
                                                            seed) {
@@ -326,9 +331,22 @@ fn_calibrate_eps_on_sampling_chains_from_one_call_to_adapt_delta <-  function(
               stop("n_eps_calibration_blocks must be a single number >= 2 (the first block is discarded).")
         }
         ##
-        n_iter_discarded <-  ceiling(n_transitions_per_eps_calibration_block / n_chains_sampling)
-        n_iter_measured <-  (n_eps_calibration_blocks - 1) * n_iter_discarded
-        n_iter_of_call <-  n_iter_discarded + n_iter_measured
+        ## ---- At most max_n_iter_of_eps_calibration_call iterations in each call ----------------------------------------------------
+        ##
+        if (!is.numeric(max_n_iter_of_eps_calibration_call) || length(max_n_iter_of_eps_calibration_call) != 1 ||
+            max_n_iter_of_eps_calibration_call < 2 || max_n_iter_of_eps_calibration_call %% 1 != 0) {
+
+              stop("max_n_iter_of_eps_calibration_call must be a single whole number >= 2.")
+
+        }
+        ##
+        ## (n_eps_calibration_blocks blocks of ceiling(n_transitions_per_eps_calibration_block /
+        ##  n_chains_sampling) iterations, cut to max_n_iter_of_eps_calibration_call iterations in all; the first
+        ##  block is discarded)
+        n_iter_per_block <-  ceiling(n_transitions_per_eps_calibration_block / n_chains_sampling)
+        n_iter_of_call <-  min(max_n_iter_of_eps_calibration_call,
+                               n_eps_calibration_blocks * n_iter_per_block)
+        n_iter_discarded <-  ceiling(n_iter_of_call / n_eps_calibration_blocks)
         rows_measured <-  (n_iter_discarded + 1):n_iter_of_call
         minus_qnorm_of_half_adapt_delta <-  -stats::qnorm(adapt_delta / 2)
         max_calls <-  7

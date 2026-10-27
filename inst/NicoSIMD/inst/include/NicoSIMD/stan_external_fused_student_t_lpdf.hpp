@@ -6,7 +6,7 @@
 // with the same arguments and the same log density: y, nu, mu and sigma each a scalar or a vector (vector,
 // row_vector or array[] real; the vectors of one length), of data (double or int) or of parameters (var).
 // ONE pass over the observations, with the BayesMVP SIMD kernels (nico_log1p_1 and
-// nico_log_1 of fast_and_approx_AVX512_fns.hpp / fast_and_approx_AVX2_fns.hpp, as selected in
+// nico_log_1 of nico_and_approx_AVX512_fns.hpp / nico_and_approx_AVX2_fns.hpp, as selected in
 // stan_external_functions.hpp), computes the log density and every partial derivative which the argument
 // types need:
 //
@@ -33,8 +33,8 @@
 // i.e., the partial derivatives of stan::math::student_t_lpdf, with (nu + 1) * r / (1 + r) - 1
 // = nu - (nu + 1) * w. A scalar argument's partial derivative is the sum over the observations, e.g., with nu
 // and sigma scalars, d / d sigma = (N * nu - (nu + 1) * sum_i w_i) / sigma. The terms in nu alone (lgamma,
-// log(nu) and digamma) are computed once for a scalar nu, and once per element, with Stan's scalar functions,
-// for a vector nu (after the pass).
+// log(nu) and digamma) are computed once for a scalar nu and once per element for a vector nu (after the pass).
+// Scalar values use the native kernels; derivatives with respect to nu keep their separate path.
 //
 // propto = false: every term of stan::math::student_t_lpdf<false>. propto = true: as in Stan, the terms
 // without a parameter are dropped (log(sqrt(pi)); the terms in nu alone when nu is data; log(sigma) when sigma
@@ -66,6 +66,8 @@
 // -----------------------------------------------------------------------------------------------------------
 
 #include "stan_external_functions.hpp"
+#include "stan_external_lgamma.hpp"
+#include "math/nico_double_exp_log.hpp"
 
 #include <stan/math/rev.hpp>
 #include <stan/math/prim.hpp>
@@ -78,7 +80,7 @@
 #include <type_traits>
 #include <vector>
 
-#if !defined(BMVP_LANES) || !defined(BMVP_KERNEL_NAME)
+#if !defined(BMVP_LANES) || (!defined(BMVP_KERNEL_NAME) && !defined(NICO_SIMD_SCALAR_KERNELS))
 #  error "stan_external_fused_student_t_lpdf.hpp: stan_external_functions.hpp must be included first"
 #endif
 
@@ -91,7 +93,111 @@ namespace fused_student_t {
 //// ---- the SIMD operations of the pass, for the 8-lane (AVX-512) and the 4-lane (AVX2) kernels. lane_mask_t
 ////      holds the lanes in use: all of them, except in the last block of a vector whose length is not a
 ////      multiple of BMVP_LANES (its spare lanes are loaded as 1.0, never stored, and left out of every sum).
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+
+using lane_mask_t = bool;
+
+inline simd_t simd_set1(const double x) {
+
+    return x;
+
+}
+inline simd_t simd_zero() {
+
+    return 0.0;
+
+}
+inline simd_t simd_add(const simd_t a,
+                       const simd_t b) {
+
+    return a + b;
+
+}
+inline simd_t simd_sub(const simd_t a,
+                       const simd_t b) {
+
+    return a - b;
+
+}
+inline simd_t simd_mul(const simd_t a,
+                       const simd_t b) {
+
+    return a * b;
+
+}
+inline simd_t simd_div(const simd_t a,
+                       const simd_t b) {
+
+    return a / b;
+
+}
+inline simd_t simd_fmadd(const simd_t a,
+                         const simd_t b,
+                         const simd_t c) {
+
+    return std::fma(a, b, c);
+
+}
+inline simd_t simd_fnmadd(const simd_t a,
+                          const simd_t b,
+                          const simd_t c) {
+
+    return std::fma(-a, b, c);
+
+}
+inline double sum_of_lanes(const simd_t x) {
+
+    return x;
+
+}
+inline lane_mask_t first_lanes(const int n_lanes) {
+
+    return n_lanes > 0;
+
+}
+inline lane_mask_t no_lanes() {
+
+    return false;
+
+}
+inline bool any_lane(const lane_mask_t m) {
+
+    return m;
+
+}
+inline lane_mask_t lanes_or(const lane_mask_t a,
+                            const lane_mask_t b) {
+
+    return a || b;
+
+}
+inline lane_mask_t lanes_not_positive_finite(const simd_t x) {
+
+        return !(x > 0.0) || !(x < std::numeric_limits<double>::infinity());
+
+}
+inline simd_t simd_add_in_lanes(const simd_t x,
+                                const simd_t a,
+                                const lane_mask_t lanes) {
+
+        return x + (lanes ? a : 0.0);
+
+}
+inline simd_t simd_load_lanes(const double* p,
+                              const lane_mask_t lanes) {
+
+    return lanes ? p[0] : 1.0;
+
+}
+inline void simd_store_lanes(double* p,
+                             const simd_t x,
+                             const lane_mask_t lanes) {
+
+    if (lanes) p[0] = x;
+
+}
+
+#elif BMVP_LANES == 8
 
 using lane_mask_t = __mmask8;
 
@@ -202,8 +308,21 @@ inline void simd_store_lanes(double* p, const simd_t x, const lane_mask_t lanes)
 
 #endif
 
-inline simd_t simd_log1p(const simd_t x) { return BMVP_KERNEL_NAME(nico_log1p_1)(x); }
-inline simd_t simd_log(const simd_t x)   { return BMVP_KERNEL_NAME(nico_log_1)(x); }
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+inline simd_t simd_log1p(const simd_t x) {
+
+    return nico_log1p_1_double_precision(x);
+
+}
+inline simd_t simd_log(const simd_t x) {
+
+    return nico_log_1_double_precision(x);
+
+}
+#else
+inline simd_t simd_log1p(const simd_t x) { return BMVP_KERNEL_NAME(nico_log1p_1_double_precision)(x); }
+inline simd_t simd_log(const simd_t x)   { return BMVP_KERNEL_NAME(nico_log_1_double_precision)(x); }
+#endif
 
 
 
@@ -593,7 +712,7 @@ inline stan::return_type_t<T_y, T_nu, T_mu, T_sigma> student_t_lpdf( const T_y& 
         else                        log_density = -(0.5 * nu_scalar + 0.5) * sum_of_lanes(sum_log1p_lanes);
         if constexpr (include_log_sigma_term) {
                 if constexpr (sigma_is_vector) log_density -= sum_of_lanes(sum_log_sigma_lanes);
-                else                           log_density -= N * std::log(sigma_scalar);
+                else                           log_density -= N * nico_log_1_double_precision(sigma_scalar);
         }
 
         //// ---- an invalid argument: Stan's exception (a non-finite log density with valid arguments, e.g., at
@@ -602,14 +721,12 @@ inline stan::return_type_t<T_y, T_nu, T_mu, T_sigma> student_t_lpdf( const T_y& 
                 check_arguments_as_Stan();
         }
 
-        //// ---- the terms in nu alone: lgamma((nu + 1) / 2) - lgamma(nu / 2) - 0.5 * log(nu) (value), and, for a
-        ////      parameter nu, digamma((nu + 1) / 2) - digamma(nu / 2) (its partial derivative); with Stan's
-        ////      scalar functions, once for a scalar nu and once per element for a vector nu
+        //// ---- the terms in nu alone, once for a scalar nu and once per element for a vector nu
         if constexpr (include_log_sqrt_pi_term) log_density -= stan::math::LOG_SQRT_PI * N;
         if constexpr (!nu_is_vector && include_terms_in_nu_alone) {
                 const double half_nu = 0.5 * nu_scalar;
-                log_density += N * (stan::math::lgamma(half_nu + 0.5) - stan::math::lgamma(half_nu)
-                                    - 0.5 * std::log(nu_scalar));
+                log_density += N * (nico_lgamma(half_nu + 0.5, nullptr) - nico_lgamma(half_nu, nullptr)
+                                    - 0.5 * nico_log_1_double_precision(nu_scalar));
         }
         if constexpr (nu_is_vector && (include_terms_in_nu_alone || nu_is_parameter)) {
                 for (int i = 0; i < N; ++i) {

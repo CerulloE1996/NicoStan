@@ -135,7 +135,9 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                                  "stanc_args",
                                  "make_args",
                                  "n_nuisance_override",
-                                 "nuisance_blocks_held_by_NicoStan")
+                                 "nuisance_blocks_held_by_NicoStan",
+                                 "names_of_the_nuisance_blocks_of_a_regular_library",
+                                 "auto_chunking")
         arguments$init_object <-  stats::setNames( object = lapply(X = init_metadata_names,
                                                                    FUN = function(field_name) {
 
@@ -425,7 +427,8 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
         output$init_object$bs_model <-  tryCatch({
                 R_fn_create_BridgeStan_model( lib = output$init_object$model_so_file,
                                               data = output$init_object$json_file_path,
-                                              seed = 123)
+                                              seed = 123,
+                                              auto_chunking = isTRUE(output$init_object$auto_chunking))
         }, error = function(condition) {
 
                 stop(paste0("Fresh-process sampler completed, but the parent could not rebuild ",

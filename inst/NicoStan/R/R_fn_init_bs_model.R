@@ -39,7 +39,8 @@ R_fn_create_BridgeStan_model <-  function( lib,
                                           data,
                                           seed = 123,
                                           stanc_args = NULL,
-                                          make_args = NULL
+                                          make_args = NULL,
+                                          auto_chunking
 ) {
 
         package_name <-  get0( x = ".nicostan_provider_package",
@@ -49,6 +50,52 @@ R_fn_create_BridgeStan_model <-  function( lib,
                                ifnotfound = "NicoStan")
         ##
         R_fn_stop_if_several_TBB_copies_loaded(package_name = package_name)
+        if (!(isTRUE(auto_chunking) || isFALSE(auto_chunking))) stop("auto_chunking must be TRUE or FALSE.")
+        ##
+        ## ---- AUTO-CHUNKING: the library built from the model's own Stan file, its sums over rows chunked ------------------------------
+        ##
+        if (tools::file_ext(lib) == "stan") {
+
+                if (auto_chunking) {
+
+                        library <-  R_fn_library_of_Stan_model_file(model_file = lib,
+                                                                    auto_chunking = TRUE)
+                        if (!file.exists(library)) {
+
+                                stop(paste0("No AUTO-CHUNKING library for ", lib, ": build it first with ",
+                                            "R_fn_build_auto_chunked_BridgeStan_library(), with the names of ",
+                                            "the model's nuisance blocks (names_of_the_nuisance_blocks)."))
+
+                        }
+                        ## (a model with no sum over rows to chunk: its own library, built here when missing)
+                        if (file.exists(library)) lib <-  library
+                        if (grepl("_auto_chunked_model[.]so$", lib)) R_fn_check_auto_chunked_BridgeStan_library(lib)
+
+                }
+
+        } else {
+
+                library_is_auto_chunked <-  grepl("_auto_chunked_model[.]so$", lib) ||
+                                            file.exists(sub("_model[.]so$", "_auto_chunking_report.rds", lib))
+                ##
+                ## ---- A library is loaded only with the auto_chunking it was built with ----------------------------------------------
+                ##
+                if (library_is_auto_chunked && !auto_chunking) {
+
+                        stop("auto_chunking = FALSE, but this is an AUTO-CHUNKING library: ", lib)
+
+                }
+                if (!library_is_auto_chunked && auto_chunking &&
+                    !identical(normalizePath(lib, mustWork = FALSE),
+                               R_fn_library_of_Stan_model_file(model_file = sub("_model[.]so$", ".stan", lib),
+                                                               auto_chunking = TRUE))) {
+
+                        stop("auto_chunking = TRUE, but this is the model's library without AUTO-CHUNKING: ", lib)
+
+                }
+                if (library_is_auto_chunked) R_fn_check_auto_chunked_BridgeStan_library(library = lib)
+
+        }
         ##
         bs_model <-  tryCatch(
               bridgestan::StanModel$new( lib = lib,
@@ -80,9 +127,17 @@ init_bs_model_external <- function( stream = NULL,
                                     Stan_data_list,
                                     Stan_model_file_path,
                                     stanc_args = NULL,
-                                    make_args = NULL
+                                    make_args = NULL,
+                                    auto_chunking
 ) {
   
+        if (!(isTRUE(auto_chunking) || isFALSE(auto_chunking))) stop("auto_chunking must be TRUE or FALSE.")
+        ## (an AUTO-CHUNKING library reads its number of chunks from the data: one chunk unless they give it)
+        if (auto_chunking && is.null(Stan_data_list$N_chunks_of_auto_chunking)) {
+
+                Stan_data_list$N_chunks_of_auto_chunking <-  1L
+
+        }
         outs <- get_BayesMVP_Stan_paths()
         pkg_dir <- outs$pkg_dir
         data_dir <- outs$data_dir
@@ -90,7 +145,9 @@ init_bs_model_external <- function( stream = NULL,
         ##
         if (length(Stan_data_list) == 0) {
           
-              ## ---- a model with NO data: cmdstanr::write_stan_json() would write an
+              ##
+              ## ---- a model with NO data: cmdstanr::write_stan_json() would write an ------------------------------------------------
+              ##
               ## empty ARRAY ([]), but BridgeStan requires an empty OBJECT ({}):
               json_file_path <- file.path( data_dir,
                                            paste0( "data_empty_",
@@ -117,7 +174,8 @@ init_bs_model_external <- function( stream = NULL,
               raw_content <- paste(readLines(json_file_path), collapse = "")
               
               ##
-              ## ---- Proper JSON object (the normal case): no parse / rewrite round trip.
+              ## ---- Proper JSON object (the normal case): no parse / rewrite round trip. --------------------------------------------
+              ##
               ##      convert_stan_data_list_to_JSON() writes the data with cmdstanr::write_stan_json(), i.e. a
               ##      JSON object starting with "{", which BridgeStan and CmdStan read natively. The fromJSON /
               ##      unwrap / write_json / re-read path below is only needed for LEGACY double-encoded files (a
@@ -146,7 +204,9 @@ init_bs_model_external <- function( stream = NULL,
 
               } else {
 
-              ## ---- LEGACY path (JSON not starting with "{", e.g. a double-encoded file): parse, unwrap if
+              ##
+              ## ---- LEGACY path (JSON not starting with "{", e.g. a double-encoded file): parse, unwrap if --------------------------
+              ##
               ##      double-encoded, rewrite the file atomically and re-read it:
               # Try to parse it
               parsed <- tryCatch({
@@ -156,32 +216,38 @@ init_bs_model_external <- function( stream = NULL,
                 stop("Invalid JSON in file: ", e$message)
               })
 
-              
-              # Check if it's wrapped in an array containing a string
-              if (is.character(parsed) && length(parsed) == 1) {
-                # It's double-encoded, extract the inner JSON
-                json_data <- jsonlite::fromJSON(parsed[1], simplifyVector = FALSE)
+              ##
+              ## ---- the inner JSON of a double-encoded file (a JSON string, or an array of one JSON string), as -----------------
+              ##
+              ##      cmdstanr::write_stan_json() wrote it: written back as it is, never re-encoded by jsonlite, whose
+              ##      auto_unbox turns every array of length 1 into a number (e.g. an array of vector[1] into an array
+              ##      of reals, which BridgeStan refuses); anything else is not Stan data:
+              inner_JSON <-  if (is.character(parsed) && length(parsed) == 1) {
+                    parsed
+              } else if (is.list(parsed) && length(parsed) == 1 && is.character(parsed[[1]]) &&
+                         length(parsed[[1]]) == 1) {
+                    parsed[[1]]
               } else {
-                # It's already proper JSON data
-                json_data <- parsed
+                    NULL
               }
-              
-              # # Validate it has expected structure
-              # if (!all(c("N", "y") %in% names(json_data))) {
-              #   warning("JSON data missing required fields N and y")
-              # }
-              
-              # Preserve singleton/empty array ranks when unwrapping legacy JSON.
+              if (is.null(inner_JSON) || !startsWith(x = trimws(x = inner_JSON, which = "left"), prefix = "{") ||
+                  !isTRUE(jsonlite::validate(inner_JSON))) {
+                    stop(paste0("init_bs_model_external: ", json_file_path, " is neither a JSON object nor a ",
+                                "double-encoded one; write the Stan data with cmdstanr::write_stan_json() ",
+                                "(never jsonlite, whose auto_unbox changes the dimensions of arrays of length 1)."))
+              }
+              ##
               # Rewritten ATOMICALLY (temporary file + rename): this file is shared by concurrent fits with the
               # same data, and an in-place rewrite let another process read it half-written ("premature EOF"):
               fn_write_file_atomically( target_file_path                = json_file_path,
                                         fn_write_to_temporary_file_path = function(temporary_file_path) {
 
-                                              jsonlite::write_json( x = json_data, path = temporary_file_path, 
-                                                                    auto_unbox = TRUE, digits = NA, pretty = FALSE)
+                                              writeLines( text     = inner_JSON,
+                                                          con      = temporary_file_path,
+                                                          useBytes = TRUE)
                                         })
 
-              
+
               # Read the validated string for bridgestan
               validated_json_string <- paste(readLines(json_file_path), collapse = "")
 
@@ -199,7 +265,8 @@ init_bs_model_external <- function( stream = NULL,
         ##                list("STAN_THREADS=true") for reduce_sum models). These are
         ##                distinct: stanc_args never affect the C++ compilation flags.
         ##
-        ## ---- STAN_THREADS: get_BayesMVP_Stan_paths() exports STAN_THREADS=true to make, so
+        ## ---- STAN_THREADS: get_BayesMVP_Stan_paths() exports STAN_THREADS=true to make, so -----------------------------------------
+        ##
         ## the model is built with a thread-local autodiff stack (safe for parallel chains).
         ## A model built WITHOUT it has ONE global autodiff stack: concurrent
         ## log_density_gradient calls from parallel chains race on
@@ -208,10 +275,12 @@ init_bs_model_external <- function( stream = NULL,
         ## up-to-date, so a stale non-threads .so would never be rebuilt -- detect
         ## it by its embedded flag and delete it to force a fresh, threads build:
         page_release_linux <-  identical(x = Sys.info()[["sysname"]], y = "Linux")
-        model_so_file <-  normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
+        model_so_file <-  normalizePath(R_fn_library_of_Stan_model_file(model_file = Stan_model_file_path,
+                                                                        auto_chunking = auto_chunking),
+                                        mustWork = FALSE)
         model_library_needs_build <-  !file.exists(model_so_file)
         ## (a library older than its Stan file was not built from that file: it was reused before, whatever its
-        ##  Stan file, e.g. a nico_reduce_sum version written again after its library was built; now the fit stops,
+        ##  Stan file, e.g. a nico_reduce_sum version written after its library was built; now the fit stops,
         ##  naming both files and their times, so that the library is built once beforehand, never inside a fit:
         ##  models already built are never built again)
         if (!model_library_needs_build && file.exists(Stan_model_file_path) &&
@@ -278,7 +347,9 @@ init_bs_model_external <- function( stream = NULL,
                     "; reduce_sum_upstream_proof=",
                     unit_upstream_proof$reason)
         }
-        model_so_file <- normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
+        model_so_file <-  normalizePath(R_fn_library_of_Stan_model_file(model_file = Stan_model_file_path,
+                                                                        auto_chunking = auto_chunking),
+                                        mustWork = FALSE)
         ##
         if (file.exists(model_so_file)) {
               raw_so <-  readBin( con = model_so_file,
@@ -309,7 +380,8 @@ init_bs_model_external <- function( stream = NULL,
                                                   data = validated_json_string,
                                                   seed = 123,
                                                   stanc_args = stanc_args,
-                                                  make_args = make_args)
+                                                  make_args = make_args,
+                                                  auto_chunking = auto_chunking)
         ## the fingerprint is written only when it differs, and through a temporary file renamed over
         ## it: several processes start fits of the same model at once, and rewriting it in place (writeLines()
         ## empties the file first) let another process read it empty, take the model as stale, delete its .so and
@@ -333,12 +405,15 @@ init_bs_model_external <- function( stream = NULL,
         json_file_path <- normalizePath(json_file_path)
         ##
         Stan_model_file_path <- normalizePath(Stan_model_file_path)
-        model_so_file <- normalizePath(transform_stan_path(Stan_model_file_path), mustWork = FALSE)
+        model_so_file <-  normalizePath(R_fn_library_of_Stan_model_file(model_file = Stan_model_file_path,
+                                                                        auto_chunking = auto_chunking),
+                                        mustWork = FALSE)
         
         return(list(bs_model = bs_model, 
                     json_file_path = json_file_path, 
                     model_so_file = model_so_file,
-                    Stan_model_file_path = Stan_model_file_path))
+                    Stan_model_file_path = Stan_model_file_path,
+                    auto_chunking = auto_chunking))
   
 }
 

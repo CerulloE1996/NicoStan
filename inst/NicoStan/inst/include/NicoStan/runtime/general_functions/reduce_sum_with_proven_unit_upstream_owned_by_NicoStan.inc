@@ -14,11 +14,15 @@
 //     other use stops the gradient with an error, since the chunks' adjoints were added with a factor of 1.
 // The gradient is the same as that of the model with the nuisance block declared as parameters, up to the
 // order of the additions of the few values read outside their own chunk.
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -26,16 +30,189 @@ namespace stan {
 namespace math {
 namespace internal {
 
+//// the (value, node) of every value read on the main tape, kept as runs: one entry for each run of values
+//// read one after another whose nodes were made at addresses one node apart (as nodes made one after another
+//// are), never one entry per value; iterated as the (value, node) of every value, in the order they were read.
+//// Nodes of the model's own tape are marked shared: a repeated read of their value returns the same node.
+//// Values read out of order (more runs than number_of_runs_before_the_node_of_every_value): from then on one
+//// (value, node) pair per value, as before the runs, iterated after the runs
+class nicostan_nodes_on_the_main_tape_t {
+ public:
+  //// (the address of a run's node k: the address of its first node plus k node sizes, in integers; a run grows
+  ////  only when the new node's own address is that address)
+  static_assert(std::is_same<vari, vari_value<double>>::value, "the nodes of the values are vari_value<double>");
+  static constexpr std::uintptr_t node_stride = sizeof(vari_value<double>);
+
+  struct run_t {
+    std::uintptr_t first_address;
+    int first_value;
+    int n;
+    bool shared;
+  };
+
+  //// (indices into the runs and the pairs, the runs first)
+  class iterator {
+    const nicostan_nodes_on_the_main_tape_t* nodes_;
+    std::size_t number_of_runs_;
+    std::size_t run_;
+    int offset_;
+    std::size_t pair_;
+
+   public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = std::pair<int, vari*>;
+    using difference_type = std::ptrdiff_t;
+    using pointer = void;
+    using reference = value_type;
+    iterator(const nicostan_nodes_on_the_main_tape_t* nodes, std::size_t run, int offset, std::size_t pair)
+        : nodes_(nodes), number_of_runs_(nodes->runs_.size()), run_(run), offset_(offset), pair_(pair) {}
+    value_type operator*() const {
+      if (run_ < number_of_runs_) {
+        const run_t& run = nodes_->runs_[run_];
+        return value_type(run.first_value + offset_,
+                          reinterpret_cast<vari*>(run.first_address +
+                                                  static_cast<std::uintptr_t>(offset_) * node_stride));
+      }
+      return nodes_->pairs_[pair_];
+    }
+    iterator& operator++() {
+      if (run_ < number_of_runs_) {
+        if (++offset_ == nodes_->runs_[run_].n) {
+          ++run_;
+          offset_ = 0;
+        }
+      } else {
+        ++pair_;
+      }
+      return *this;
+    }
+    bool operator==(const iterator& other) const {
+      return run_ == other.run_ && offset_ == other.offset_ && pair_ == other.pair_;
+    }
+    bool operator!=(const iterator& other) const { return !(*this == other); }
+  };
+
+  iterator begin() const { return iterator(this, 0, 0, 0); }
+  iterator end() const { return iterator(this, runs_.size(), 0, pairs_.size()); }
+  bool empty() const { return runs_.empty() && pairs_.empty(); }
+  std::size_t number_of_runs() const { return runs_.size(); }
+  std::size_t number_of_pairs() const { return pairs_.size(); }
+
+  //// above this many runs the values are read out of order: from then on one (value, node) pair per value, and
+  //// a node pointer per value (nicostan_nuisance_block_t::nodes_by_value_on_the_main_tape), as before the runs
+  static constexpr std::size_t number_of_runs_before_the_node_of_every_value = 32;
+  bool values_read_out_of_order() const { return values_read_out_of_order_; }
+  //// (the node pointers are written chunk by chunk)
+  static constexpr int values_per_chunk_of_the_node_of_every_value = 512;
+  //// the node of every shared value of the runs at its value, nullptr for the others
+  void fill_the_node_of_every_value(std::vector<vari*>& node_of_every_value, int size) const {
+    const int chunk = values_per_chunk_of_the_node_of_every_value;
+    node_of_every_value.clear();
+    node_of_every_value.reserve(size);
+    for (int first = 0; first < size; first += chunk) {
+      node_of_every_value.insert(node_of_every_value.end(), std::min(chunk, size - first), nullptr);
+    }
+    for (const run_t& run : runs_) {
+      if (!run.shared) continue;
+      for (int first = 0; first < run.n; first += chunk) {
+        const int length = std::min(chunk, run.n - first);
+        const std::size_t first_index = static_cast<std::size_t>(run.first_value) + first;
+        const std::uintptr_t first_address = run.first_address + static_cast<std::uintptr_t>(first) * node_stride;
+        for (int k = 0; k < length; ++k) {
+          node_of_every_value[first_index + k] =
+                reinterpret_cast<vari*>(first_address + static_cast<std::uintptr_t>(k) * node_stride);
+        }
+      }
+    }
+  }
+
+  //// a node of a nested tape: listed, never shared
+  void emplace_back(int value, vari* node) { add(value, node, false); }
+  //// a node of the model's own tape: listed and shared
+  void emplace_back_shared(int value, vari* node) { add(value, node, true); }
+
+  //// the shared node of a value in the runs, or nullptr (the run of the last value found, then the next run,
+  //// first: a repeated read goes through the values in the same order)
+  vari* shared_node_of_value(int value) {
+    if (value < first_shared_value_ || value >= end_of_the_shared_values_) return nullptr;
+    const std::size_t n_runs = runs_.size();
+    for (std::size_t k = run_of_the_last_value_found_; k < n_runs && k < run_of_the_last_value_found_ + 2;
+         ++k) {
+      const run_t& run = runs_[k];
+      if (run.shared && value >= run.first_value && value < run.first_value + run.n) {
+        run_of_the_last_value_found_ = k;
+        return node_of_run(run, value);
+      }
+    }
+    for (std::size_t k = 0; k < n_runs; ++k) {
+      const run_t& run = runs_[k];
+      if (run.shared && value >= run.first_value && value < run.first_value + run.n) {
+        run_of_the_last_value_found_ = k;
+        return node_of_run(run, value);
+      }
+    }
+    return nullptr;
+  }
+
+  void clear() {
+    runs_.clear();
+    pairs_.clear();
+    values_read_out_of_order_ = false;
+    run_of_the_last_value_found_ = 0;
+    first_shared_value_ = std::numeric_limits<int>::max();
+    end_of_the_shared_values_ = 0;
+  }
+
+ private:
+  std::vector<run_t> runs_;
+  std::vector<std::pair<int, vari*>> pairs_;
+  bool values_read_out_of_order_ = false;
+  std::size_t run_of_the_last_value_found_ = 0;
+  int first_shared_value_ = std::numeric_limits<int>::max();
+  int end_of_the_shared_values_ = 0;
+
+  static vari* node_of_run(const run_t& run, int value) {
+    return reinterpret_cast<vari*>(run.first_address +
+                                   static_cast<std::uintptr_t>(value - run.first_value) * node_stride);
+  }
+
+  void add(int value, vari* node, bool shared) {
+    if (values_read_out_of_order_) {
+      pairs_.emplace_back(value, node);
+      return;
+    }
+    if (shared) {
+      if (value < first_shared_value_) first_shared_value_ = value;
+      if (value + 1 > end_of_the_shared_values_) end_of_the_shared_values_ = value + 1;
+    }
+    const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(node);
+    if (!runs_.empty()) {
+      run_t& last = runs_.back();
+      if (last.shared == shared && value == last.first_value + last.n &&
+          address == last.first_address + static_cast<std::uintptr_t>(last.n) * node_stride) {
+        ++last.n;
+        return;
+      }
+    }
+    runs_.push_back(run_t{address, value, 1, shared});
+    if (runs_.size() > number_of_runs_before_the_node_of_every_value) values_read_out_of_order_ = true;
+  }
+};
+
 struct nicostan_nuisance_block_t {
   const double* values = nullptr;   // NicoStan's array of the nuisance values (0-based)
   double* gradient = nullptr;       // NicoStan's array of their gradient, zeroed before the gradient call
   int size = 0;
-  std::vector<std::pair<int, vari*>> nodes_on_the_main_tape;     // (unit, node) of values read on the main tape
+  // std::vector<std::pair<int, vari*>> nodes_on_the_main_tape;   // (unit, node) of values read on the main tape
+  nicostan_nodes_on_the_main_tape_t nodes_on_the_main_tape;        // (unit, node) of values read on the main tape
   std::vector<std::pair<int, double>> adjoints_from_other_chunks;  // (unit, adjoint) of values read by the chunk
   std::mutex mutex_of_the_adjoints_from_other_chunks;              //  of another unit
   std::atomic<bool> read_inside_a_reduce_sum{false};
   //// Repeated main-tape reads share one leaf per nuisance value within this gradient only.
   //// No storage is allocated for a model which reads its nuisance values only inside chunks.
+  //// (filled only once the values are read out of order, i.e. in more runs than
+  ////  nicostan_nodes_on_the_main_tape_t::number_of_runs_before_the_node_of_every_value; until then the shared
+  ////  runs of nodes_on_the_main_tape find a value's node; cleared by BridgeStan's gradient)
   std::vector<vari*> nodes_by_value_on_the_main_tape;
   const ChainableStack::AutodiffStackStorage* identity_of_the_main_tape = nullptr;
   std::size_t nested_depth_of_the_main_tape = std::numeric_limits<std::size_t>::max();

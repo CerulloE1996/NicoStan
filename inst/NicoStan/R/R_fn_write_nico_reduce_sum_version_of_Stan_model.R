@@ -110,12 +110,41 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                                    x = nico_reduce_sum_Stan_model_file_path)
         user_header_of_the_version <-  sub(pattern = "\\.stan$", replacement = "_user_header.hpp",
                                            x = nico_reduce_sum_Stan_model_file_path)
+        ##
+        ## ---- the md5 of a version with its E5 cell label block left out (the lines from "// ---- E5 cell label"
+        ##      to "// ---- end of the E5 cell label"), so that a version whose only change is its label is kept:
+        ##
+        fn_md5_of_the_version_without_its_E5_cell_label <-  function(file) {
+
+              lines_of_the_file <-  readLines(con = file, warn = FALSE)
+              where_first <-  which(startsWith(lines_of_the_file, "// ---- E5 cell label"))
+              where_last <-  which(startsWith(lines_of_the_file, "// ---- end of the E5 cell label"))
+              if ((length(where_first) == 1) && (length(where_last) == 1) && (where_first < where_last)) {
+                    lines_of_the_file <-  lines_of_the_file[-(where_first:where_last)]
+              }
+              file_of_the_lines <-  tempfile(fileext = ".stan")
+              writeLines(text = lines_of_the_file, con = file_of_the_lines)
+              md5_of_the_lines <-  unname(tools::md5sum(files = file_of_the_lines))
+              unlink(file_of_the_lines)
+              return(md5_of_the_lines)
+
+        }
         if (file.exists(file_of_the_record) && file.exists(nico_reduce_sum_Stan_model_file_path) &&
             file.exists(user_header_of_the_version)) {
               record_of_the_writer <-  tryCatch(readRDS(file_of_the_record), error = function(e) NULL)
+              # if (!is.null(record_of_the_writer) && identical(record_of_the_writer$key, key_of_this_version) &&
+              #     identical(record_of_the_writer$md5_of_the_version,
+              #               unname(tools::md5sum(files = nico_reduce_sum_Stan_model_file_path))) &&
+              #     identical(record_of_the_writer$md5_of_the_user_header,
+              #               unname(tools::md5sum(files = user_header_of_the_version)))) {
+              ## (the version as written, or the version as written with only its E5 cell label changed)
               if (!is.null(record_of_the_writer) && identical(record_of_the_writer$key, key_of_this_version) &&
-                  identical(record_of_the_writer$md5_of_the_version,
-                            unname(tools::md5sum(files = nico_reduce_sum_Stan_model_file_path))) &&
+                  (identical(record_of_the_writer$md5_of_the_version,
+                             unname(tools::md5sum(files = nico_reduce_sum_Stan_model_file_path))) ||
+                   (!is.null(record_of_the_writer$md5_of_the_version_without_its_E5_cell_label) &&
+                    identical(record_of_the_writer$md5_of_the_version_without_its_E5_cell_label,
+                              fn_md5_of_the_version_without_its_E5_cell_label(
+                                    file = nico_reduce_sum_Stan_model_file_path)))) &&
                   identical(record_of_the_writer$md5_of_the_user_header,
                             unname(tools::md5sum(files = user_header_of_the_version)))) {
                     return(record_of_the_writer$result)
@@ -1149,7 +1178,7 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
         ##      chunk's own tape (theta[start:end], theta[start:end, 1], C_raw[c][start:end, ], ...;
         ##      fn_candidates_of_a_use_in_a_chunk(); a use the readers cannot index reads the whole block, on the
         ##      chunk's own tape). The log-Jacobian of a constrained block passed so is added by a reduce_sum of
-        ##      its own over the block's terms, with the same grainsize, just before the statement of that
+        ##      its own over the block's terms, with the same chunk_size, just before the statement of that
         ##      reduce_sum, when that statement adds its value to the target as it is, at the top level of the
         ##      model block (else by jacobian += in the transformed parameters block, see below):
         ##
@@ -1417,7 +1446,7 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
               closing_of_body <-  fn_position_of_closing_bracket(text, opening_of_body)
               function_arguments <-  trimws(fn_split_at_top_level(substr(text, opening_of_arguments + 1,
                                                                          closing_of_arguments - 1), ","))
-              ## (the call's argument k, after the function, the sliced argument and the grainsize, is the
+              ## (the call's argument k, after the function, the sliced argument and the chunk_size, is the
               ##  function's argument k, after the slice, start and end)
               parameter_name <-  sub(pattern = "^.*[^A-Za-z0-9_]([A-Za-z0-9_]+)$", replacement = "\\1",
                                      x = trimws(fn_without_markers(function_arguments[position_of_the_block])))
@@ -1715,12 +1744,28 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
               return(invisible(TRUE))
         }
 
+        ## (each reduce_sum_static call this writer rewrote, i.e. whose partial sum is its _nicostan_chunked_of_
+        ##  copy, calls NicoStan's name, nico_reduce_sum_static; every other call is left as the model has it;
+        ##  R_fn_Stan_parallel_call_names gives stanc Stan's name back, so the C++ is the same)
+        text_with_the_name_of_NicoStan <-  gsub(
+              pattern = paste0("(?<![A-Za-z0-9_])reduce_sum_static",
+                               "(\\s*\\(\\s*[A-Za-z_][A-Za-z0-9_]*_nicostan_chunked_of_)"),
+              replacement = "nico_reduce_sum_static\\1",
+              x = text,
+              perl = TRUE)
+        # fn_write_lines_when_they_change(lines  = c(paste0("// ", name_of_the_method_in_the_written_comments,
+        #                                                   " version of ", basename(Stan_model_file_path),
+        #                                                   ", written by NicoStan: its nuisance blocks (",
+        #                                                   paste(nuisance_params, collapse = ", "),
+        #                                                   ") are held by NicoStan inside the chunks"),
+        #                                            fn_restore(text)),
+        #                                 file   = nico_reduce_sum_Stan_model_file_path)
         fn_write_lines_when_they_change(lines  = c(paste0("// ", name_of_the_method_in_the_written_comments,
                                                           " version of ", basename(Stan_model_file_path),
                                                           ", written by NicoStan: its nuisance blocks (",
                                                           paste(nuisance_params, collapse = ", "),
                                                           ") are held by NicoStan inside the chunks"),
-                                                   fn_restore(text)),
+                                                   fn_restore(text_with_the_name_of_NicoStan)),
                                         file   = nico_reduce_sum_Stan_model_file_path)
         # readers_header <-  system.file("include", "NicoStan", "runtime", "general_functions",
         #                                "stan_external_nuisance_values_of_the_block_owned_by_NicoStan.hpp",
@@ -1866,6 +1911,9 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                       key                     = key_of_this_version,
                       md5_of_the_version      = unname(tools::md5sum(
                                                       files = nico_reduce_sum_Stan_model_file_path)),
+                      md5_of_the_version_without_its_E5_cell_label =
+                            fn_md5_of_the_version_without_its_E5_cell_label(
+                                  file = nico_reduce_sum_Stan_model_file_path),
                       md5_of_the_user_header  = unname(tools::md5sum(files = user_header)),
                       result                  = result_of_the_writer),
                 file = temporary_file_of_the_record)

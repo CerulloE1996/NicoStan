@@ -187,8 +187,12 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                                                         seed = initial_values_seed)
         ##
         ## ---- a library in NicoStan's nuisance-block form (n_nuisance_owned_by_NicoStan > 0): its nuisance
-        ##      values are not BridgeStan parameters; the gradient is measured with them at 0 (the values used
-        ##      outside NicoStan's gradient call), the same memory per unit as in NicoStan's gradient call
+        ##      values are not BridgeStan parameters, all 0 here; the log densities without the gradient (the
+        ##      search of a finite point) use the values set for evaluations outside NicoStan's gradient call,
+        ##      and the ONE measured gradient goes through NicoStan's own gradient call, with the nuisance block
+        ##      held, as NicoStan's sampler runs it: one node per nuisance value on the main tape, where the
+        ##      values used outside NicoStan make a node at every read (a model that reads a value more than
+        ##      once on the main tape, e.g. the Cox packing, would be measured too large)
         ##
         if (n_nuisance_owned_by_NicoStan > 0) {
               ## (called through do.call(): the routine is in the model library, not in NicoStan's own, and a
@@ -197,6 +201,46 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
                                   as.double(rep(0, n_nuisance_owned_by_NicoStan)),
                                   as.integer(n_nuisance_owned_by_NicoStan),
                                   PACKAGE = tools::file_path_sans_ext(basename(model_so_file))))
+        }
+        nuisance_values_of_the_gradient <-  as.double(rep(0, n_nuisance_owned_by_NicoStan))
+        nuisance_gradient_of_the_gradient <-  double(n_nuisance_owned_by_NicoStan)
+        ##
+        ## ---- one log density and gradient, through NicoStan's own gradient call for a nuisance-block library
+        ##      (the .C copies of its two nuisance-sized vectors, 16 bytes per nuisance value, are in the measurement)
+        ##
+        fn_log_density_gradient_of_the_measurement <-  function(theta_unconstrained) {
+
+              if (n_nuisance_owned_by_NicoStan == 0) {
+
+                    return(bridgestan_model$log_density_gradient( theta_unc = theta_unconstrained,
+                                                                  propto    = propto,
+                                                                  jacobian  = jacobian))
+
+              }
+              private_fields <-  bridgestan_model$.__enclos_env__$private
+              out <-  do.call(".C", list( "nicostan_bs_log_density_gradient_with_the_nuisance_block_R",
+                                          as.raw(private_fields$model),
+                                          as.logical(propto),
+                                          as.logical(jacobian),
+                                          as.double(theta_unconstrained),
+                                          nuisance_values_of_the_gradient,
+                                          nuisance_gradient = nuisance_gradient_of_the_gradient,
+                                          as.integer(n_nuisance_owned_by_NicoStan),
+                                          val = double(1),
+                                          gradient = double(length(theta_unconstrained)),
+                                          return_code = as.integer(0),
+                                          err_msg = as.character(""),
+                                          err_ptr = raw(8),
+                                          NAOK = TRUE,
+                                          PACKAGE = private_fields$lib_name))
+              if (out$return_code != 0) {
+
+                    stop(paste0("fn_estimate_initial_M_bytes_per_chain: NicoStan's gradient call with the nuisance ",
+                                "block failed: ", out$err_msg))
+
+              }
+              return(list(val = out$val, gradient = out$gradient))
+
         }
         ##
         n_unconstrained_parameters <-  bridgestan_model$param_unc_num()
@@ -405,9 +449,7 @@ fn_measure_one_gradient_memory_in_this_process <-  function( model_so_file,
         ##
         ## ---- ONE log density and gradient:
         ##
-        log_density_and_gradient <-  bridgestan_model$log_density_gradient( theta_unc = theta_unconstrained,
-                                                                            propto    = propto,
-                                                                            jacobian  = jacobian)
+        log_density_and_gradient <-  fn_log_density_gradient_of_the_measurement(theta_unconstrained)
         ##
         VmHWM_and_VmRSS_after_gradient <-  fn_read_VmHWM_and_VmRSS_bytes()
         VmHWM_after_gradient_bytes <-  VmHWM_and_VmRSS_after_gradient[["VmHWM"]]
@@ -836,8 +878,8 @@ fn_locate_free_heap_release_function <-  function() {
 #'     in tests at 1,000 and 5,000 individuals, depending on the seed), so the initial values of the real run (init_list) or,
 #'     by default, zero on the unconstrained scale are used.
 #'   \item It must use the same compiled model, the same data (the full data, not a subset) and the same settings as the real
-#'     run. For a model with within-chain chunking (e.g. reduce_sum), the model should be evaluated as one chunk (a chunk or
-#'     grain size equal to the number of observations), otherwise the result is the memory of one chunk, not of the full data.
+#'     run. For a model with within-chain chunking (e.g. reduce_sum), the model should be evaluated as one chunk (a chunk
+#'     size equal to the number of observations), otherwise the result is the memory of one chunk, not of the full data.
 #'   \item The evaluation is single-threaded (STAN_NUM_THREADS = 1 in the child process).
 #'   \item Linux only: it reads /proc/self/status and /proc/self/smaps_rollup and writes /proc/self/clear_refs. If the peak
 #'     cannot be reset in a repeat, that repeat uses the resident growth only (which misses temporaries freed before the
@@ -1043,10 +1085,43 @@ fn_estimate_initial_M_bytes_per_chain <-  function( model_so_file               
               file_of_the_kept_measurements <-  file.path(folder_of_the_kept_measurements,
                                                           "M_bytes_per_chain_kept.rds")
         }
+        # name_of_this_case <-  paste0("library_", file.size(model_so_file), "_bytes_modified_",
+        #                              format(as.numeric(file.mtime(model_so_file)), digits = 17), "_data_",
+        #                              file.size(json_file_path), "_bytes_nuisance_", n_nuisance_owned_by_NicoStan,
+        #                              "_propto_", propto, "_jacobian_", jacobian)
+        ##
+        ## ---- chunk_size and N_blocks of the data are part of the case (data of one size in bytes can hold
+        ##      different chunk sizes), N_blocks as given in the data or ceiling(N / chunk_size)
+        ##
+        text_of_the_data <-  readChar(con = json_file_path, nchars = file.size(json_file_path), useBytes = TRUE)
+        fn_integer_of_the_data <-  function(name) {
+
+              found <-  regmatches(x = text_of_the_data,
+                                   m = regexec(pattern = paste0("\"", name, "\"\\s*:\\s*\\[?\\s*([0-9]+)"),
+                                               text = text_of_the_data))[[1]]
+              if (length(x = found) == 2) return(as.numeric(found[2]))
+              return(NA_real_)
+
+        }
+        chunk_size_of_the_data <-  fn_integer_of_the_data(name = "chunk_size")
+        N_blocks_of_the_data <-  fn_integer_of_the_data(name = "N_blocks")
+        if (is.na(N_blocks_of_the_data) && !is.na(chunk_size_of_the_data)) {
+              N_blocks_of_the_data <-  ceiling(fn_integer_of_the_data(name = "N") / chunk_size_of_the_data)
+        }
+        ## (an AUTO-CHUNKING library's number of chunks, read from its data: part of the case, so that two numbers
+        ##  of chunks whose data files have the same size are never one measurement)
+        N_chunks_of_auto_chunking_of_the_data <-  fn_integer_of_the_data(name = "N_chunks_of_auto_chunking")
         name_of_this_case <-  paste0("library_", file.size(model_so_file), "_bytes_modified_",
                                      format(as.numeric(file.mtime(model_so_file)), digits = 17), "_data_",
                                      file.size(json_file_path), "_bytes_nuisance_", n_nuisance_owned_by_NicoStan,
-                                     "_propto_", propto, "_jacobian_", jacobian)
+                                     "_propto_", propto, "_jacobian_", jacobian,
+                                     "_chunk_size_", chunk_size_of_the_data, "_N_blocks_", N_blocks_of_the_data,
+                                     if (!is.na(N_chunks_of_auto_chunking_of_the_data))
+                                           paste0("_N_chunks_of_auto_chunking_",
+                                                  N_chunks_of_auto_chunking_of_the_data) else "",
+                                     ## (a nuisance-block library measured through NicoStan's own gradient call:
+                                     ##  never one of the measurements kept before, through the values used outside)
+                                     if (n_nuisance_owned_by_NicoStan > 0) "_through_NicoStans_gradient_call" else "")
         kept_measurements <-  list()
         for (file_to_read in unique(c(earlier_file_of_the_kept_measurements,
                                      file_of_the_kept_measurements))) {

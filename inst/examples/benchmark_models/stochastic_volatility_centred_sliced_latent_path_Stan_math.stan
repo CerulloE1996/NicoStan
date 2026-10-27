@@ -6,12 +6,12 @@
 // reduce_sum_static. Parameter count and order do not depend on chunk_size.
 
 functions {
-    array[] int fn_deterministic_leaf_starts(data int first, data int last, data int grainsize) {
+    array[] int fn_deterministic_leaf_starts(data int first, data int last, data int chunk_size) {
         int length_of_range = last - first + 1;
-        if (length_of_range <= grainsize) return { first };
+        if (length_of_range <= chunk_size) return { first };
         int middle = first + length_of_range %/% 2;
-        return append_array(fn_deterministic_leaf_starts(first, middle - 1, grainsize),
-                            fn_deterministic_leaf_starts(middle, last, grainsize));
+        return append_array(fn_deterministic_leaf_starts(first, middle - 1, chunk_size),
+                            fn_deterministic_leaf_starts(middle, last, chunk_size));
     }
 
     real fn_density_of_latent_path_slice_lpdf(array[] real h_slice, int start, int end, data array[] real y,

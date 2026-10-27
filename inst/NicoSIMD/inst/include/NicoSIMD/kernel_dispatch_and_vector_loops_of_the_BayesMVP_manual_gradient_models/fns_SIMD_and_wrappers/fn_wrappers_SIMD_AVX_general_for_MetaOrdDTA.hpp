@@ -229,12 +229,12 @@ inline  void       fn_process_Ref_double_AVX(       Eigen::Ref<T> x_Ref,
                                               nico_exp_1_wo_checks_AVX512, mvp_std_exp, skip_checks) ;
     } else if (fn == "log") {   
           fn_process_double_AVX_sub_function( x_Ref, 
-                                              nico_log_1_AVX512, mvp_std_log, 
-                                              nico_log_1_wo_checks_AVX512, mvp_std_log, skip_checks) ;
+                                              nico_log_1_double_precision_AVX512, mvp_std_log, 
+                                              nico_log_1_double_precision_wo_checks_AVX512, mvp_std_log, skip_checks) ;
     } else if (fn == "log1p") {    
           fn_process_double_AVX_sub_function( x_Ref, 
-                                              nico_log1p_1_AVX512, mvp_std_log1p, 
-                                              nico_log1p_1_wo_checks_AVX512, mvp_std_log1p, skip_checks) ;
+                                              nico_log1p_1_double_precision_AVX512, mvp_std_log1p, 
+                                              nico_log1p_1_double_precision_wo_checks_AVX512, mvp_std_log1p, skip_checks) ;
     } else if (fn == "log1m") {     
           fn_process_double_AVX_sub_function( x_Ref, 
                                               nico_log1m_1_AVX512, mvp_std_log1m, 
@@ -319,12 +319,12 @@ inline  void       fn_process_Ref_double_AVX(        Eigen::Ref<T> x_Ref,
                                          nico_exp_1_wo_checks_AVX2, mvp_std_exp, skip_checks) ;
    } else if (fn == "log") {   
      fn_process_double_AVX_sub_function( x_Ref, 
-                                         nico_log_1_AVX2, mvp_std_log, 
-                                         nico_log_1_wo_checks_AVX2, mvp_std_log, skip_checks) ;
+                                         nico_log_1_double_precision_AVX2, mvp_std_log, 
+                                         nico_log_1_double_precision_wo_checks_AVX2, mvp_std_log, skip_checks) ;
    } else if (fn == "log1p") {    
      fn_process_double_AVX_sub_function( x_Ref, 
-                                         nico_log1p_1_AVX2, mvp_std_log1p, 
-                                         nico_log1p_1_wo_checks_AVX2, mvp_std_log1p, skip_checks) ;
+                                         nico_log1p_1_double_precision_AVX2, mvp_std_log1p, 
+                                         nico_log1p_1_double_precision_wo_checks_AVX2, mvp_std_log1p, skip_checks) ;
    } else if (fn == "log1m") {     
      fn_process_double_AVX_sub_function( x_Ref, 
                                          nico_log1m_1_AVX2, mvp_std_log1m, 

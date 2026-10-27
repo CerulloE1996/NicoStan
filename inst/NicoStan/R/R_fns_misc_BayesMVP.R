@@ -401,7 +401,8 @@ detect_nuisance_block_info_from_stan_model <- function(bs_model,
 get_n_params_main_from_n_nuisance_using_Stan_bs_model <- function(  n_nuisance, 
                                                                  Stan_data_list,
                                                                  Stan_model_file_path,
-                                                                 stanc_args = NULL
+                                                                 stanc_args = NULL,
+                                                                 auto_chunking
 ) { 
   
   
@@ -409,13 +410,15 @@ get_n_params_main_from_n_nuisance_using_Stan_bs_model <- function(  n_nuisance,
           outs <- init_bs_model_external(  Stan_data_list = Stan_data_list,
                                            compile = FALSE,
                                            force_recompile = FALSE,
-                                           Stan_model_file_path = Stan_model_file_path)
+                                           Stan_model_file_path = Stan_model_file_path,
+                                           auto_chunking = auto_chunking)
         } else { 
           outs <- init_bs_model_external(  Stan_data_list = Stan_data_list,
                                           compile = FALSE,
                                           force_recompile = FALSE,
                                           Stan_model_file_path = Stan_model_file_path,
-                                          stanc_args = stanc_args)
+                                          stanc_args = stanc_args,
+                                          auto_chunking = auto_chunking)
         }
         ##
         bs_model <- outs$bs_model
@@ -539,6 +542,7 @@ get_model_info <- function(  Model_type,
                              Stan_model_file_path = NULL,
                              stanc_args = NULL,
                              make_args = NULL,
+                             auto_chunking,
                              ##
                              sample_nuisance = NULL,
                              n_nuisance_override = NULL,
@@ -563,7 +567,8 @@ get_model_info <- function(  Model_type,
                                                           Stan_data_list = Stan_data_list,
                                                           Stan_model_file_path = Stan_model_file_path,
                                                           stanc_args = stanc_args,
-                                                          make_args = make_args)
+                                                          make_args = make_args,
+                                                          auto_chunking = auto_chunking)
           
                 bs_model <- outs_bs_model$bs_model
                 

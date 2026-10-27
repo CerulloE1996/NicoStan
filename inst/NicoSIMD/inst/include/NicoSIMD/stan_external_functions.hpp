@@ -3,7 +3,7 @@
 // -| --------- BayesMVP AVX-512 / AVX2 special functions, exposed to Stan as external functions ------------------------------
 //
 // Vector -> vector versions of the special functions that dominate the LC-MVOP likelihood, computed
-// with the BayesMVP SIMD kernels (fast_and_approx_AVX512_fns.hpp / fast_and_approx_AVX2_fns.hpp)
+// with the BayesMVP SIMD kernels (nico_and_approx_AVX512_fns.hpp / nico_and_approx_AVX2_fns.hpp)
 // instead of Stan's scalar implementations. Each function has
 //
 //     * a PRIM overload  (Eigen column vector of double)  -> Eigen::Matrix<double, -1, 1>
@@ -62,6 +62,11 @@
 #include <ostream>
 #include <vector>
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+#include "math/nico_double_exp_log.hpp"
+#include "math/nico_double_probability.hpp"
+#endif
+
 // ---- the three macros the kernel files use (same definitions as BayesMVP's initial_config / SIMD_config)
 #ifndef ALWAYS_INLINE
 #  if defined(__GNUC__) || defined(__clang__)
@@ -80,20 +85,17 @@
 #  define ALIGN32 alignas(32)
 #endif
 
-// ---- the four global constants the kernel files read (same values as BayesMVP's double_fns.hpp)
-#ifndef BMVP_STAN_EXT_KERNEL_CONSTANTS
-#define BMVP_STAN_EXT_KERNEL_CONSTANTS
-static constexpr double NORMAL_TAIL_THRESH  = 2.5;
-static constexpr int    MILLS_CF_DEPTH      = 40;
-static constexpr double NEG_HALF_LOG_2PI    = -0.91893853320467274178;   // -0.5*log(2*pi)
-static constexpr double INV_SQRT_2PI        =  0.39894228040143267794;   //  1/sqrt(2*pi)
-#endif
+#include "math/nico_normal_constants.hpp"
 
 // ---- the SIMD kernels (self-contained: <immintrin.h>, <cmath>, the macros and constants above). Absolute paths: no -I needed.
-#include "math/fast_and_approx_AVX2_fns.hpp"
-#include "math/fast_and_approx_AVX512_fns.hpp"
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
+#include "math/nico_and_approx_AVX2_fns.hpp"
+#include "math/nico_and_approx_AVX512_fns.hpp"
+#endif
 
-#if defined(__AVX512F__) && defined(__AVX512VL__) && defined(__AVX512DQ__) && !defined(BAYESMVP_FORCE_AVX2)
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+#  define BMVP_LANES 1
+#elif defined(__AVX512F__) && defined(__AVX512VL__) && defined(__AVX512DQ__) && !defined(BAYESMVP_FORCE_AVX2)
 #  define BMVP_LANES 8
 #  define BMVP_KERNEL_NAME(stem) stem##_AVX512
 #elif defined(NICO_SIMD_AVX2_KERNELS)   //// AVX2 natively, or NEON through SIMDe
@@ -124,7 +126,14 @@ static constexpr double INV_PHI_APPROX_C2 = 5.494448514153059;
 //// ---- SIMD register type: single instruction, multiple data, with double-precision lanes:
 ////
 //// simd_t is one processor register; BMVP_LANES gives its number of double-precision values.
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+//// one double: the scalar lane keeps every kernel call shape identical to the SIMD lanes.
+using simd_t = double;
+inline simd_t simd_loadu(const double* p) { return *p; }
+inline void   simd_storeu(double* p, simd_t v) { *p = v; }
+inline simd_t simd_load(const double* p) { return *p; }
+inline void   simd_store(double* p, simd_t v) { *p = v; }
+#elif BMVP_LANES == 8
 //// __m512d is a 512-bit register holding eight doubles, selected for AVX-512.
 using simd_t = __m512d;
 inline simd_t simd_loadu(const double* p) { return _mm512_loadu_pd(p); }
@@ -155,6 +164,7 @@ inline void apply_kernel(double* p, const int n, K k) {
 
 }
 
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 #define BMVP_K(stem) [](const simd_t v) { return BMVP_KERNEL_NAME(stem)(v); }
 
 // ---- in-place kernels on a buffer of n doubles
@@ -168,7 +178,7 @@ inline void k_exp(double* p, int n)            { apply_kernel(p, n, BMVP_K(nico_
 // inline void k_log(double* p, int n)            { apply_kernel(p, n, BMVP_K(nico_log_1)); }
 inline void k_log(double* p, int n)            { apply_kernel(p, n, BMVP_K(nico_log_1_double_precision)); }
 inline void k_log1m(double* p, int n)          { apply_kernel(p, n, BMVP_K(nico_log1m_1)); }
-inline void k_log1p(double* p, int n)          { apply_kernel(p, n, BMVP_K(nico_log1p_1)); }
+inline void k_log1p(double* p, int n)          { apply_kernel(p, n, BMVP_K(nico_log1p_1_double_precision)); }
 inline void k_log1p_exp(double* p, int n)      { apply_kernel(p, n, BMVP_K(nico_log1p_exp_1)); }
 inline void k_inv_logit(double* p, int n)      { apply_kernel(p, n, BMVP_K(nico_inv_logit)); }
 inline void k_log_inv_logit(double* p, int n)  { apply_kernel(p, n, BMVP_K(nico_log_inv_logit)); }
@@ -199,7 +209,7 @@ inline simd_t simd_inv_Phi_approx_from_logit_prob_of(const simd_t logit_p) {
     ALIGN64  __m512d const two_s_minus_one  = _mm512_fmsub_pd(_mm512_set1_pd(2.0), s, one);
     const __mmask8 large           = _mm512_cmp_pd_mask(s, _mm512_set1_pd(1e8), _CMP_GT_OQ);
     ALIGN64  __m512d const y                = _mm512_mul_pd(_mm512_set1_pd(1.0 / 3.0),
-                                         nico_log1p_1_AVX512(_mm512_mask_blend_pd(large, log1p_argument,
+                                         nico_log1p_1_double_precision_AVX512(_mm512_mask_blend_pd(large, log1p_argument,
                                                                                   two_s_minus_one)));
     ALIGN64  __m512d const y_squared        = _mm512_mul_pd(y, y);
     ALIGN64  __m512d series = _mm512_set1_pd(odd_inverse_factorials[0]);
@@ -224,7 +234,7 @@ inline simd_t simd_inv_Phi_approx_from_logit_prob_of(const simd_t logit_p) {
     ALIGN32  __m256d const two_s_minus_one  = _mm256_fmsub_pd(_mm256_set1_pd(2.0), s, one);
     ALIGN32  __m256d const large            = _mm256_cmp_pd(s, _mm256_set1_pd(1e8), _CMP_GT_OQ);
     ALIGN32  __m256d const y                = _mm256_mul_pd(_mm256_set1_pd(1.0 / 3.0),
-                                         nico_log1p_1_AVX2(_mm256_blendv_pd(log1p_argument, two_s_minus_one,
+                                         nico_log1p_1_double_precision_AVX2(_mm256_blendv_pd(log1p_argument, two_s_minus_one,
                                                                             large)));
     ALIGN32  __m256d const y_squared        = _mm256_mul_pd(y, y);
     ALIGN32  __m256d series = _mm256_set1_pd(odd_inverse_factorials[0]);
@@ -249,6 +259,208 @@ inline void k_inv_Phi_approx_from_logit_prob(double* p, int n) {
 }
 inline void k_log1m_exp(double* p, int n)      { apply_kernel(p, n, BMVP_K(nico_log1m_exp_1)); }
 #undef BMVP_K
+#else
+
+// ---- the scalar lane calls the native double functions.
+inline void k_Phi(double* p,
+                  int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_Phi(p[i]);
+    }
+
+}
+
+inline void k_log_Phi(double* p,
+                      int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log_Phi(p[i]);
+    }
+
+}
+
+inline void k_dlog_Phi_dx(double* p,
+                          int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_dlog_Phi_dx(p[i]);
+    }
+
+}
+
+inline void k_inv_Phi(double* p,
+                      int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_inv_Phi_wo_checks(p[i]);
+    }
+
+}
+
+inline void k_exp(double* p,
+                  int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_exp_1(p[i]);
+    }
+
+}
+
+inline void k_log(double* p,
+                  int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log_1_double_precision(p[i]);
+    }
+
+}
+
+inline void k_log1m(double* p,
+                    int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log1m_1(p[i]);
+    }
+
+}
+
+inline void k_log1p(double* p,
+                    int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log1p_1_double_precision(p[i]);
+    }
+
+}
+
+inline void k_log1p_exp(double* p,
+                        int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log1p_exp_1(p[i]);
+    }
+
+}
+
+inline void k_inv_logit(double* p,
+                        int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_inv_logit(p[i]);
+    }
+
+}
+
+inline void k_log_inv_logit(double* p,
+                            int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log_inv_logit(p[i]);
+    }
+
+}
+
+inline void k_Phi_approx(double* p,
+                         int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_Phi_approx(p[i]);
+    }
+
+}
+
+inline void k_log_Phi_approx(double* p,
+                             int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log_Phi_approx(p[i]);
+    }
+
+}
+
+inline void k_inv_Phi_approx(double* p,
+                             int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_inv_Phi_approx(p[i]);
+    }
+
+}
+
+inline void k_inv_Phi_approx_from_logit_prob(double* p,
+                                             int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_inv_Phi_approx_from_logit_prob_public(p[i]);
+    }
+
+}
+
+inline void k_log1m_exp(double* p,
+                        int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log1m_exp_1(p[i]);
+    }
+
+}
+
+inline void k_expm1(double* p,
+                    int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_expm1_value(p[i]);
+    }
+
+}
+
+inline void k_tanh(double* p,
+                   int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_tanh_value(p[i]);
+    }
+
+}
+
+inline void k_square(double* p,
+                     int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_square(p[i]);
+    }
+
+}
+
+inline void k_sqrt(double* p,
+                   int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_sqrt(p[i]);
+    }
+
+}
+
+inline void k_logit(double* p,
+                    int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_logit(p[i]);
+    }
+
+}
+
+inline void k_log1m_inv_logit(double* p,
+                              int n) {
+
+    for (int i = 0; i < n; ++i) {
+        p[i] = nico_log_inv_logit(-p[i]);
+    }
+
+}
+
+#endif
 
 inline void copy_n(const double* x, int n, double* out) { for (int i = 0; i < n; ++i) out[i] = x[i]; }
 
@@ -377,6 +589,7 @@ inline void d_inv_Phi_approx_from_logit_prob(const double* lp, const double* z, 
 
 }
 
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 // ---- tanh, square, sqrt, logit and log1m_inv_logit: in-place kernels on a buffer of n doubles (tanh, logit and
 //      log_inv_logit are BayesMVP's kernels of math/nico_and_approx_*_fns.hpp; square and sqrt are one instruction)
 #if BMVP_LANES == 8
@@ -472,6 +685,7 @@ inline void k_log1m_inv_logit(double* p, int n) {
     apply_kernel(p, n, [](const simd_t v) { return BMVP_KERNEL_NAME(nico_log_inv_logit)(simd_negative_of(v)); });
 
 }
+#endif
 
 // tanh(x) (simd_tanh_of above): d/dx = 1 - tanh(x)^2, from the result
 inline void v_tanh(const double* x, int n, double* f) { copy_n(x, n, f); k_tanh(f, n); }
@@ -606,7 +820,9 @@ inline VecVar rev_apply_log_or_inv_Phi(const T& input) {
             if constexpr (!inverse_normal) {
                 for (int lane = 0; lane < BMVP_LANES; ++lane)
                     derivatives[lane] = input_nodes[first + (lane < count ? lane : count - 1)]->val_;
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+                for (int j = 0; j < count; ++j) derivatives[j] = 1.0 / derivatives[j];
+#elif BMVP_LANES == 8
                 simd_store(derivatives, _mm512_div_pd(_mm512_set1_pd(1.0), simd_load(derivatives)));
 #else
                 simd_store(derivatives, _mm256_div_pd(_mm256_set1_pd(1.0), simd_load(derivatives)));
@@ -804,6 +1020,16 @@ inline VecVar rev_apply_strip_mined(const T& input, V value_function, K in_place
 //      the degree-8 rational) and of the body: the operations of nico_log_Phi_* and nico_dlog_Phi_dx_*
 //      (math/nico_and_approx_*_fns.hpp), in the same order, with the same lane-mask tests (tail only if a lane is
 //      in the tail, body only if a lane is not); both outputs are bit-identical to the two kernels.
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+inline void log_Phi_and_dlog_Phi_dx_simd(const double x,
+                                         double& log_Phi_x,
+                                         double& dlog_Phi_dx_x) {
+
+    log_Phi_x     = nico_log_Phi(x);
+    dlog_Phi_dx_x = nico_dlog_Phi_dx(x);
+
+}
+#else
 #if BMVP_LANES == 8
 inline void log_Phi_and_dlog_Phi_dx_simd(const __m512d x, __m512d& log_Phi_x, __m512d& dlog_Phi_dx_x) {
 
@@ -819,7 +1045,7 @@ inline void log_Phi_and_dlog_Phi_dx_simd(const __m512d x, __m512d& log_Phi_x, __
                                             nico_exp_1_AVX512(_mm512_mul_pd(_mm512_set1_pd(-0.5),
                                                                             _mm512_mul_pd(x_aligned,
                                                                                     x_aligned))));
-        log_body = nico_log_1_AVX512(Phi_x);
+        log_body = nico_log_1_double_precision_AVX512(Phi_x);
         d_body   = _mm512_div_pd(phi, Phi_x);
     }
     if (is_tail != 0) {                                                        // at least one tail lane
@@ -828,7 +1054,7 @@ inline void log_Phi_and_dlog_Phi_dx_simd(const __m512d x, __m512d& log_Phi_x, __
         ALIGN64  __m512d const R         = _mm512_div_pd(_mm512_set1_pd(1.0), inverse_R);
         log_tail = _mm512_add_pd(_mm512_fnmadd_pd(_mm512_set1_pd(0.5), _mm512_mul_pd(x_aligned, x_aligned),
                                                   _mm512_set1_pd(NEG_HALF_LOG_2PI)),
-                                 nico_log_1_AVX512(R));
+                                 nico_log_1_double_precision_AVX512(R));
         d_tail   = inverse_R;
     }
     log_Phi_x     = _mm512_mask_blend_pd(is_tail, log_body, log_tail);
@@ -850,7 +1076,7 @@ inline void log_Phi_and_dlog_Phi_dx_simd(const __m256d x, __m256d& log_Phi_x, __
         ALIGN32  __m256d const phi   = _mm256_mul_pd(_mm256_set1_pd(::INV_SQRT_2PI),
                                             nico_exp_1_AVX2(_mm256_mul_pd(_mm256_set1_pd(-0.5),
                                                                           _mm256_mul_pd(x_aligned, x_aligned))));
-        log_body = nico_log_1_AVX2(Phi_x);
+        log_body = nico_log_1_double_precision_AVX2(Phi_x);
         d_body   = _mm256_div_pd(phi, Phi_x);
     }
     if (tail_lanes != 0) {                                                     // at least one tail lane
@@ -859,13 +1085,14 @@ inline void log_Phi_and_dlog_Phi_dx_simd(const __m256d x, __m256d& log_Phi_x, __
         ALIGN32  __m256d const R         = _mm256_div_pd(_mm256_set1_pd(1.0), inverse_R);
         log_tail = _mm256_add_pd(_mm256_fnmadd_pd(_mm256_set1_pd(0.5), _mm256_mul_pd(x_aligned, x_aligned),
                                                   _mm256_set1_pd(NEG_HALF_LOG_2PI)),
-                                 nico_log_1_AVX2(R));
+                                 nico_log_1_double_precision_AVX2(R));
         d_tail   = inverse_R;
     }
     log_Phi_x     = _mm256_blendv_pd(log_body, log_tail, is_tail);
     dlog_Phi_dx_x = _mm256_blendv_pd(d_body, d_tail, is_tail);
 
 }
+#endif
 #endif
 
 // ---- on n doubles: values (in) -> log Phi(values) (out, in place), and derivatives -> d/dx log Phi; a partial
@@ -1215,6 +1442,24 @@ using nico::math::nico_inv_Phi;
 
 namespace nico::math {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+inline void inv_Phi_from_log_p_and_its_derivatives_simd(
+    const double log_p,
+    const double log_1m_p,
+    double& z,
+    double& dz_dlog_p,
+    double& dz_dlog_1m_p) {
+
+    const double p = nico_exp_1(log_p);
+    z = nico_inv_Phi_from_log_p_wo_checks(log_p, log_1m_p);
+    const double log_inv_phi = std::fma(0.5, z * z, -NEG_HALF_LOG_2PI);
+    const bool uses_log_p = (std::abs(p - 0.5) <= 0.425) || (log_p < log_1m_p);
+    const double magnitude = nico_exp_1((uses_log_p ? log_p : log_1m_p) + log_inv_phi);
+    dz_dlog_p = uses_log_p ? magnitude : 0.0;
+    dz_dlog_1m_p = uses_log_p ? 0.0 : -magnitude;
+
+}
+#else
 #if BMVP_LANES == 8
 inline void inv_Phi_from_log_p_and_its_derivatives_simd(const __m512d log_p, const __m512d log_1m_p, __m512d& z,
                                                          __m512d& dz_dlog_p, __m512d& dz_dlog_1m_p) {
@@ -1258,6 +1503,7 @@ inline void inv_Phi_from_log_p_and_its_derivatives_simd(const __m256d log_p, con
     dz_dlog_1m_p = _mm256_andnot_pd(uses_log_p, _mm256_sub_pd(_mm256_setzero_pd(), magnitude));
 
 }
+#endif
 #endif
 
 template <typename T_log_p, typename T_log_1m_p>
@@ -1433,6 +1679,7 @@ inline double bmvp_simd_lanes(std::ostream* /*pstream__*/) { return static_cast<
 using nico::math::bmvp_simd_lanes;
 
 // ---- the fused log densities (each also includes this file itself, under #pragma once, so either may come first)
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 #include "stan_external_fused_normal_lpdf.hpp"
 #include "stan_external_fused_student_t_lpdf.hpp"
 #include "stan_external_fused_weibull_lpdf.hpp"
@@ -1466,6 +1713,16 @@ using nico::math::bmvp_simd_lanes;
 //  step)
 #include "stan_external_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp.hpp"
 #endif
+#else
+// ---- the scalar kernels: only the fused nodes that have a scalar lane
+#include "stan_external_sum_of_exponentials_by_group.hpp"
+#include "stan_external_log_cumulative_sum_exp.hpp"
+#include "stan_external_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp.hpp"
+#include "stan_external_dot_product_exp_of_affine_predictor_by_column.hpp"
+#include "stan_external_fused_student_t_id_glm_weibull_log_glm_and_bernoulli_logit_glm_by_group.hpp"
+#include "stan_external_AR1_path.hpp"
+#include "stan_external_fused_normal_log_scale_lpdf.hpp"
+#endif
 
 
 
@@ -1489,6 +1746,7 @@ using nico::math::bmvp_simd_lanes;
 
 
 
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 // ---- log_sum_exp: the reduction, elementwise pairs and row-wise reduction with the Nico exponential.
 #include "stan_external_log_sum_exp_with_nico_exponential.hpp"
 
@@ -1499,7 +1757,11 @@ using nico::math::bmvp_simd_lanes;
 //      C = 2, 4: the LC-MVP and LC-MVOP), one autodiff node per slice:
 //      stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood.hpp
 #include "stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood.hpp"
-
+#else
+#include "stan_external_log_sum_exp_with_nico_exponential.hpp"
+#include "stan_external_gp_exp_quad_cov.hpp"
+#include "stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood.hpp"
+#endif
 
 
 

@@ -9,7 +9,9 @@ namespace nico::math::grouped_bernoulli {
 inline void negative_abs(const double* x, int n, double* out) {
 
     int i = 0;
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    //// (one lane: the loop below takes every element)
+#elif BMVP_LANES == 8
     const nico::math::simd_t zero = _mm512_setzero_pd();
     for (; i + BMVP_LANES <= n; i += BMVP_LANES) {
         const nico::math::simd_t values = nico::math::simd_loadu(x + i);
@@ -33,7 +35,9 @@ inline void derivatives(const double* x, const double* exp_neg_abs_x, const doub
                         int n, double* out) {
 
     int i = 0;
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    //// (one lane: the loop below takes every element)
+#elif BMVP_LANES == 8
     const nico::math::simd_t zero = _mm512_setzero_pd();
     const nico::math::simd_t one = _mm512_set1_pd(1.0);
     for (; i + BMVP_LANES <= n; i += BMVP_LANES) {
@@ -71,7 +75,9 @@ inline void derivatives(const double* x, const double* exp_neg_abs_x, const doub
 inline double sum_log_probability(const double* x, double* log1p_exp_neg_abs_x, int n) {
 
     int i = 0;
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    //// (one lane: the loop below takes every element)
+#elif BMVP_LANES == 8
     const nico::math::simd_t zero = _mm512_setzero_pd();
     for (; i + BMVP_LANES <= n; i += BMVP_LANES) {
         const nico::math::simd_t x_values = nico::math::simd_loadu(x + i);

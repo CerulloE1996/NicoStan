@@ -207,8 +207,13 @@ fn_compute_sampling_num_chunks_for_Stan_model <-  function( model_so_file,
                                                               CPU_list                = CPU_list)
               if (!is.null(saved_choice)) {
                     return(list( num_chunks_sampling              = saved_choice$num_chunks_sampling,
-                                 chunk_size_sampling              = ceiling(N_units /
-                                                                            saved_choice$num_chunks_sampling),
+                                 # chunk_size_sampling              = ceiling(N_units /
+                                 #                                            saved_choice$num_chunks_sampling),
+                                 chunk_size_sampling              = fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                                          N         = N_units,
+                                                                          N_chunks  =
+                                                                                saved_choice$num_chunks_sampling
+                                                                    )$chunk_size,
                                  num_chunks_sampling_from_rule    = saved_choice$num_chunks_sampling_from_rule,
                                  rule_is_fastest_or_near_tie      = NA,
                                  num_chunks_within_tie_of_fastest = NA,
@@ -229,8 +234,11 @@ fn_compute_sampling_num_chunks_for_Stan_model <-  function( model_so_file,
         ## ---- M_bytes/chain of this compiled model (the full data as one piece):
         ##
         if (is.null(M_bytes_per_chain)) {
-              Stan_data_list_one_piece <-  Stan_data_list
-              Stan_data_list_one_piece$chunk_size <-  as.integer(N_units)
+              # Stan_data_list_one_piece <-  Stan_data_list
+              # Stan_data_list_one_piece$chunk_size <-  as.integer(N_units)
+              Stan_data_list_one_piece <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                 Stan_data_list  = Stan_data_list,
+                                                 N_chunks        = 1)
               n_nuisance_owned_by_NicoStan <-  0
               if (!is.null(init_object) && length(init_object$nuisance_blocks_held_by_NicoStan) > 0 &&
                   !is.null(init_object$n_nuisance_override)) {
@@ -263,9 +271,14 @@ fn_compute_sampling_num_chunks_for_Stan_model <-  function( model_so_file,
                                                     L2_cache_and_threads_per_core$L2_cache_size_bytes,
                                               N_threads_per_core            =
                                                     L2_cache_and_threads_per_core$N_threads_per_core)
-        rule <-  list(N_chunks = sampling_equation_of_18_Oct$num_chunks_sampling,
+        ## (the chains and threads per chain are given: the equation's N_chunks at 1 thread per chain)
+        # rule <-  list(N_chunks = sampling_equation_of_18_Oct$num_chunks_sampling,
+        #               sampling_equation_of_18_Oct = sampling_equation_of_18_Oct)
+        rule <-  list(N_chunks = sampling_equation_of_18_Oct$num_chunks_at_one_thread_per_chain,
                       sampling_equation_of_18_Oct = sampling_equation_of_18_Oct)
-        most_num_chunks <-  Inf
+        # most_num_chunks <-  Inf
+        ## (at most N chunks: exactly N_chunks chunks run, none may be empty)
+        most_num_chunks <-  N_units
         num_chunks_sampling_from_rule <-  2^ceiling(log2(rule$N_chunks))
         ##
         ## ---- the rule's chunk count and the powers of two around it, timed with the sampling layout:
@@ -342,7 +355,7 @@ fn_compute_sampling_num_chunks_for_Stan_model <-  function( model_so_file,
                                                     minimum_seconds_per_timing   = minimum_seconds_per_timing,
                                                     L_main                       = L_main_of_timings,
                                                     JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list
-                                              )$seconds_per_iteration
+                                              )$seconds_per_iteration_at_requested_L
                                         },
                                   fewest_num_chunks       = max(1, n_threads_WCP_sampling),
                                   most_num_chunks         = most_num_chunks,
@@ -385,7 +398,12 @@ fn_compute_sampling_num_chunks_for_Stan_model <-  function( model_so_file,
                                        seconds_spent_choosing         = seconds_spent_choosing)
         }
         return(list( num_chunks_sampling              = num_chunks_sampling,
-                     chunk_size_sampling              = ceiling(N_units / num_chunks_sampling),
+                     # chunk_size_sampling              = ceiling(N_units / num_chunks_sampling),
+                     ## (NA when the rule asks for more chunks than units: such a layout cannot run)
+                     chunk_size_sampling              = if (num_chunks_sampling > N_units) NA_integer_ else
+                                                        fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                              N         = N_units,
+                                                              N_chunks  = num_chunks_sampling)$chunk_size,
                      num_chunks_sampling_from_rule    = num_chunks_sampling_from_rule,
                      rule_is_fastest_or_near_tie      = rule_is_fastest_or_near_tie,
                      num_chunks_within_tie_of_fastest = num_chunks_within_tie_of_fastest,

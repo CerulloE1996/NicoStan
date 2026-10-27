@@ -87,15 +87,15 @@ inline simd_t simd_negate(const simd_t x) {
 
 }
 
-inline simd_t simd_fast_log1p(const simd_t x) {
+inline simd_t nico_log1p_simd(const simd_t x) {
 
-  return BMVP_KERNEL_NAME(nico_log1p_1)(x);
+  return BMVP_KERNEL_NAME(nico_log1p_1_double_precision)(x);
 
 }
 
-inline simd_t simd_fast_log(const simd_t x) {
+inline simd_t nico_log_simd(const simd_t x) {
 
-  return BMVP_KERNEL_NAME(nico_log_1)(x);
+  return BMVP_KERNEL_NAME(nico_log_1_double_precision)(x);
 
 }
 
@@ -365,7 +365,7 @@ nico_student_t_regression_lpdf(
         nico::math::student_t_regression_detail::simd_subtract(y_simd, mu_simd), sigma_simd);
     const auto q = nico::math::student_t_regression_detail::simd_multiply(
         nico::math::student_t_regression_detail::simd_multiply(residual, residual), inverse_nu);
-    const auto log1p_q = nico::math::student_t_regression_detail::simd_fast_log1p(q);
+    const auto log1p_q = nico::math::student_t_regression_detail::nico_log1p_simd(q);
     nico::math::simd_store(residual_lanes, residual);
     nico::math::simd_store(q_lanes, q);
     nico::math::simd_store(log1p_lanes, log1p_q);

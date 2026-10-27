@@ -209,7 +209,7 @@ data {
   matrix[N_subj, K_long] X_long_event; // longitudinal fixed-effect design at T_surv
   array[N_subj] matrix[Q, K_long] X_long_quad; // same design at each subject's quadrature times
 
-  // int<lower=1> grainsize;           // subjects per chunk (reduce_sum_static)
+  // int<lower=1> chunk_size;           // subjects per chunk (reduce_sum_static)
   int<lower=1> N;                   // the units of the chunks: the subjects (must equal N_subj)
   int<lower=1> chunk_size;          // subjects per chunk (reduce_sum_static)
 }
@@ -346,7 +346,7 @@ model {
   // (computed inside the chunks, std_normal_lupdf of each chunk's columns of b_raw)
 
   // Longitudinal and survival likelihoods (reduce_sum_static over the subjects, in chunks of chunk_size)
-  // target += reduce_sum_static(partial_sum_subjects_lupmf, subject_index, grainsize,
+  // target += reduce_sum_static(partial_sum_subjects_lupmf, subject_index, chunk_size,
   // target += reduce_sum_static(partial_sum_subjects_lupmf, subject_index, chunk_size,
   //                             X_long, Y_long, time_long, subj_long, observations_before,
   //                             X_surv, T_surv, event_indicator, quad_weights, X_long_event,

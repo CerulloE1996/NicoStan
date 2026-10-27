@@ -129,7 +129,6 @@ See [nico_reduce_sum and nico_map_rect](#nico_reduce_sum-and-nico_map_rect) for 
 
 Usually eight combinations, four when an axis does not apply, and up to sixteen for the Cox model with the map axis;
 a missing implementation is not "N/A". The table names the axes only; the timings are reported separately.
-
 <!-- ----------------------------------------------------------------------------------------- -->
 - **Hybrid diffusion-pathspace HMC** for models with suitable Gaussian latent/nuisance blocks,
 based on [Beskos et al., 2011](https://doi.org/10.1016/j.spa.2011.06.003),
@@ -2970,10 +2969,65 @@ More specifically, NicoSIMD holds:
 | Our own fused multi-step building blocks | `nico_AR1_recursion`, `nico_stationary_noncentred_AR1_path`, `nico_affine_recurrence_at_positions`, `nico_last_value_of_affine_recurrence`, `nico_log_sum_exp_of_affine_predictor`, `nico_log_cumulative_sum_exp`, `nico_dot_products_of_affine_predictor_and_log_cumulative_sum_exp`, `nico_dot_product_exp_of_affine_predictor_by_column`, `nico_sum_of_exponentials_by_group`, `nico_two_compartment_first_order_input_exponents_and_coefficients`, `nico_rows_of_mean_plus_random_effects_times_transposed_loadings`, `nico_gp_exp_quad_cov_cholesky`, `nico_truncated_normal_quantile_and_log_mass` | yes |
 
 
-A function is fused when it computes the whole likelihood in C++, or fuses two or more expensive steps into one
-autodiff node, so that fewer nodes are needed (e.g., `nico_bernoulli_logit_glm_lpmf` computes the linear predictor,
-the inverse logit and the log probability of every observation in one node);
-a vectorised density on its own (e.g., `nico_normal_lpdf`) is not fused.
+### Mathematical backend and reverse-mode fusion
+
+A fused function combines two or more expensive mathematical operations internally in C++ into
+one autodiff operation with a combined reverse pass, instead of recording those expensive
+operations separately on the AD tape. This must happen at the C++ stan::math::var / reverse-mode
+AD level.
+
+Cheap operations - sqrt, pow, multiplication, division, addition and subtraction - do not count
+towards the two-operation requirement. Squares and matrix products remain cheap as well.
+
+A wrapper around separate AD calls is not fusion. Computing log1p(exp(x)) inside a C++ function
+does not qualify when exp and log1p still create separate AD operations. Computing their values
+internally and registering one operation with combined derivative propagation does qualify.
+
+### Four experimental categories
+
+NicoSIMD is the implementation of the nico::math mathematical backend in this table.
+
+| Mathematical backend | Fusion category | Definition |
+|---|---|---|
+| Stan::math | Non-fused | Use Stan::math mathematical implementations. No call may combine two or more expensive mathematical operations internally in C++ into one reverse-mode autodiff operation with a combined reverse pass. When a calculation requires several expensive operations, evaluate them as separate autodiff operations. |
+| Stan::math | Fused | Use Stan::math mathematical implementations and maximise the use of its applicable functions that combine two or more expensive mathematical operations internally in C++ into one reverse-mode autodiff operation with a combined reverse pass. Use ordinary Stan::math calls for remaining work. The fused category exists only when at least one applicable call satisfies this implementation criterion. |
+| NicoSIMD | Non-fused | Preserve the non-fused Stan model's structure and replace each expensive mathematical call with its NicoSIMD implementation. Each replacement must remain non-fused under the same C++ reverse-mode criterion; a matching function name or interface is not proof. Keep cheap operations on Stan::math. |
+| NicoSIMD | Fused | Maximise the use of applicable NicoSIMD functions that combine two or more expensive mathematical operations internally in C++ into one reverse-mode autodiff operation with a combined reverse pass. Use ordinary NicoSIMD calls for remaining expensive work and Stan::math for cheap operations. The fused category exists only when at least one applicable call satisfies this implementation criterion. |
+
+### Required accompanying qualifications
+
+1. Preserve the statistical model, priors, constraints and parameterisation. Do not change a model
+   merely to make a fused function applicable.
+2. NicoSIMD has many more fused functions than Stan::math. Each fused cell maximises its own
+   backend's applicable fusions. The files often differ; where no additional Nico fusion applies,
+   corresponding Nico calls may use the same structure as the Stan-fused implementation.
+3. Mathematical backend, fusion, summation and mapping are independent axes. Summation and map
+   calls follow the design row; they do not establish mathematical fusion. A Stan-mathematics
+   hybrid using Nico summation, mapping or nuisance readers is not a 100% Stan-only comparator.
+4. A speed comparator uses only Stan::math mathematics and Stan's own summation/mapping, or none.
+5. Inspect the actual C++ overload, parameter/data roles, proportional specialization and combined
+   reverse operation. A function name, vectorisation, a GLM label or a README classification is
+   not proof. Inspect the mathematical operations combined by the implementation, including
+   operations eliminated analytically rather than retained as literal function calls. No particular
+   callback API is required. A combined reverse operation alone does not establish fusion.
+6. Parameter values extracted into double or SIMD buffers retain their derivative dependence.
+   Do not count only the explicit expensive calls left after analytic simplification. In particular,
+   poisson_log_lpmf and poisson_log_glm_lpmf / poisson_log_glm_lupmf combine the exponential link
+   and Poisson log probability in one C++ autodiff operation. Done separately, exp followed by
+   poisson_lpmf records separate operations. These Poisson log functions are fused. Supporting
+   counting conventions never override this definition or the user's explicit rulings.
+7. stanc runs at its default transformation level, without --O1 or --Oexperimental. The specified
+   C++ compiler optimisation flags remain unchanged. Inspect generated C++ for introduced calls;
+   separate-looking Stan expressions are not proof of separate reverse-mode operations.
+8. Numerical log-density and gradient agreement are separate build checks, not conversion or
+   fusion proof. Declarations without calls and double-only generated quantities do not establish
+   reverse-mode likelihood fusion; they still obey the mathematical-backend requirements.
+9. If an overload or input regime is not verified, mark it unverified. Do not infer classifications
+   for every density, GLM, recurrence or inventory group by analogy. This category table is not a
+   certification that existing model cells conform.
+
+The function inventory above requires overload-specific checking against this definition;
+its group labels are not certification of every listed function or argument regime.
 The fused GHK function covers the multivariate (ordered) probit family
 (1, 2 or 4 latent classes; binary, ordinal and mixed outcomes; missing results).
 

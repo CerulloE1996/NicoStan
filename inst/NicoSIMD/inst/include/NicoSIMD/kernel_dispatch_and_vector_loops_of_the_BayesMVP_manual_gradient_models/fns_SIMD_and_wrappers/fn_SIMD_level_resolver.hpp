@@ -18,7 +18,7 @@
 ////        "AVX2"          -> 4 lanes (the __m256d kernels, fast_*_AVX2; on AVX2-only AND on AVX-512 builds),
 ////        "Stan" / "Loop" -> 1 (scalar).
 ////      So on an AVX-512 build a vect_type = "AVX2" request runs the 4-lane AVX2 kernels (the AVX2 kernel
-////      header, BayesMVP/math/fast_and_approx_AVX2_fns.hpp, is compiled on every AVX2-capable build, AVX-512
+////      header, BayesMVP/math/nico_and_approx_AVX2_fns.hpp, is compiled on every AVX2-capable build, AVX-512
 ////      ones included). A level this build did not compile (e.g. "AVX512" on an AVX2-only laptop build) THROWS
 ////      instead of silently running another level. The R front end
 ////      (fn_check_native_model_vect_types_and_Phi_types) stops before sampling in that case; the throw is the
@@ -30,7 +30,7 @@
 ////      NOTE: vect_type selects BayesMVP's own kernels only. Eigen / Stan-math code in the same binary is
 ////      vectorised at the build's compile level (AVX-512 on the Local_HPC) whatever vect_type is.
 ////
-//// The two conditions below are the guards of the kernel headers themselves (fast_and_approx_AVX512_fns.hpp
+//// The two conditions below are the guards of the kernel headers themselves (nico_and_approx_AVX512_fns.hpp
 //// needs AVX512F+VL+DQ; the AVX2 kernels use FMA intrinsics, hence __FMA__, as fn_dispatch_templated.hpp
 //// requires).
 ////

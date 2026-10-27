@@ -24,7 +24,7 @@
 //// only so that DISPATCH_VEC can instantiate all three levels; vec_from_string never selects a level
 //// that is not compiled.
 ////
-//// REQUIRES: fast_and_approx_AVX512_fns.hpp and fast_and_approx_AVX2_fns.hpp (the fast_*_AVX512
+//// REQUIRES: nico_and_approx_AVX512_fns.hpp and nico_and_approx_AVX2_fns.hpp (the fast_*_AVX512
 ////           / fast_*_AVX2 kernels) included first, and stan/math for the scalar path.
 ////
 
@@ -109,10 +109,10 @@ inline int vec_width(Vec v) { return v == Vec::AVX512 ? 8 : (v == Vec::AVX2 ? 4 
 template <Fn fn, bool checks> ALWAYS_INLINE __m512d kernel_AVX512(__m512d x);
 template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::exp, true >(__m512d x) { return nico_exp_1_AVX512(x); }
 template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::exp, false>(__m512d x) { return nico_exp_1_wo_checks_AVX512(x); }
-template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log, true >(__m512d x) { return nico_log_1_AVX512(x); }
-template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log, false>(__m512d x) { return nico_log_1_wo_checks_AVX512(x); }
-template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1p, true >(__m512d x) { return nico_log1p_1_AVX512(x); }
-template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1p, false>(__m512d x) { return nico_log1p_1_wo_checks_AVX512(x); }
+template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log, true >(__m512d x) { return nico_log_1_double_precision_AVX512(x); }
+template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log, false>(__m512d x) { return nico_log_1_double_precision_wo_checks_AVX512(x); }
+template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1p, true >(__m512d x) { return nico_log1p_1_double_precision_AVX512(x); }
+template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1p, false>(__m512d x) { return nico_log1p_1_double_precision_wo_checks_AVX512(x); }
 template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1m, true >(__m512d x) { return nico_log1m_1_AVX512(x); }
 template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1m, false>(__m512d x) { return nico_log1m_1_wo_checks_AVX512(x); }
 template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::log1p_exp, true >(__m512d x) { return nico_log1p_exp_1_AVX512(x); }
@@ -150,10 +150,10 @@ template <> ALWAYS_INLINE __m512d kernel_AVX512<Fn::tanh, false>(__m512d x) { re
 template <Fn fn, bool checks> ALWAYS_INLINE __m256d kernel_AVX2(__m256d x);
 template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::exp, true >(__m256d x) { return nico_exp_1_AVX2(x); }
 template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::exp, false>(__m256d x) { return nico_exp_1_wo_checks_AVX2(x); }
-template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log, true >(__m256d x) { return nico_log_1_AVX2(x); }
-template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log, false>(__m256d x) { return nico_log_1_wo_checks_AVX2(x); }
-template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1p, true >(__m256d x) { return nico_log1p_1_AVX2(x); }
-template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1p, false>(__m256d x) { return nico_log1p_1_wo_checks_AVX2(x); }
+template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log, true >(__m256d x) { return nico_log_1_double_precision_AVX2(x); }
+template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log, false>(__m256d x) { return nico_log_1_double_precision_wo_checks_AVX2(x); }
+template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1p, true >(__m256d x) { return nico_log1p_1_double_precision_AVX2(x); }
+template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1p, false>(__m256d x) { return nico_log1p_1_double_precision_wo_checks_AVX2(x); }
 template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1m, true >(__m256d x) { return nico_log1m_1_AVX2(x); }
 template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1m, false>(__m256d x) { return nico_log1m_1_wo_checks_AVX2(x); }
 template <> ALWAYS_INLINE __m256d kernel_AVX2<Fn::log1p_exp, true >(__m256d x) { return nico_log1p_exp_1_AVX2(x); }

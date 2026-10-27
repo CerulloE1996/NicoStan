@@ -537,7 +537,16 @@ inline void add_sums_of_W_times_kernel_values_of_a_column_segment(
         const double alpha_of_column, const double* x_rows, const double x_of_column, const int count,
         double& sum_of_products, double& sum_of_products_times_squared_distances) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    for (int r = 0; r < count; ++r) {
+        const double W = std::fma(alpha_rows[r], alpha_of_column, -inverse_K[r]);
+        const double product = W * kernel_values[r];
+        const double distance = x_rows[r] - x_of_column;
+        sum_of_products += product;
+        sum_of_products_times_squared_distances = std::fma(product * distance, distance,
+                                                           sum_of_products_times_squared_distances);
+    }
+#elif BMVP_LANES == 8
     ALIGN64  __m512d sums_of_products = _mm512_setzero_pd();
     ALIGN64  __m512d sums_of_products_times_squared_distances = _mm512_setzero_pd();
     ALIGN64  __m512d const alpha_column = _mm512_set1_pd(alpha_of_column);

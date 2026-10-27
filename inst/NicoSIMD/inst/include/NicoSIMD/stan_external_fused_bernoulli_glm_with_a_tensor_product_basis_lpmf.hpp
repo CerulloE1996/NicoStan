@@ -381,6 +381,7 @@ inline stan::return_type_t<T_alpha, T_beta, T_weights> nico_bernoulli_logit_glm_
 
 using nico::math::nico_bernoulli_logit_glm_with_a_tensor_product_basis_lpmf;
 
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
 namespace nico::math {
 
 template <bool propto, typename T_y, typename T_x, typename T_alpha, typename T_beta, typename T_basis_1,
@@ -407,6 +408,7 @@ inline stan::return_type_t<T_alpha, T_beta, T_weights> nico_bernoulli_probit_glm
 }  // namespace nico::math
 
 using nico::math::nico_bernoulli_probit_glm_with_a_tensor_product_basis_lpmf;
+#endif
 
 
 

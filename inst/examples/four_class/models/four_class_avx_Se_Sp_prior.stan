@@ -1,9 +1,12 @@
+// LC_MVOP_4class_joint_v1_reduce_sum_AVX.stan -- GENERATED from LC_MVOP_4class_joint_v1_reduce_sum.stan by
+// stan_ext/make_AVX_variant.py. Identical model; vectorised special functions inside partial_log_lik are
+// the BayesMVP AVX externals. Regenerate after editing the base model; do not edit by hand.
 // LC_MVOP_4class_joint_v1_reduce_sum.stan
 //
 // WITHIN-CHAIN PARALLELISM / CHUNKED-TAPE variant (reduce_sum_static) of LC_MVOP_4class_joint_v1.
 // Same model, same log-density. Structural differences only:
 //   (1) u_raw is array[N] row_vector[n_tests] so reduce_sum_static slices the nuisance parameters;
-//   (2) the likelihood is a plain partial-sum function; the u tanh-Jacobian is RETURNED, not jacobian +=;
+//   (2) the likelihood is a hand-written partial-sum function; the u tanh-Jacobian is RETURNED, not jacobian +=;
 //   (3) no log_lik in transformed parameters - target is incremented once, inside reduce_sum_static;
 //   (4) observed / missing index sets are built per slice inside the partial function;
 //   (5) chunk_size (data) bounds the slice size; R defaults to ceil(N / num_chunks). With threads_per_chain = 1 this is "chunking":
@@ -134,6 +137,27 @@
 // Integrated with the APMS application revisions. See APMS_INTEGRATION.md for checks and scope.
 
 functions {
+      // ---- BayesMVP AVX-512 / AVX2 kernels exposed as EXTERNAL functions (bodies in
+      // stan_ext/BayesMVP_AVX_stan_fns.hpp; compile with --allow-undefined + that user header).
+      // Vector -> vector, elementwise, analytic gradient registered as ONE autodiff node per call.
+      // Used only in the vectorised (Phi_type != 1) branches of partial_log_lik.
+      vector nico_Phi(vector x);
+      vector nico_log_Phi(vector x);
+      vector nico_inv_Phi(vector p);
+      vector nico_exp(vector x);
+      vector nico_log(vector x);
+      vector nico_log1m(vector x);
+      vector nico_log1p(vector x);
+      vector nico_log1p_exp(vector x);
+      vector nico_log1m_exp(vector x);
+      vector nico_inv_logit(vector x);
+      vector nico_log_inv_logit(vector x);
+      vector nico_Phi_approx(vector x);
+      vector nico_log_Phi_approx(vector x);
+      vector nico_inv_Phi_approx(vector p);
+      vector nico_inv_Phi_approx_from_logit_prob(vector lp);
+      real bmvp_simd_lanes();
+
 
       //////////////////////////////////////////////////////////////////////////
       // ---- Unchanged from the 2-class file:
@@ -456,8 +480,11 @@ functions {
                         pattern_id[m] += n_pattern;
                     n_pattern *= 2;
                 }
-                for (m in 1:M) for (c in 1:n_class)
-                    lp[m, c] = log_prev_slice[m, c];
+                for (m in 1:M) {
+                    for (c in 1:n_class) {
+                        lp[m, c] = log_prev_slice[m, c];
+                    }
+                }
                 for (pattern in 1:(n_pattern - 1)) {
                     int count = 0;
                     int P = 0;
@@ -573,6 +600,100 @@ functions {
                 return lp;
       }
 
+      ////
+      //// ---- Induced Dirichlet with the Dirichlet of the segment sums (between chosen cutoffs)
+      //// ---- swapped for a prior on P = Phi(C - location) at the chosen cutoffs: Sp (s = absent),
+      //// ---- 1 - Se (s = present):
+      ////
+      real induced_dirichlet_with_Se_Sp_prior_lpdf(vector C_centred,
+                                                   vector log_spacing,
+                                                   vector C_baseline,
+                                                   vector alpha,
+                                                   vector alpha_seg,
+                                                   array[] int chosen,
+                                                   int prior_type,
+                                                   vector A_user,
+                                                   matrix beta_ab,
+                                                   matrix link_mean_SD,
+                                                   int use_probit_link) {
+
+                int n_thr = num_elements(C_centred);
+                int m = num_elements(chosen);
+                ////
+                //// ---- the model's induced Dirichlet on the centred cutpoints:
+                ////
+                real log_prob = induced_dirichlet_lpdf(C_centred | log_spacing, alpha);
+                ////
+                //// ---- the cumulative probabilities P at the chosen cutoffs, baseline and centred:
+                ////
+                vector[m] P_chosen;
+                vector[m] P_anchor;
+                for (j in 1:m) {
+                     int k = chosen[j];
+                     if (use_probit_link == 1) {
+                          P_chosen[j] = Phi_stable(C_baseline[k]);
+                          P_anchor[j] = Phi_stable(C_centred[k]);
+                     } else {
+                          P_chosen[j] = inv_logit(C_baseline[k]);
+                          P_anchor[j] = inv_logit(C_centred[k]);
+                     }
+                }
+                ////
+                //// ---- segment sums between the chosen cutoffs (the m + 1 simplex parts):
+                ////
+                vector[m + 1] q;
+                vector[m + 1] q_anchor;
+                q[1] = P_chosen[1];
+                q_anchor[1] = P_anchor[1];
+                for (j in 2:m) {
+                     q[j] = P_chosen[j] - P_chosen[j - 1];
+                     q_anchor[j] = P_anchor[j] - P_anchor[j - 1];
+                }
+                q[m + 1] = 1.0 - P_chosen[m];
+                q_anchor[m + 1] = 1.0 - P_anchor[m];
+                ////
+                //// ---- induced Dirichlet minus the Dirichlet of the segment sums:
+                ////
+                log_prob += - dirichlet_lpdf(q_anchor | alpha_seg);
+                ////
+                //// ---- Jacobian between the selected anchor and baseline probabilities:
+                ////
+                for (j in 1:m) {
+                     int k = chosen[j];
+                     if (use_probit_link == 1) {
+                          log_prob += - std_normal_lpdf(C_centred[k]);
+                          if (prior_type != 4) {
+                               log_prob += std_normal_lpdf(C_baseline[k]);
+                          }
+                     } else {
+                          log_prob += - log_inv_logit(C_centred[k]) - log1m_inv_logit(C_centred[k]);
+                          if (prior_type != 4) {
+                               log_prob += log_inv_logit(C_baseline[k]) + log1m_inv_logit(C_baseline[k]);
+                          }
+                     }
+                }
+                ////
+                //// ---- prior on P at the chosen cutoffs:
+                ////
+                if (prior_type == 1) {
+                     //// Dirichlet on the segment sums:
+                     log_prob += dirichlet_lpdf(q | A_user);
+                } else if (prior_type == 2) {
+                     //// Beta on each P, restricted to rising P (normaliser constant):
+                     log_prob += beta_lpdf(P_chosen | beta_ab[, 1], beta_ab[, 2]);
+                } else if (prior_type == 4) {
+                     //// Normal on the link scale, restricted to rising P:
+                     log_prob += normal_lpdf(C_baseline[chosen] | link_mean_SD[, 1], link_mean_SD[, 2]);
+                } else {
+                     //// Beta on each (P_j - P_{j-1}) / (1 - P_{j-1}):
+                     vector[m] P_prev = append_row(0.0, P_chosen[1:(m - 1)]);
+                     log_prob += beta_lpdf(q[1:m] ./ (1.0 - P_prev) | beta_ab[, 1], beta_ab[, 2]);
+                     log_prob += - sum(log1m(P_prev));
+                }
+                return log_prob;
+
+      }
+
 
       //////////////////////////////////////////////////////////////////////////
       // ---- reduce_sum_static partial-sum function (4-class). Slices u_raw by OBSERVATION;
@@ -601,80 +722,91 @@ functions {
             array[T,Kmax] int seen = rep_array(0,T,Kmax);
             matrix[C,T*Kmax] cache = rep_matrix(0.0,C,T*Kmax);
             vector[N] out;
-            for (n in 1:N) for (t in 1:T) {
-                  category[n,t] = y[n,t] < 0 ? 0 : to_int(y[n,t]) + (t <= n_binary_tests ? 1 : 0);
-                  if (category[n,t] > 0) seen[t,category[n,t]] = 1;
+            for (n in 1:N) {
+                  for (t in 1:T) {
+                        category[n,t] = y[n,t] < 0 ? 0 : to_int(y[n,t]) + (t <= n_binary_tests ? 1 : 0);
+                        if (category[n,t] > 0) seen[t,category[n,t]] = 1;
+                  }
             }
-            for (c in 1:C) for (t in 1:T) {
-                  int K = t <= n_binary_tests ? 2 : n_cat_per_ord_test[t-n_binary_tests];
-                  for (k in 1:K) if (seen[t,k] == 1) {
-                        real lp;
-                        //// Shared measurement: compute each class/category probability once.
-                        //// Phi_type = 0 and 1 use the exact-normal interval routine of the dependent GHK path (log-space
-                        //// tails, no Phi / Phi_approx splice at the thresholds). Only Phi_type = 2 takes the else branch below.
-                        if (Phi_type != 2) {
-                              if (t <= n_binary_tests)
-                                    lp = log_Phi_stable(k == 1 ? -beta[c,t] : beta[c,t]);
-                              else {
+            for (c in 1:C) {
+                  for (t in 1:T) {
+                        int K = t <= n_binary_tests ? 2 : n_cat_per_ord_test[t-n_binary_tests];
+                        for (k in 1:K) if (seen[t,k] == 1) {
+                              real lp;
+                              //// Shared measurement: compute each class/category probability once.
+                              //// Phi_type = 0 and 1 use the exact-normal interval routine of the dependent GHK path (log-space
+                              //// tails, no Phi / Phi_approx splice at the thresholds). Only Phi_type = 2 takes the else branch below.
+                              if (Phi_type != 2) {
+                                    if (t <= n_binary_tests)
+                                          lp = log_Phi_stable(k == 1 ? -beta[c,t] : beta[c,t]);
+                                    else {
+                                          int to = t - n_binary_tests;
+                                          int own = class_D[c,test_condition[t]] + 1;
+                                          int first = ord_start_index[to];
+                                          real lo = k == 1 ? negative_infinity()
+                                                           : C_vec_tp[own][first+k-2] - beta[c,t];
+                                          real hi = k == K ? positive_infinity()
+                                                           : C_vec_tp[own][first+k-1] - beta[c,t];
+                                          real log_width = (k > 1 && k < K) ? log_C_gap_tp[own][first+k-1] : positive_infinity();
+                                          lp = normal_interval_mass(lo,hi,log_width);
+                                    }
+                              } else {
+                              if (t <= n_binary_tests) {
+                                    real b = -beta[c,t];
+                                    real poly = 0.07056 * b * square(b) + 1.5976 * b;
+                                    if (k == 1 && b < underflow_threshold) lp = log_inv_logit(poly);
+                                    else if (k == 2 && b > overflow_threshold) lp = log_inv_logit(-poly);
+                                    //// Phi_type = 2: log Phi_approx(b) = log_inv_logit(poly), log(1 - Phi_approx(b)) = log_inv_logit(-poly),
+                                    //// exact and stable for every b (log1m of Phi_approx at b was log(0) for b > ~7.11).
+                                    else if (Phi_type == 2) lp = log_inv_logit(k == 1 ? poly : -poly);
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // else {
+                                          // real p = Phi(b);
+                                          // lp = k == 1 ? log(p) : log1m(p);
+                                    // }
+                              } else {
                                     int to = t - n_binary_tests;
                                     int own = class_D[c,test_condition[t]] + 1;
                                     int first = ord_start_index[to];
-                                    real lo = k == 1 ? negative_infinity() : C_vec_tp[own][first+k-2] - beta[c,t];
-                                    real hi = k == K ? positive_infinity() : C_vec_tp[own][first+k-1] - beta[c,t];
-                                    real log_width = (k > 1 && k < K) ? log_C_gap_tp[own][first+k-1] : positive_infinity();
-                                    lp = normal_interval_mass(lo,hi,log_width);
+                                    real lo = (k == 1 ? -C_sentinel : C_vec_tp[own][first+k-2]) - beta[c,t];
+                                    real hi = (k == K ? C_sentinel : C_vec_tp[own][first+k-1]) - beta[c,t];
+                                    real mid = 0.5 * (lo+hi);
+                                    real log_width = (k > 1 && k < K) ? log_C_gap_tp[own][first+k-1] : 0.0;
+                                    if (k > 1 && k < K && log_width < log(1e-5) - log1p(abs(mid))) {
+                                          int approx_cdf = (Phi_type == 2);
+                                          lp = narrow_interval_logprob(mid,log_width,approx_cdf);
+                                    } else if (hi < underflow_threshold) {
+                                          real llo = log_inv_logit(0.07056 * lo * square(lo) + 1.5976 * lo);
+                                          real lhi = log_inv_logit(0.07056 * hi * square(hi) + 1.5976 * hi);
+                                          lp = lhi + log1m_exp(llo-lhi);
+                                    } else if (lo > overflow_threshold) {
+                                          real llo = log_inv_logit(-0.07056 * lo * square(lo) - 1.5976 * lo);
+                                          real lhi = log_inv_logit(-0.07056 * hi * square(hi) - 1.5976 * hi);
+                                          lp = llo + log1m_exp(lhi-llo);
+                                    } else if (Phi_type == 2) {
+                                          //// Same stable Phi_approx interval identity as in partial_log_lik (no tail cancellation).
+                                          real poly_lo = 0.07056 * lo * square(lo) + 1.5976 * lo;
+                                          real poly_hi = 0.07056 * hi * square(hi) + 1.5976 * hi;
+                                          real poly_gap = (hi - lo) * (0.07056 * (square(lo) + lo * hi + square(hi)) + 1.5976);
+                                          lp = log_inv_logit(poly_hi) + log_inv_logit(-poly_lo)
+                                             + log1m_exp(-poly_gap);
+                                    }
+                                    //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
+                                    // else lp = log(Phi(hi)-Phi(lo));
                               }
-                        } else {
-                        if (t <= n_binary_tests) {
-                              real b = -beta[c,t];
-                              real poly = 0.07056 * b * square(b) + 1.5976 * b;
-                              if (k == 1 && b < underflow_threshold) lp = log_inv_logit(poly);
-                              else if (k == 2 && b > overflow_threshold) lp = log_inv_logit(-poly);
-                              //// Phi_type = 2: log Phi_approx(b) = log_inv_logit(poly), log(1 - Phi_approx(b)) = log_inv_logit(-poly),
-                              //// exact and stable for every b (log1m of Phi_approx at b was log(0) for b > ~7.11).
-                              else if (Phi_type == 2) lp = log_inv_logit(k == 1 ? poly : -poly);
-                              //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
-                              // else {
-                                    // real p = Phi(b);
-                                    // lp = k == 1 ? log(p) : log1m(p);
-                              // }
-                        } else {
-                              int to = t - n_binary_tests;
-                              int own = class_D[c,test_condition[t]] + 1;
-                              int first = ord_start_index[to];
-                              real lo = (k == 1 ? -C_sentinel : C_vec_tp[own][first+k-2]) - beta[c,t];
-                              real hi = (k == K ? C_sentinel : C_vec_tp[own][first+k-1]) - beta[c,t];
-                              real mid = 0.5 * (lo+hi);
-                              real log_width = (k > 1 && k < K) ? log_C_gap_tp[own][first+k-1] : 0.0;
-                              if (k > 1 && k < K && log_width < log(1e-5) - log1p(abs(mid))) {
-                                    int approx_cdf = (Phi_type == 2);
-                                    lp = narrow_interval_logprob(mid,log_width,approx_cdf);
-                              } else if (hi < underflow_threshold) {
-                                    real llo = log_inv_logit(0.07056 * lo * square(lo) + 1.5976 * lo);
-                                    real lhi = log_inv_logit(0.07056 * hi * square(hi) + 1.5976 * hi);
-                                    lp = lhi + log1m_exp(llo-lhi);
-                              } else if (lo > overflow_threshold) {
-                                    real llo = log_inv_logit(-0.07056 * lo * square(lo) - 1.5976 * lo);
-                                    real lhi = log_inv_logit(-0.07056 * hi * square(hi) - 1.5976 * hi);
-                                    lp = llo + log1m_exp(lhi-llo);
-                              } else if (Phi_type == 2) {
-                                    //// Same stable Phi_approx interval identity as in partial_log_lik (no tail cancellation).
-                                    real poly_lo = 0.07056 * lo * square(lo) + 1.5976 * lo;
-                                    real poly_hi = 0.07056 * hi * square(hi) + 1.5976 * hi;
-                                    real poly_gap = (hi - lo) * (0.07056 * (square(lo) + lo * hi + square(hi)) + 1.5976);
-                                    lp = log_inv_logit(poly_hi) + log_inv_logit(-poly_lo) + log1m_exp(-poly_gap);
                               }
-                              //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
-                              // else lp = log(Phi(hi)-Phi(lo));
+                              cache[c,(t-1)*Kmax+k] = lp;
                         }
-                        }
-                        cache[c,(t-1)*Kmax+k] = lp;
                   }
             }
             for (n in 1:N) {
                   vector[C] lp = to_vector(log_prev_subject[n]);
-                  for (c in 1:C) for (t in 1:T) if (category[n,t] > 0)
-                        lp[c] += cache[c,(t-1)*Kmax+category[n,t]];
+                  for (c in 1:C) {
+                        for (t in 1:T) {
+                              if (category[n,t] > 0)
+                                    lp[c] += cache[c,(t-1)*Kmax+category[n,t]];
+                        }
+                  }
                   out[n] = log_sum_exp(lp);
             }
             return out;
@@ -759,7 +891,7 @@ functions {
             real out = 0.0;
 
             ////
-            //// ---- u transform + Jacobian (plain-function equivalent of lb_ub_jacobian(u_raw, 0, 1)):
+            //// ---- u transform + Jacobian (hand-written equivalent of lb_ub_jacobian(u_raw, 0, 1)):
             ////
             matrix[M, n_tests] tanh_u;
             for (m in 1:M)  tanh_u[m, ] = tanh(u_raw_slice[m]);
@@ -812,9 +944,9 @@ functions {
                   ////
                   if (n_m > 0) {
                         array[n_m] int mis = idx_m[1:n_m];
-                        if (Phi_type == 2) Z_std_norm[mis, t] = inv_Phi_approx_from_prob(u[mis, t]);
+                        if (Phi_type == 2) Z_std_norm[mis, t] = nico_inv_Phi_approx(u[mis, t]);
                         //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
-                        // else               Z_std_norm[mis, t] = inv_Phi(u[mis, t]);
+                        // else               Z_std_norm[mis, t] = nico_inv_Phi(u[mis, t]);
                         y1[mis, t] = rep_vector(0.0, n_m);
                   }
 
@@ -879,10 +1011,10 @@ functions {
                                           //// log(v) and log(1 - v) are taken from log(u) and log1m(u) directly (1 - u is never formed).
                                           vector[n_ok] sign_y = yy + (yy - 1.0);
                                           vector[n_ok] poly_signed = sign_y .* (0.07056 * square(Bound_Z) .* Bound_Z + 1.5976 * Bound_Z);
-                                          vector[n_ok] log_Phi_signed = log_inv_logit(poly_signed);
-                                          vector[n_ok] log_1m_Phi_signed = log_inv_logit(-poly_signed);
-                                          vector[n_ok] log_u = log(u[index, t]);
-                                          vector[n_ok] log_1m_u = log1m(u[index, t]);
+                                          vector[n_ok] log_Phi_signed = nico_log_inv_logit(poly_signed);
+                                          vector[n_ok] log_1m_Phi_signed = nico_log_inv_logit(-poly_signed);
+                                          vector[n_ok] log_u = nico_log(u[index, t]);
+                                          vector[n_ok] log_1m_u = nico_log1m(u[index, t]);
                                           vector[n_ok] log_v;
                                           vector[n_ok] log_1m_v;
                                           for (ii in 1:n_ok) {
@@ -892,7 +1024,7 @@ functions {
                                           matrix[n_ok, 2] tmp;
                                           tmp[, 1] = log_Phi_signed;
                                           tmp[, 2] = log_1m_Phi_signed + log_v;
-                                          Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(sign_y .* (log_sum_exp_2d(tmp) - (log_1m_v + log_1m_Phi_signed)));
+                                          Z_std_norm[index, t] = nico_inv_Phi_approx_from_logit_prob(sign_y .* (log_sum_exp_2d(tmp) - (log_1m_v + log_1m_Phi_signed)));
                                           y1[index, t] = log_1m_Phi_signed;
                                     }
                                     //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
@@ -909,9 +1041,9 @@ functions {
                                                 // if (yy[ii] == 1) u_reflected[ii] = 1.0 - u[index[ii], t];
                                                 // else             u_reflected[ii] = u[index[ii], t];
                                           // }
-                                          // vector[n_ok] prob_t = Phi(reflect_sign .* Bound_Z);
-                                          // Z_std_norm[index, t] = reflect_sign .* inv_Phi(u_reflected .* prob_t);
-                                          // y1[index, t] = log(prob_t);
+                                          // vector[n_ok] prob_t = nico_Phi(reflect_sign .* Bound_Z);
+                                          // Z_std_norm[index, t] = reflect_sign .* nico_inv_Phi(u_reflected .* prob_t);
+                                          // y1[index, t] = nico_log(prob_t);
                                     // }
                               }
                               if (n_uf > 0) {   //// underflow + y == 0
@@ -919,10 +1051,10 @@ functions {
                                     vector[n_uf] Bound_Z = uf_Bz[1:n_uf];
                                     if (Phi_type == 2) {
                                           //// Phi_type = 2: Phi_approx tail, unchanged.
-                                          vector[n_uf] log_Bound_U_Phi_Bound_Z = log_inv_logit(0.07056 * square(Bound_Z) .* Bound_Z + 1.5976 * Bound_Z);
-                                          vector[n_uf] log_Phi_Z    = log(u[index, t]) + log_Bound_U_Phi_Bound_Z;
-                                          vector[n_uf] log_1m_Phi_Z = log1m_exp(log(u[index, t]) + log_Bound_U_Phi_Bound_Z);
-                                          Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
+                                          vector[n_uf] log_Bound_U_Phi_Bound_Z = nico_log_inv_logit(0.07056 * square(Bound_Z) .* Bound_Z + 1.5976 * Bound_Z);
+                                          vector[n_uf] log_Phi_Z    = nico_log(u[index, t]) + log_Bound_U_Phi_Bound_Z;
+                                          vector[n_uf] log_1m_Phi_Z = nico_log1m_exp(nico_log(u[index, t]) + log_Bound_U_Phi_Bound_Z);
+                                          Z_std_norm[index, t] = nico_inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
                                           y1[index, t] = log_Bound_U_Phi_Bound_Z;
                                     }
                                     //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
@@ -932,8 +1064,8 @@ functions {
                                           // //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
                                           // vector[n_uf] log_Phi_Bound_Z;
                                           // for (ii in 1:n_uf) log_Phi_Bound_Z[ii] = log_Phi_stable(Bound_Z[ii]);
-                                          // vector[n_uf] log_q = log(u[index, t]) + log_Phi_Bound_Z;
-                                          // vector[n_uf] log_1m_q = log1m_exp(log_q);
+                                          // vector[n_uf] log_q = nico_log(u[index, t]) + log_Phi_Bound_Z;
+                                          // vector[n_uf] log_1m_q = nico_log1m_exp(log_q);
                                           // for (ii in 1:n_uf) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
                                           // y1[index, t] = log_Phi_Bound_Z;
                                     // }
@@ -943,13 +1075,13 @@ functions {
                                     vector[n_of] Bound_Z = of_Bz[1:n_of];
                                     if (Phi_type == 2) {
                                           //// Phi_type = 2: Phi_approx tail, unchanged.
-                                          vector[n_of] log_Bound_U_Phi_Bound_Z_1m = log_inv_logit(- 0.07056 * square(Bound_Z) .* Bound_Z - 1.5976 * Bound_Z);
+                                          vector[n_of] log_Bound_U_Phi_Bound_Z_1m = nico_log_inv_logit(- 0.07056 * square(Bound_Z) .* Bound_Z - 1.5976 * Bound_Z);
                                           matrix[n_of, 2] tmp;
-                                          tmp[, 1] = log_Bound_U_Phi_Bound_Z_1m + log(u[index, t]);
-                                          tmp[, 2] = log1m_exp(log_Bound_U_Phi_Bound_Z_1m);
+                                          tmp[, 1] = log_Bound_U_Phi_Bound_Z_1m + nico_log(u[index, t]);
+                                          tmp[, 2] = nico_log1m_exp(log_Bound_U_Phi_Bound_Z_1m);
                                           vector[n_of] log_Phi_Z    = log_sum_exp_2d(tmp);
-                                          vector[n_of] log_1m_Phi_Z = log1m(u[index, t]) + log_Bound_U_Phi_Bound_Z_1m;
-                                          Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
+                                          vector[n_of] log_1m_Phi_Z = nico_log1m(u[index, t]) + log_Bound_U_Phi_Bound_Z_1m;
+                                          Z_std_norm[index, t] = nico_inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
                                           y1[index, t] = log_Bound_U_Phi_Bound_Z_1m;
                                     }
                                     //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
@@ -960,8 +1092,8 @@ functions {
                                           // //// log_Phi_stable and normal_from_log_uniform have no AVX kernels; tails are rare, so their scalar Stan versions are used here (the vector log / log1m / log1m_exp calls become fast_* in the AVX variants).
                                           // vector[n_of] log_1m_Phi_Bound_Z;
                                           // for (ii in 1:n_of) log_1m_Phi_Bound_Z[ii] = log_Phi_stable(-Bound_Z[ii]);
-                                          // vector[n_of] log_1m_q = log1m(u[index, t]) + log_1m_Phi_Bound_Z;
-                                          // vector[n_of] log_q = log1m_exp(log_1m_q);
+                                          // vector[n_of] log_1m_q = nico_log1m(u[index, t]) + log_1m_Phi_Bound_Z;
+                                          // vector[n_of] log_q = nico_log1m_exp(log_1m_q);
                                           // for (ii in 1:n_of) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
                                           // y1[index, t] = log_1m_Phi_Bound_Z;
                                     // }
@@ -1039,20 +1171,20 @@ functions {
                                           vector[n_ok] poly_lo = 0.07056 * square(Bound_Z_lo) .* Bound_Z_lo + 1.5976 * Bound_Z_lo;
                                           vector[n_ok] poly_hi = 0.07056 * square(Bound_Z_hi) .* Bound_Z_hi + 1.5976 * Bound_Z_hi;
                                           vector[n_ok] poly_gap = (Bound_Z_hi - Bound_Z_lo) .* (0.07056 * (square(Bound_Z_lo) + Bound_Z_lo .* Bound_Z_hi + square(Bound_Z_hi)) + 1.5976);
-                                          vector[n_ok] log_Phi_lo = log_inv_logit(poly_lo);
-                                          vector[n_ok] log_Phi_hi = log_inv_logit(poly_hi);
-                                          vector[n_ok] log_1m_Phi_lo = log_inv_logit(-poly_lo);
-                                          vector[n_ok] log_1m_Phi_hi = log_inv_logit(-poly_hi);
-                                          y1[index, t] = log_Phi_hi + log_1m_Phi_lo + log1m_exp(-poly_gap);
+                                          vector[n_ok] log_Phi_lo = nico_log_inv_logit(poly_lo);
+                                          vector[n_ok] log_Phi_hi = nico_log_inv_logit(poly_hi);
+                                          vector[n_ok] log_1m_Phi_lo = nico_log_inv_logit(-poly_lo);
+                                          vector[n_ok] log_1m_Phi_hi = nico_log_inv_logit(-poly_hi);
+                                          y1[index, t] = log_Phi_hi + log_1m_Phi_lo + nico_log1m_exp(-poly_gap);
                                           //// Z = Phi_approx^{-1}(q), q = Phi_lo + u * (Phi_hi - Phi_lo), via logit(q) = log(q) - log(1 - q) with
                                           //// q = (1 - u) Phi_lo + u Phi_hi and 1 - q = (1 - u)(1 - Phi_lo) + u (1 - Phi_hi): both sums of positive terms.
                                           matrix[n_ok, 2] tmp_lower;
                                           matrix[n_ok, 2] tmp_upper;
-                                          tmp_lower[, 1] = log_Phi_lo + log1m(u[index, t]);
-                                          tmp_lower[, 2] = log_Phi_hi + log(u[index, t]);
-                                          tmp_upper[, 1] = log_1m_Phi_lo + log1m(u[index, t]);
-                                          tmp_upper[, 2] = log_1m_Phi_hi + log(u[index, t]);
-                                          Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_sum_exp_2d(tmp_lower) - log_sum_exp_2d(tmp_upper));
+                                          tmp_lower[, 1] = log_Phi_lo + nico_log1m(u[index, t]);
+                                          tmp_lower[, 2] = log_Phi_hi + nico_log(u[index, t]);
+                                          tmp_upper[, 1] = log_1m_Phi_lo + nico_log1m(u[index, t]);
+                                          tmp_upper[, 2] = log_1m_Phi_hi + nico_log(u[index, t]);
+                                          Z_std_norm[index, t] = nico_inv_Phi_approx_from_logit_prob(log_sum_exp_2d(tmp_lower) - log_sum_exp_2d(tmp_upper));
                                     }
                                     //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
                                     // } else {
@@ -1078,11 +1210,11 @@ functions {
                                                       // u_reflected[ii] = u[index[ii], t];
                                                 // }
                                           // }
-                                          // vector[n_ok] Phi_lo = Phi(Bound_Z_lo_reflected);
-                                          // vector[n_ok] Phi_hi = Phi(Bound_Z_hi_reflected);
+                                          // vector[n_ok] Phi_lo = nico_Phi(Bound_Z_lo_reflected);
+                                          // vector[n_ok] Phi_hi = nico_Phi(Bound_Z_hi_reflected);
                                           // vector[n_ok] prob_t = Phi_hi - Phi_lo;
-                                          // Z_std_norm[index, t] = reflect_sign .* inv_Phi(Phi_lo + prob_t .* u_reflected);
-                                          // y1[index, t] = log(prob_t);
+                                          // Z_std_norm[index, t] = reflect_sign .* nico_inv_Phi(Phi_lo + prob_t .* u_reflected);
+                                          // y1[index, t] = nico_log(prob_t);
                                     // }
                               }
                               if (n_lt > 0) {   //// BOTH bounds in the left tail
@@ -1091,14 +1223,14 @@ functions {
                                     vector[n_lt] Bound_Z_hi = lt_hi[1:n_lt];
                                     if (Phi_type == 2) {
                                           //// Phi_type = 2: Phi_approx tail, unchanged.
-                                          vector[n_lt] log_Phi_lo = log_inv_logit(0.07056 * square(Bound_Z_lo) .* Bound_Z_lo + 1.5976 * Bound_Z_lo);
-                                          vector[n_lt] log_Phi_hi = log_inv_logit(0.07056 * square(Bound_Z_hi) .* Bound_Z_hi + 1.5976 * Bound_Z_hi);
-                                          y1[index, t] = log_Phi_hi + log1m_exp(log_Phi_lo - log_Phi_hi);
+                                          vector[n_lt] log_Phi_lo = nico_log_inv_logit(0.07056 * square(Bound_Z_lo) .* Bound_Z_lo + 1.5976 * Bound_Z_lo);
+                                          vector[n_lt] log_Phi_hi = nico_log_inv_logit(0.07056 * square(Bound_Z_hi) .* Bound_Z_hi + 1.5976 * Bound_Z_hi);
+                                          y1[index, t] = log_Phi_hi + nico_log1m_exp(log_Phi_lo - log_Phi_hi);
                                           matrix[n_lt, 2] tmp;
-                                          tmp[, 1] = log_Phi_lo + log1m(u[index, t]);
-                                          tmp[, 2] = log_Phi_hi + log(u[index, t]);
+                                          tmp[, 1] = log_Phi_lo + nico_log1m(u[index, t]);
+                                          tmp[, 2] = log_Phi_hi + nico_log(u[index, t]);
                                           vector[n_lt] log_Phi_Z = log_sum_exp_2d(tmp);
-                                          Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log1m_exp(log_Phi_Z));
+                                          Z_std_norm[index, t] = nico_inv_Phi_approx_from_logit_prob(log_Phi_Z - nico_log1m_exp(log_Phi_Z));
                                     }
                                     //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
                                     // } else {
@@ -1109,12 +1241,12 @@ functions {
                                           // vector[n_lt] log_Phi_hi;
                                           // for (ii in 1:n_lt) log_Phi_lo[ii] = log_Phi_stable(Bound_Z_lo[ii]);
                                           // for (ii in 1:n_lt) log_Phi_hi[ii] = log_Phi_stable(Bound_Z_hi[ii]);
-                                          // y1[index, t] = log_Phi_hi + log1m_exp(log_Phi_lo - log_Phi_hi);
+                                          // y1[index, t] = log_Phi_hi + nico_log1m_exp(log_Phi_lo - log_Phi_hi);
                                           // matrix[n_lt, 2] tmp;
-                                          // tmp[, 1] = log_Phi_lo + log1m(u[index, t]);
-                                          // tmp[, 2] = log_Phi_hi + log(u[index, t]);
+                                          // tmp[, 1] = log_Phi_lo + nico_log1m(u[index, t]);
+                                          // tmp[, 2] = log_Phi_hi + nico_log(u[index, t]);
                                           // vector[n_lt] log_q = log_sum_exp_2d(tmp);
-                                          // vector[n_lt] log_1m_q = log1m_exp(log_q);
+                                          // vector[n_lt] log_1m_q = nico_log1m_exp(log_q);
                                           // for (ii in 1:n_lt) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
                                     // }
                               }
@@ -1124,15 +1256,15 @@ functions {
                                     vector[n_rt] Bound_Z_hi = rt_hi[1:n_rt];
                                     if (Phi_type == 2) {
                                           //// Phi_type = 2: Phi_approx tail, unchanged.
-                                          vector[n_rt] log_1m_Phi_lo = log_inv_logit(- 0.07056 * square(Bound_Z_lo) .* Bound_Z_lo - 1.5976 * Bound_Z_lo);
-                                          vector[n_rt] log_1m_Phi_hi = log_inv_logit(- 0.07056 * square(Bound_Z_hi) .* Bound_Z_hi - 1.5976 * Bound_Z_hi);
-                                          y1[index, t] = log_1m_Phi_lo + log1m_exp(log_1m_Phi_hi - log_1m_Phi_lo);
+                                          vector[n_rt] log_1m_Phi_lo = nico_log_inv_logit(- 0.07056 * square(Bound_Z_lo) .* Bound_Z_lo - 1.5976 * Bound_Z_lo);
+                                          vector[n_rt] log_1m_Phi_hi = nico_log_inv_logit(- 0.07056 * square(Bound_Z_hi) .* Bound_Z_hi - 1.5976 * Bound_Z_hi);
+                                          y1[index, t] = log_1m_Phi_lo + nico_log1m_exp(log_1m_Phi_hi - log_1m_Phi_lo);
                                           matrix[n_rt, 2] tmp;
-                                          tmp[, 1] = log_1m_Phi_lo + log1m(u[index, t]);
-                                          tmp[, 2] = log_1m_Phi_hi + log(u[index, t]);
+                                          tmp[, 1] = log_1m_Phi_lo + nico_log1m(u[index, t]);
+                                          tmp[, 2] = log_1m_Phi_hi + nico_log(u[index, t]);
                                           vector[n_rt] log_1m_Phi_Z = log_sum_exp_2d(tmp);
-                                          vector[n_rt] log_Phi_Z = log1m_exp(log_1m_Phi_Z);
-                                          Z_std_norm[index, t] = inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
+                                          vector[n_rt] log_Phi_Z = nico_log1m_exp(log_1m_Phi_Z);
+                                          Z_std_norm[index, t] = nico_inv_Phi_approx_from_logit_prob(log_Phi_Z - log_1m_Phi_Z);
                                     }
                                     //// (no Phi_type 0: only 1 and 2; its old branch is kept below as comments)
                                     // } else {
@@ -1144,12 +1276,12 @@ functions {
                                           // vector[n_rt] log_1m_Phi_hi;
                                           // for (ii in 1:n_rt) log_1m_Phi_lo[ii] = log_Phi_stable(-Bound_Z_lo[ii]);
                                           // for (ii in 1:n_rt) log_1m_Phi_hi[ii] = log_Phi_stable(-Bound_Z_hi[ii]);
-                                          // y1[index, t] = log_1m_Phi_lo + log1m_exp(log_1m_Phi_hi - log_1m_Phi_lo);
+                                          // y1[index, t] = log_1m_Phi_lo + nico_log1m_exp(log_1m_Phi_hi - log_1m_Phi_lo);
                                           // matrix[n_rt, 2] tmp;
-                                          // tmp[, 1] = log_1m_Phi_lo + log1m(u[index, t]);
-                                          // tmp[, 2] = log_1m_Phi_hi + log(u[index, t]);
+                                          // tmp[, 1] = log_1m_Phi_lo + nico_log1m(u[index, t]);
+                                          // tmp[, 2] = log_1m_Phi_hi + nico_log(u[index, t]);
                                           // vector[n_rt] log_1m_q = log_sum_exp_2d(tmp);
-                                          // vector[n_rt] log_q = log1m_exp(log_1m_q);
+                                          // vector[n_rt] log_q = nico_log1m_exp(log_1m_q);
                                           // for (ii in 1:n_rt) Z_std_norm[index[ii], t] = normal_from_log_uniform(log_q[ii], log_1m_q[ii]);
                                     // }
                               }
@@ -1393,6 +1525,34 @@ data {
       array[n_ordinal_tests] int<lower=1> n_thr_per_ord_test;
       array[2] matrix<lower=0>[n_ordinal_tests > 0 ? max(n_cat_per_ord_test) : 1, max(n_ordinal_tests, 1)] prior_dirichlet_alpha;  //// [own-status][cat, ord test]
       ////
+      //// ---- Priors directly on Sp (s = absent) and 1 - Se (s = present) at chosen cutoffs, per own-status
+      //// ---- set s and ordinal test t: (hyperparameters on the scale P = Phi(C - beta_own) = Sp for s = 1
+      //// ---- and 1 - Se for s = 2)
+      //// ---- Types 1 and 3 use P = Sp and 1 - Se; types 2 and 4 use Sp and Se:
+      ////
+      int<lower=0, upper=1> use_Se_Sp_prior;      //// 0 = original cutpoint prior
+      int<lower=0, upper=1> anchor_at_location;   //// 1 = cutpoints centred at the baseline location
+      int<lower=1, upper=4> Se_Sp_prior_type;     //// 1 = Dirichlet, 2-3 = Betas, 4 = link-scale Normal
+      int<lower=0, upper=(n_ordinal_tests > 0 ? max(n_cat_per_ord_test) - 1 : 0)> n_chosen_max;
+      array[2, n_ordinal_tests] int<lower=0, upper=n_chosen_max> n_chosen;
+      array[2, n_ordinal_tests, n_chosen_max] int<lower=1,
+            upper=(n_ordinal_tests > 0 ? max(n_cat_per_ord_test) - 1 : 0)> chosen_cutoffs;
+      array[2, n_ordinal_tests] vector<lower=0.0>[n_chosen_max + 1] prior_Se_Sp_dirichlet_A;
+      array[2, n_ordinal_tests] matrix<lower=0.0>[n_chosen_max, 2] prior_Se_Sp_beta;
+      array[2, n_ordinal_tests] matrix[n_chosen_max, 2] prior_Se_Sp_link_mean_SD;
+            //// Mean and SD of link(Sp), link(Se)
+      ////
+      //// ---- Priors directly on Sp (s = absent) and 1 - Se (s = present) at chosen binary tests:
+      //// ---- Types 1 and 3 use P = Sp and 1 - Se; types 2 and 4 use Sp and Se:
+      ////
+      int<lower=0, upper=n_tests> n_chosen_bin_max;
+      array[2] int<lower=0, upper=n_chosen_bin_max> n_chosen_bin;
+      array[2, n_chosen_bin_max] int<lower=1, upper=n_tests> chosen_bin_tests;
+      array[2] matrix<lower=0.0>[n_chosen_bin_max, 2] prior_Se_Sp_bin_dirichlet_A;
+      array[2] matrix<lower=0.0>[n_chosen_bin_max, 2] prior_Se_Sp_bin_beta;
+      array[2] matrix[n_chosen_bin_max, 2] prior_Se_Sp_bin_link_mean_SD;
+            //// Mean and SD of link(Sp), link(Se)
+      ////
       matrix[N, n_tests] y;      //// binary: 0/1; ordinal: 1..K; MISSING: any negative value (use -1)
       ////
       int<lower=1> n_pops;
@@ -1566,8 +1726,6 @@ data {
       //// to Pr(B | A) depends on the prevalences, and a share of prior draws has a Frechet ceiling
       //// min(prev_A, prev_B) / prev_A below the intended lower endpoint - those draws cannot reach it
       //// at ANY odds ratio.
-      if (Phi_type != 1 && Phi_type != 2)
-          reject("Phi_type must be 1 (Phi) or 2 (Phi_approx); got Phi_type = ", Phi_type);
       ////
       //// In this mode the SAME declared parameters are reused with a different meaning, so that no
       //// parameter is left out of the target density:
@@ -1583,13 +1741,20 @@ data {
 }
 
 transformed data {
+      if (Phi_type != 1 && Phi_type != 2)
+          reject("Phi_type must be 1 (Phi) or 2 (Phi_approx); got Phi_type = ", Phi_type);
+      ////
       //// Independent tests need no GHK augmentation. With every off-diagonal fixed to zero,
       //// the interval probabilities do not depend on u; integrating those uniforms gives one.
       //// This removes N * n_tests redundant parameters in M3 without changing its model.
       int all_correlations_zero = 1;
-      for (c in 1:n_class) for (i in 2:n_tests) for (j in 1:(i - 1)) {
-          if (known_values_indicator_list[c][i,j] == 0 || known_values_list[c][i,j] != 0)
-              all_correlations_zero = 0;
+      for (c in 1:n_class) {
+          for (i in 2:n_tests) {
+              for (j in 1:(i - 1)) {
+                  if (known_values_indicator_list[c][i,j] == 0 || known_values_list[c][i,j] != 0)
+                      all_correlations_zero = 0;
+              }
+          }
       }
       int n_u_rows = (prior_only == 1 || all_correlations_zero == 1) ? 0 : N;
 
@@ -1613,9 +1778,12 @@ transformed data {
       if (n_prevalence_covariates > 0 && use_OR_prior != 1)
           reject("prevalence covariates require use_OR_prior = 1");
       if (covariate_effects_by_own_status == 0)
-          for (t in 1:n_tests) for (k in 1:n_covariates_max)
-              if (covariate_active[1,k,t] != covariate_active[2,k,t])
-                  reject("shared covariates require the same active mask in both statuses");
+          for (t in 1:n_tests) {
+              for (k in 1:n_covariates_max) {
+                  if (covariate_active[1,k,t] != covariate_active[2,k,t])
+                      reject("shared covariates require the same active mask in both statuses");
+              }
+          }
       if (sum(standardisation_weight) <= 0) reject("standardisation_weight must have a positive total");
       vector[n_standardisation] standardisation_w = standardisation_weight / sum(standardisation_weight);
       if (sum(grid_standardisation_weight) <= 0) reject("grid_standardisation_weight must have a positive total");
@@ -1635,9 +1803,12 @@ transformed data {
       for (t in 1:n_ordinal_tests) {
           if (n_thr_per_ord_test[t] != n_cat_per_ord_test[t] - 1)
               reject("ordinal category / threshold counts disagree");
-          for (st in 1:2) for (k in 1:n_cat_per_ord_test[t])
-              if (prior_dirichlet_alpha[st][k, t] <= 0)
-                  reject("active Dirichlet concentrations must be strictly positive");
+          for (st in 1:2) {
+              for (k in 1:n_cat_per_ord_test[t]) {
+                  if (prior_dirichlet_alpha[st][k, t] <= 0)
+                      reject("active Dirichlet concentrations must be strictly positive");
+              }
+          }
       }
       for (n in 1:N) {
           if (pop[n] < 1 || pop[n] > n_pops) reject("pop is outside 1:n_pops");
@@ -1742,8 +1913,10 @@ transformed data {
       int n_corrs_total = 0;
       for (c in 1:n_class) {
           corr_start_index[c] = n_corrs_total + 1;
-          for (i in 2:n_tests) for (j in 1:(i - 1)) {
-              if (known_values_indicator_list[c][i, j] == 0) n_corrs_per_class[c] += 1;
+          for (i in 2:n_tests) {
+              for (j in 1:(i - 1)) {
+                  if (known_values_indicator_list[c][i, j] == 0) n_corrs_per_class[c] += 1;
+              }
           }
           n_corrs_total += n_corrs_per_class[c];
       }
@@ -1752,12 +1925,14 @@ transformed data {
           for (c in 2:n_class) {
               if (n_corrs_per_class[c] != n_corrs_per_class[1])
                   reject("correlation pooling requires the same free-entry pattern in every class");
-              for (i in 2:n_tests) for (j in 1:(i - 1)) {
-                  if (lb_corr_actual[c][i,j] != lb_corr_actual[1][i,j] || ub_corr[c][i,j] != ub_corr[1][i,j])
-                      reject("correlation pooling requires identical bounds in every class");
-                  if (known_values_indicator_list[c][i, j] != known_values_indicator_list[1][i, j] ||
-                      known_values_list[c][i, j] != known_values_list[1][i, j])
-                      reject("correlation pooling requires identical fixed entries in every class");
+              for (i in 2:n_tests) {
+                  for (j in 1:(i - 1)) {
+                      if (lb_corr_actual[c][i,j] != lb_corr_actual[1][i,j] || ub_corr[c][i,j] != ub_corr[1][i,j])
+                          reject("correlation pooling requires identical bounds in every class");
+                      if (known_values_indicator_list[c][i, j] != known_values_indicator_list[1][i, j] ||
+                          known_values_list[c][i, j] != known_values_list[1][i, j])
+                          reject("correlation pooling requires identical fixed entries in every class");
+                  }
               }
           }
       }
@@ -1803,6 +1978,42 @@ transformed data {
           reject("n_loo_draws > 0 is not available: the LOO log-likelihood (log_lik_obs_ghk_rng) is ",
                  "commented out, since it integrated the missing tests out over the observed tests only, ",
                  "not by the GHK method; set n_loo_draws = 0");
+      ////
+      //// ---- Sums of prior_dirichlet_alpha over the segments between chosen cutoffs, per own-status set s
+      //// ---- and ordinal test t:
+      ////
+      array[2, n_ordinal_tests] vector[n_chosen_max + 1] alpha_seg;
+      for (t_ord in 1:n_ordinal_tests) {
+            int n_cat_t = n_cat_per_ord_test[t_ord];
+            for (s in 1:2) {
+                  alpha_seg[s, t_ord] = rep_vector(0.0, n_chosen_max + 1);
+                  int k_prev = 0;
+                  for (j in 1:n_chosen[s, t_ord]) {
+                       int k_j = chosen_cutoffs[s, t_ord, j];
+                       if (k_j <= k_prev) reject("chosen_cutoffs must rise: set ", s, ", test ", t_ord);
+                       if (k_j > n_thr_per_ord_test[t_ord])
+                             reject("chosen_cutoffs beyond thresholds: set ", s, ", test ", t_ord);
+                       alpha_seg[s, t_ord][j] = sum(prior_dirichlet_alpha[s][(k_prev + 1):k_j, t_ord]);
+                       k_prev = k_j;
+                  }
+                  alpha_seg[s, t_ord][n_chosen[s, t_ord] + 1]
+                        = sum(prior_dirichlet_alpha[s][(k_prev + 1):n_cat_t, t_ord]);
+            }
+      }
+      ////
+      //// ---- Chosen binary tests must be binary, not perfect references, and must rise:
+      ////
+      for (s in 1:2) {
+            for (j in 1:n_chosen_bin[s]) {
+                  int t_j = chosen_bin_tests[s, j];
+                  if (is_perfect_ref[t_j] == 1) reject("chosen binary test is a perfect reference: set ", s);
+                  if (mean_has_own[t_j] == 0) reject("chosen binary test is ordinal: set ", s);
+                  if (j > 1) {
+                        if (chosen_bin_tests[s, j] <= chosen_bin_tests[s, j - 1])
+                              reject("chosen_bin_tests must rise: set ", s);
+                  }
+            }
+      }
 }
 
 parameters {
@@ -1900,9 +2111,13 @@ transformed parameters {
       ////
       array[2] matrix[n_covariates_max, n_tests] beta_cov_by_own_status
             = { beta_cov_raw[1], beta_cov_raw[covariate_effects_by_own_status == 1 ? 2 : 1] };
-      for (st in 1:2) for (t in 1:n_tests) for (k in 1:n_covariates_max) {
-          if (is_perfect_ref[t] == 1 || covariate_active[st, k, t] == 0)
-              beta_cov_by_own_status[st][k, t] = 0.0;
+      for (st in 1:2) {
+          for (t in 1:n_tests) {
+              for (k in 1:n_covariates_max) {
+                  if (is_perfect_ref[t] == 1 || covariate_active[st, k, t] == 0)
+                      beta_cov_by_own_status[st][k, t] = 0.0;
+              }
+          }
       }
       ////
       array[n_class] matrix[n_tests, n_tests] Omega;
@@ -2057,8 +2272,79 @@ model {
       ////
       for (t in 1:n_tests) {
           if (is_perfect_ref[t] == 0 && mean_has_own[t] == 1) {      //// binary, accuracy estimated
-              beta_own_absent_free[t]  ~ normal(prior_beta_mean[1, t], prior_beta_sd[1, t]);
-              beta_own_present_free[t] ~ normal(prior_beta_mean[2, t], prior_beta_sd[2, t]);  //// truncated below at beta_own_absent_free[t] by declaration
+              if (use_Se_Sp_prior == 1) {
+                    ////
+                    //// ---- Se / Sp prior at the chosen binary tests, per own-status set s:
+                    ////
+                    int j_chosen_absent = 0;
+                    for (j in 1:n_chosen_bin[1]) {
+                         if (chosen_bin_tests[1, j] == t) {
+                              j_chosen_absent = j;
+                         }
+                    }
+                    if (j_chosen_absent > 0) {
+                         //// ---- set s = 1 (absent): P = Phi(-mu) = Sp:
+                         real mu_absent = beta_own_absent_free[t];
+                         real P_absent = Phi_stable(-mu_absent);
+                         if (Se_Sp_prior_type == 1) {
+                              vector[2] q_absent;
+                              q_absent[1] = P_absent;
+                              q_absent[2] = 1.0 - P_absent;
+                              target += dirichlet_lpdf(q_absent
+                                        | prior_Se_Sp_bin_dirichlet_A[1, j_chosen_absent]');
+                         } else if (Se_Sp_prior_type == 2 || Se_Sp_prior_type == 3) {
+                              target += beta_lpdf(P_absent | prior_Se_Sp_bin_beta[1, j_chosen_absent, 1],
+                                                  prior_Se_Sp_bin_beta[1, j_chosen_absent, 2]);
+                         } else {
+                              target += normal_lpdf(-mu_absent
+                                        | prior_Se_Sp_bin_link_mean_SD[1, j_chosen_absent, 1],
+                                        prior_Se_Sp_bin_link_mean_SD[1, j_chosen_absent, 2]);
+                         }
+                         //// ---- Jacobian of P = Phi(-mu) w.r.t. the intercept: phi(mu) for types 1-3:
+                         if (Se_Sp_prior_type != 4) {
+                              target += std_normal_lpdf(mu_absent);
+                         }
+                    } else {
+                         beta_own_absent_free[t]  ~ normal(prior_beta_mean[1, t], prior_beta_sd[1, t]);
+                    }
+                    int j_chosen_present = 0;
+                    for (j in 1:n_chosen_bin[2]) {
+                         if (chosen_bin_tests[2, j] == t) {
+                              j_chosen_present = j;
+                         }
+                    }
+                    if (j_chosen_present > 0) {
+                         //// ---- set s = 2 (present): P = Phi(-mu) = 1 - Se:
+                         real mu_present = beta_own_present_free[t];
+                         real P_present = Phi_stable(-mu_present);
+                         if (Se_Sp_prior_type == 1) {
+                              vector[2] q_present;
+                              q_present[1] = P_present;
+                              q_present[2] = 1.0 - P_present;
+                              target += dirichlet_lpdf(q_present
+                                        | prior_Se_Sp_bin_dirichlet_A[2, j_chosen_present]');
+                         } else if (Se_Sp_prior_type == 2) {
+                              target += beta_lpdf(P_present | prior_Se_Sp_bin_beta[2, j_chosen_present, 2],
+                                                  prior_Se_Sp_bin_beta[2, j_chosen_present, 1]);
+                         } else if (Se_Sp_prior_type == 3) {
+                              target += beta_lpdf(P_present | prior_Se_Sp_bin_beta[2, j_chosen_present, 1],
+                                                  prior_Se_Sp_bin_beta[2, j_chosen_present, 2]);
+                         } else {
+                              target += normal_lpdf(mu_present
+                                        | prior_Se_Sp_bin_link_mean_SD[2, j_chosen_present, 1],
+                                        prior_Se_Sp_bin_link_mean_SD[2, j_chosen_present, 2]);
+                         }
+                         //// ---- Jacobian of P = Phi(-mu) w.r.t. the intercept: phi(mu) for types 1-3:
+                         if (Se_Sp_prior_type != 4) {
+                              target += std_normal_lpdf(mu_present);
+                         }
+                    } else {
+                         beta_own_present_free[t] ~ normal(prior_beta_mean[2, t], prior_beta_sd[2, t]);  //// truncated below at beta_own_absent_free[t] by declaration
+                    }
+              } else {
+                    beta_own_absent_free[t]  ~ normal(prior_beta_mean[1, t], prior_beta_sd[1, t]);
+                    beta_own_present_free[t] ~ normal(prior_beta_mean[2, t], prior_beta_sd[2, t]);  //// truncated below at beta_own_absent_free[t] by declaration
+              }
           }
           if (allow_cross_loading[t] == 1) {
               delta_cross_free[1, t] ~ normal(0.0, prior_delta_cross_sd[t]);
@@ -2170,8 +2456,47 @@ model {
                 ////
                 for (s in 1:2) {
                       vector[n_thr_t] C_t = get_test_values(C_vec_tp[s], ord_start_index, ord_end_index, t_ord);
-                      target += induced_dirichlet_lpdf(C_t | get_test_values(log_C_gap_tp[s], ord_start_index, ord_end_index, t_ord),
-                                                       to_vector(prior_dirichlet_alpha[s][1:n_cat_t, t_ord]));
+                      vector[n_thr_t] log_C_gap_t
+                            = get_test_values(log_C_gap_tp[s], ord_start_index,
+                                              ord_end_index, t_ord);
+                      if (use_Se_Sp_prior == 1 && n_chosen[s, t_ord] > 0) {
+                            int m = n_chosen[s, t_ord];
+                            ////
+                            //// ---- anchor: the set's own-status location (0 for ordinal tests, whose location
+                            //// ---- IS the cutpoints); the baseline is the cutpoints centred at it:
+                            ////
+                            vector[n_thr_t] baseline_location = rep_vector(beta_own[s, t], n_thr_t);
+                            vector[n_thr_t] C_anchor = rep_vector(0.0, n_thr_t);
+                            if (anchor_at_location == 1) {
+                                 C_anchor = baseline_location;
+                            }
+                            vector[n_thr_t] C_centred = C_t - C_anchor;
+                            vector[n_thr_t] C_baseline = C_t - baseline_location;
+                            matrix[m, 2] beta_ab = prior_Se_Sp_beta[s, t_ord][1:m, ];
+                            matrix[m, 2] link_mean_SD = prior_Se_Sp_link_mean_SD[s, t_ord][1:m, ];
+                            //// flip for the present set: C_baseline is on the probit(1 - Se) scale
+                            if (s == 2) {
+                                 link_mean_SD[, 1] = - link_mean_SD[, 1];
+                                 if (Se_Sp_prior_type == 2) {
+                                      beta_ab = append_col(beta_ab[, 2], beta_ab[, 1]);
+                                 }
+                            }
+                            target += induced_dirichlet_with_Se_Sp_prior_lpdf(
+                                      C_centred | log_C_gap_t,
+                                      C_baseline,
+                                      to_vector(prior_dirichlet_alpha[s][1:n_cat_t, t_ord]),
+                                      alpha_seg[s, t_ord][1:(m + 1)],
+                                      chosen_cutoffs[s, t_ord, 1:m],
+                                      Se_Sp_prior_type,
+                                      prior_Se_Sp_dirichlet_A[s, t_ord][1:(m + 1)],
+                                      beta_ab,
+                                      link_mean_SD,
+                                      1);
+                      } else {
+                            target += induced_dirichlet_lpdf(
+                                      C_t | log_C_gap_t,
+                                      to_vector(prior_dirichlet_alpha[s][1:n_cat_t, t_ord]));
+                      }
                 }
                 ////
                 //// Jacobians: absent set - log-increments (as always); present set - the r -> d map
@@ -2255,6 +2580,7 @@ model {
 
 
 generated quantities {
+      real simd_lanes = bmvp_simd_lanes();
       array[n_pops] vector[n_class] prev;
       vector[n_pops] pop_w_std;
       vector[n_pops] pi_11;
@@ -2466,12 +2792,14 @@ generated quantities {
           for (t in 1:n_binary_tests) {
               real num_pos = 0.0;   real den_pos = 0.0;
               real num_neg = 0.0;   real den_neg = 0.0;
-              for (i in 1:n_standardisation) for (c in 1:n_class) {
-                  int s_own = class_D[c, test_condition[t]] + 1;
-                  real w = standardisation_w[i] * prev_subject[standardisation_index[i], c];
-                  real p = Phi(beta[c, t] + Xbeta_std[s_own][i, t]);
-                  if (class_D[c, test_condition[t]] == 1) { num_pos += w * p; den_pos += w; }
-                  else                                    { num_neg += w * p; den_neg += w; }
+              for (i in 1:n_standardisation) {
+                  for (c in 1:n_class) {
+                      int s_own = class_D[c, test_condition[t]] + 1;
+                      real w = standardisation_w[i] * prev_subject[standardisation_index[i], c];
+                      real p = Phi(beta[c, t] + Xbeta_std[s_own][i, t]);
+                      if (class_D[c, test_condition[t]] == 1) { num_pos += w * p; den_pos += w; }
+                      else                                    { num_neg += w * p; den_neg += w; }
+                  }
               }
               Se_bin[t] = num_pos / den_pos;
               Sp_bin[t] = 1.0 - (num_neg / den_neg);
@@ -2492,12 +2820,14 @@ generated quantities {
               for (k in 1:n_thr_t) {
                   real num_pos = 0.0;   real den_pos = 0.0;
                   real num_neg = 0.0;   real den_neg = 0.0;
-                  for (i in 1:n_standardisation) for (c in 1:n_class) {
-                      int s_own = class_D[c, test_condition[t]] + 1;
-                      real w = standardisation_w[i] * prev_subject[standardisation_index[i], c];
-                      real p = Phi(-(C_ts[s_own][k] - (beta[c, t] + Xbeta_std[s_own][i, t])));   //// Pr(Y > k | class c)
-                      if (class_D[c, test_condition[t]] == 1) { num_pos += w * p; den_pos += w; }
-                      else                                    { num_neg += w * p; den_neg += w; }
+                  for (i in 1:n_standardisation) {
+                      for (c in 1:n_class) {
+                          int s_own = class_D[c, test_condition[t]] + 1;
+                          real w = standardisation_w[i] * prev_subject[standardisation_index[i], c];
+                          real p = Phi(-(C_ts[s_own][k] - (beta[c, t] + Xbeta_std[s_own][i, t])));   //// Pr(Y > k | class c)
+                          if (class_D[c, test_condition[t]] == 1) { num_pos += w * p; den_pos += w; }
+                          else                                    { num_neg += w * p; den_neg += w; }
+                      }
                   }
                   Se_ord[t_ord][k] = num_pos / den_pos;
                   Sp_ord[t_ord][k] = 1.0 - (num_neg / den_neg);
@@ -2563,26 +2893,28 @@ generated quantities {
                         C_B_ref[s] = C_B_full[ref_cutoff_category_B - 1];
                   }
             }
-            for (i in 1:n_standardisation) for (c in 1:n_class) {
-                  real w = standardisation_w[i] * prev_subject[standardisation_index[i], c];
-                  int sA = class_D[c, test_condition[1]] + 1;
-                  int sB = class_D[c, test_condition[2]] + 1;
-                  real a;   //// P(Z_refA > a) = P(refA diagnosed positive | class c)
-                  real b;
-                  if (n_binary_tests >= 2) {
-                        //// binary view (M3/M4/M5): "positive" is Z > 0, location is beta[c,t] alone.
-                        a = -(beta[c, 1] + Xbeta_std[sA][i, 1]);
-                        b = -(beta[c, 2] + Xbeta_std[sB][i, 2]);
-                  } else {
-                        //// ordinal view (M6-M10): own-status location lives in the cutpoints
-                        //// (beta_own = 0 for ordinal tests), so beta[c,t] contributes only any
-                        //// cross-loading / covariate shift, exactly as elsewhere in this file.
-                        a = C_A_ref[sA] - (beta[c, 1] + Xbeta_std[sA][i, 1]);
-                        b = C_B_ref[sB] - (beta[c, 2] + Xbeta_std[sB][i, 2]);
+            for (i in 1:n_standardisation) {
+                  for (c in 1:n_class) {
+                        real w = standardisation_w[i] * prev_subject[standardisation_index[i], c];
+                        int sA = class_D[c, test_condition[1]] + 1;
+                        int sB = class_D[c, test_condition[2]] + 1;
+                        real a;   //// P(Z_refA > a) = P(refA diagnosed positive | class c)
+                        real b;
+                        if (n_binary_tests >= 2) {
+                              //// binary view (M3/M4/M5): "positive" is Z > 0, location is beta[c,t] alone.
+                              a = -(beta[c, 1] + Xbeta_std[sA][i, 1]);
+                              b = -(beta[c, 2] + Xbeta_std[sB][i, 2]);
+                        } else {
+                              //// ordinal view (M6-M10): own-status location lives in the cutpoints
+                              //// (beta_own = 0 for ordinal tests), so beta[c,t] contributes only any
+                              //// cross-loading / covariate shift, exactly as elsewhere in this file.
+                              a = C_A_ref[sA] - (beta[c, 1] + Xbeta_std[sA][i, 1]);
+                              b = C_B_ref[sB] - (beta[c, 2] + Xbeta_std[sB][i, 2]);
+                        }
+                        sum_A  += w * Phi(-a);
+                        sum_B  += w * Phi(-b);
+                        sum_AB += w * biv_norm_upper(a, b, Omega[c, 1, 2], n_quad_nodes);
                   }
-                  sum_A  += w * Phi(-a);
-                  sum_B  += w * Phi(-b);
-                  sum_AB += w * biv_norm_upper(a, b, Omega[c, 1, 2], n_quad_nodes);
             }
             p_refA_pos_overall = sum_A;
             p_refB_pos_overall = sum_B;
@@ -2650,32 +2982,34 @@ generated quantities {
                   real num_B_pp = 0.0;  real num_B_np = 0.0;
                   real num_AB_pp = 0.0;
 
-                  for (gi in 1:n_grid_standardisation) for (c in 1:n_class) {
+                  for (gi in 1:n_grid_standardisation) {
+                        for (c in 1:n_class) {
 
-                        int ii = grid_standardisation_position[gi];
-                        int sA = class_D[c, test_condition[tA_g]] + 1;
-                        int sB = class_D[c, test_condition[tB_g]] + 1;
-                        real muA = beta[c, tA_g] + Xbeta_std[sA][ii, tA_g];
-                        real muB = beta[c, tB_g] + Xbeta_std[sB][ii, tB_g];
-                        ////
-                        vector[n_thr_per_ord_test[tA]] C_A = get_test_values(C_vec_tp[sA], ord_start_index, ord_end_index, tA);
-                        vector[n_thr_per_ord_test[tB]] C_B = get_test_values(C_vec_tp[sB], ord_start_index, ord_end_index, tB);
-                        ////
-                        real aA = C_A[grid_thr_A[i]] - muA;    //// screen A positive  <=>  Z_A > aA
-                        real aB = C_B[grid_thr_B[j]] - muB;
-                        ////
-                        real mA = Phi(-aA);                    //// P(A+ | c), marginal
-                        real mB = Phi(-aB);
-                        real pp = biv_norm_upper(aA, aB, Omega[c, tA_g, tB_g], n_quad_nodes);
-                        real pn = fmax(0.0, mA - pp);
-                        real np = fmax(0.0, mB - pp);
-                        real w  = grid_standardisation_w[gi] * prev_subject[standardisation_index[ii], c];
-                        ////
-                        joint_pp += w * pp;  joint_pn += w * pn;  joint_np += w * np;
-                        if (class_D[c, 1] == 1) { num_A_pp += w * pp;  num_A_pn += w * pn; }
-                        if (class_D[c, 2] == 1) { num_B_pp += w * pp;  num_B_np += w * np; }
-                        if (class_D[c, 1] == 1 && class_D[c, 2] == 1) num_AB_pp += w * pp;
+                              int ii = grid_standardisation_position[gi];
+                              int sA = class_D[c, test_condition[tA_g]] + 1;
+                              int sB = class_D[c, test_condition[tB_g]] + 1;
+                              real muA = beta[c, tA_g] + Xbeta_std[sA][ii, tA_g];
+                              real muB = beta[c, tB_g] + Xbeta_std[sB][ii, tB_g];
+                              ////
+                              vector[n_thr_per_ord_test[tA]] C_A = get_test_values(C_vec_tp[sA], ord_start_index, ord_end_index, tA);
+                              vector[n_thr_per_ord_test[tB]] C_B = get_test_values(C_vec_tp[sB], ord_start_index, ord_end_index, tB);
+                              ////
+                              real aA = C_A[grid_thr_A[i]] - muA;    //// screen A positive  <=>  Z_A > aA
+                              real aB = C_B[grid_thr_B[j]] - muB;
+                              ////
+                              real mA = Phi(-aA);                    //// P(A+ | c), marginal
+                              real mB = Phi(-aB);
+                              real pp = biv_norm_upper(aA, aB, Omega[c, tA_g, tB_g], n_quad_nodes);
+                              real pn = fmax(0.0, mA - pp);
+                              real np = fmax(0.0, mB - pp);
+                              real w  = grid_standardisation_w[gi] * prev_subject[standardisation_index[ii], c];
+                              ////
+                              joint_pp += w * pp;  joint_pn += w * pn;  joint_np += w * np;
+                              if (class_D[c, 1] == 1) { num_A_pp += w * pp;  num_A_pn += w * pn; }
+                              if (class_D[c, 2] == 1) { num_B_pp += w * pp;  num_B_np += w * np; }
+                              if (class_D[c, 1] == 1 && class_D[c, 2] == 1) num_AB_pp += w * pp;
 
+                        }
                   }
 
                   p_screen_both_pos[i, j]      = joint_pp;
@@ -2738,18 +3072,20 @@ generated quantities {
 //        }
 //    }
       
-      for (other in 0:1) for (t in 1:n_tests) {
-          real gap = t <= n_binary_tests ? beta_own[2,t] - beta_own[1,t]
-              : C_vec_tp[1][ord_start_index[t-n_binary_tests] + min(n_thr_per_ord_test[t-n_binary_tests], (t == 1 ? ref_cutoff_category_A-1 : t == 2 ? ref_cutoff_category_B-1 : t == 3 ? 10 : 5)) - 1]
-                - C_vec_tp[2][ord_start_index[t-n_binary_tests] + min(n_thr_per_ord_test[t-n_binary_tests], (t == 1 ? ref_cutoff_category_A-1 : t == 2 ? ref_cutoff_category_B-1 : t == 3 ? 10 : 5)) - 1];
-          real smallest = positive_infinity();
-          for (n in 1:N) {
-              real contrast = gap + other * (delta_cross[2,t] - delta_cross[1,t]);
-              int nc = n_covs_per_outcome[t];
-              if (nc > 0) contrast += X[t][n,1:nc] * (beta_cov_by_own_status[2][1:nc,t] - beta_cov_by_own_status[1][1:nc,t]);
-              smallest = fmin(smallest, contrast);
+      for (other in 0:1) {
+          for (t in 1:n_tests) {
+              real gap = t <= n_binary_tests ? beta_own[2,t] - beta_own[1,t]
+                  : C_vec_tp[1][ord_start_index[t-n_binary_tests] + min(n_thr_per_ord_test[t-n_binary_tests], (t == 1 ? ref_cutoff_category_A-1 : t == 2 ? ref_cutoff_category_B-1 : t == 3 ? 10 : 5)) - 1]
+                    - C_vec_tp[2][ord_start_index[t-n_binary_tests] + min(n_thr_per_ord_test[t-n_binary_tests], (t == 1 ? ref_cutoff_category_A-1 : t == 2 ? ref_cutoff_category_B-1 : t == 3 ? 10 : 5)) - 1];
+              real smallest = positive_infinity();
+              for (n in 1:N) {
+                  real contrast = gap + other * (delta_cross[2,t] - delta_cross[1,t]);
+                  int nc = n_covs_per_outcome[t];
+                  if (nc > 0) contrast += X[t][n,1:nc] * (beta_cov_by_own_status[2][1:nc,t] - beta_cov_by_own_status[1][1:nc,t]);
+                  smallest = fmin(smallest, contrast);
+              }
+              min_effective_separation[other+1,t] = smallest;
           }
-          min_effective_separation[other+1,t] = smallest;
       }
 
       screen_count_expected = rep_matrix(0.0, 2, n_pops);

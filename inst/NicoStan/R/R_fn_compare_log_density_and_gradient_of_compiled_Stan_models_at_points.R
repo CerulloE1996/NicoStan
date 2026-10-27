@@ -231,6 +231,12 @@ fn_compare_log_density_and_gradient_of_compiled_Stan_models_at_points <-  functi
                                                                               reference$log_density[in_set])),
                           n_points_not_finite_in_model                = sum(!is.finite(
                                                                               other$log_density[in_set])),
+                          n_gradients_not_finite_in_reference         = sum(rowSums(!is.finite(
+                                                                              reference$gradient[in_set, ,
+                                                                                  drop = FALSE])) > 0),
+                          n_gradients_not_finite_in_model             = sum(rowSums(!is.finite(
+                                                                              other$gradient[in_set, ,
+                                                                                  drop = FALSE])) > 0),
                           largest_abs_log_density_of_reference        = suppressWarnings(max(abs(
                                                                               reference$log_density[in_set]),
                                                                               na.rm = TRUE)),

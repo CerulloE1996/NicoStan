@@ -34,6 +34,15 @@
 #include "stan_external_functions.hpp"
 #include "nico_simd_exp_in_double_precision.hpp"
 
+// ---- the exp of the covariance entries: the degree-13 one only in the builds that define
+//      NICO_GPC_COVARIANCE_EXP_DEGREE_13 (the GPC builds)
+#if defined(NICO_GPC_COVARIANCE_EXP_DEGREE_13)
+#  include "math/nico_GPC_covariance_exp_degree_13.hpp"
+#  define NICO_GP_COVARIANCE_EXP nico_GPC_covariance_exp_degree_13
+#else
+#  define NICO_GP_COVARIANCE_EXP nico_simd_exp_in_double_precision
+#endif
+
 namespace nico::math {
 namespace gp_exp_quad_cov {
 
@@ -51,7 +60,9 @@ static constexpr const char* function_name = "nico_gp_exp_quad_cov";
 ////
 inline simd_t nico_gp_covariance_products_of_values_and_adjoints(const vari* nodes, const int count) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return nodes[0].val_ * nodes[0].adj_;
+#elif BMVP_LANES == 8
     const __m512i byte_offsets = _mm512_set_epi64(7 * sizeof(vari), 6 * sizeof(vari),
                                                 5 * sizeof(vari), 4 * sizeof(vari),
                                                 3 * sizeof(vari), 2 * sizeof(vari), sizeof(vari), 0);
@@ -82,7 +93,9 @@ inline simd_t nico_gp_covariance_products_of_values_and_adjoints(const vari* nod
 ////
 inline double nico_gp_covariance_sum_of_packet(const simd_t values) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return values;
+#elif BMVP_LANES == 8
     return _mm512_reduce_add_pd(values);
 #else
     const __m128d halves = _mm_add_pd(_mm256_castpd256_pd128(values),
@@ -104,7 +117,13 @@ inline void column_segment(const double* x_rows, const int n, const double x_col
     //// The final partial packet uses masked memory operations, not scalar mathematical work.
     //// The squared distance is formed before multiplication by the length-scale coefficient.
     ////
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    for (int i = 0; i < n; ++i) {
+        const double distance = x_rows[i] - x_column;
+        const double argument = distance * distance * minus_half_inverse_squared_length_scale;
+        out[i] = NICO_GP_COVARIANCE_EXP(argument) * squared_sigma;
+    }
+#elif BMVP_LANES == 8
     const simd_t column_point = _mm512_set1_pd(x_column);
     const simd_t coefficient = _mm512_set1_pd(minus_half_inverse_squared_length_scale);
     const simd_t magnitude = _mm512_set1_pd(squared_sigma);
@@ -118,7 +137,7 @@ inline void column_segment(const double* x_rows, const int n, const double x_col
                                                     column_point);
         const simd_t distance_squared = _mm512_mul_pd(distance, distance);
         const simd_t argument = _mm512_maskz_mul_pd(valid_lanes, distance_squared, coefficient);
-        const simd_t value = _mm512_mul_pd(nico_simd_exp_in_double_precision(argument), magnitude);
+        const simd_t value = _mm512_mul_pd(NICO_GP_COVARIANCE_EXP(argument), magnitude);
         _mm512_mask_storeu_pd(out + i, valid_lanes, value);
     }
 #else
@@ -136,7 +155,7 @@ inline void column_segment(const double* x_rows, const int n, const double x_col
         const simd_t distance_squared = _mm256_mul_pd(distance, distance);
         const simd_t argument = _mm256_and_pd(_mm256_mul_pd(distance_squared, coefficient),
                                               _mm256_castsi256_pd(valid_lanes));
-        const simd_t value = _mm256_mul_pd(nico_simd_exp_in_double_precision(argument), magnitude);
+        const simd_t value = _mm256_mul_pd(NICO_GP_COVARIANCE_EXP(argument), magnitude);
         _mm256_maskstore_pd(out + i, valid_lanes, value);
     }
 #endif
@@ -176,7 +195,10 @@ struct reverse_pass_of_covariance {
         //// Masking the distance also keeps inactive tail lanes out of the derivative reductions.
         //// Node construction, matrix-address selection and copying remain memory/control operations.
         ////
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+        simd_t sums_of_products = 0.0;
+        simd_t sums_of_products_times_squared_distances = 0.0;
+#elif BMVP_LANES == 8
         simd_t sums_of_products = _mm512_setzero_pd();
         simd_t sums_of_products_times_squared_distances = _mm512_setzero_pd();
 #else
@@ -192,7 +214,11 @@ struct reverse_pass_of_covariance {
                 const int count = std::min(BMVP_LANES, n_rows - i);
                 const simd_t product = nico_gp_covariance_products_of_values_and_adjoints(entries + position,
                                                                                            count);
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+                const double distance = x_rows[i] - x_columns[j];
+                sums_of_products += product;
+                sums_of_products_times_squared_distances += product * (distance * distance);
+#elif BMVP_LANES == 8
                 const __mmask8 valid_lanes = count == 8 ? static_cast<__mmask8>(0xFF)
                                                        : static_cast<__mmask8>((1u << count) - 1u);
                 const simd_t distance = _mm512_maskz_sub_pd(valid_lanes,
@@ -224,7 +250,9 @@ struct reverse_pass_of_covariance {
             for (int j = 0; j < n_columns; j += BMVP_LANES) {
                 const int count = std::min(BMVP_LANES, n_columns - j);
                 const simd_t product = nico_gp_covariance_products_of_values_and_adjoints(diagonal + j, count);
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+                sums_of_products += product;
+#elif BMVP_LANES == 8
                 sums_of_products = _mm512_add_pd(sums_of_products, product);
 #else
                 sums_of_products = _mm256_add_pd(sums_of_products, product);

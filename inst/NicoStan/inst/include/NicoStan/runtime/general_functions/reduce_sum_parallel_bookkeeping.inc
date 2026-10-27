@@ -4,7 +4,7 @@
 // the single-threaded work around the parallel section; two of its parts are reduce_sum's own:
 //   (1) save_varis over every sliced var before the parallel section (one pointer write per var);
 //   (2) precomputed_gradients_vari::chain(): one adjoint add per sliced var in the reverse pass.
-// Both are done here in parallel over blocks of terms / vars (grainsize 2048), inside this_task_arena::isolate,
+// Both are done here in parallel over blocks of terms / vars (chunk_size 2048), inside this_task_arena::isolate,
 // as the parallel section itself. The adjoint adds are parallel ONLY when the saved vari addresses of the sliced
 // part are strictly increasing (checked in O(n) once per call), which proves the sliced vars are distinct (no
 // two threads ever add to the same adjoint); any repeated reference falls back to the serial loop, so the
@@ -83,7 +83,7 @@ inline void nicostan_save_varis_of_sliced_terms(vari** varis, const Vec& vmapped
 // ---- (3) the chunks of reduce_sum on the chain's OpenMP team instead of TBB's parallel reduce (compiled in with
 //      -DNICOSTAN_REDUCE_SUM_OPENMP and -fopenmp; the model library links the libomp NicoStan itself uses):
 //      the pieces are EXACTLY the leaves TBB's parallel_deterministic_reduce with the simple_partitioner makes
-//      (recursive halving of [0, num_terms) at the middle until a piece has at most grainsize terms, in order),
+//      (recursive halving of [0, num_terms) at the middle until a piece has at most chunk_size terms, in order),
 //      so every model sees the same chunk boundaries as with TBB; the pieces are given to the threads up front
 //      sleep / wake cycles per gradient call with 45 TBB threads, 49 with 8), and the team spins between the
 //      gradient calls of a chain (KMP_BLOCKTIME, as NicoStan's own models). One thread, or a call from inside
@@ -105,21 +105,21 @@ namespace stan {
 namespace math {
 namespace internal {
 
-// the leaves of TBB's blocked_range<size_t>(0, num_terms, grainsize) under the simple_partitioner, in order
-inline void nicostan_tbb_leaves(std::size_t begin, std::size_t end, std::size_t grainsize,
+// the leaves of TBB's blocked_range<size_t>(0, num_terms, chunk_size) under the simple_partitioner, in order
+inline void nicostan_tbb_leaves(std::size_t begin, std::size_t end, std::size_t chunk_size,
                                 std::vector<std::pair<std::size_t, std::size_t>>& leaves) {
-  if (end - begin > grainsize) {
+  if (end - begin > chunk_size) {
     const std::size_t middle = begin + (end - begin) / 2;
-    nicostan_tbb_leaves(begin, middle, grainsize, leaves);
-    nicostan_tbb_leaves(middle, end, grainsize, leaves);
+    nicostan_tbb_leaves(begin, middle, chunk_size, leaves);
+    nicostan_tbb_leaves(middle, end, chunk_size, leaves);
   } else {
     leaves.emplace_back(begin, end);
   }
 }
 
 template <typename Reducer>
-inline void nicostan_reduce_sum_openmp(Reducer& worker, std::size_t num_terms, std::size_t grainsize) {
-  const std::size_t g = std::max<std::size_t>(1, grainsize);
+inline void nicostan_reduce_sum_openmp(Reducer& worker, std::size_t num_terms, std::size_t chunk_size) {
+  const std::size_t g = std::max<std::size_t>(1, chunk_size);
   std::vector<std::pair<std::size_t, std::size_t>> leaves;
   leaves.reserve(num_terms / g + 2);
   nicostan_tbb_leaves(0, num_terms, g, leaves);

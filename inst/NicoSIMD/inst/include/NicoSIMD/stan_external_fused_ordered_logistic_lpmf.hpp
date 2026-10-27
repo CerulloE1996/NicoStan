@@ -27,8 +27,8 @@
 //     1 / (1 + t_v) (v >= 0); 1 / (1 + t_u) and 1 / (1 + t_v) come from ONE division, 1 / w.
 //   * Every term of log P is <= 0 (no cancellation), and every partial is a sum of positive terms, apart from
 //     d / d eta, a difference of two inv_logit values; t_u and t_v never overflow (arguments <= 0).
-//   * L_k and A_k depend on the cutpoints only, and are computed with Stan's log1m_exp and std::expm1 from the
-//     cutpoint gap itself (so that near-equal cutpoints keep full precision): with one cutpoint vector, once
+//   * L_k and A_k depend on the cutpoints only, and are computed with nico_log1m_exp_1 and nico_expm1_value from
+//     the cutpoint gap itself (so that near-equal cutpoints keep full precision): with one cutpoint vector, once
 //     per category with responses per call (the responses enter through the number of responses in each
 //     category); with one cutpoint vector per response, once per distinct (lower, upper) cutpoint pair,
 //     through a thread-local table keyed by the two values (e.g. c[item]: once per item and category).
@@ -209,7 +209,7 @@ ALWAYS_INLINE double first_lane(const simd_t a) { return _mm256_cvtsd_f64(a); }
 #endif
 
 ALWAYS_INLINE simd_t nico_exp(const simd_t a) { return BMVP_KERNEL_NAME(nico_exp_1_wo_checks)(a); }
-ALWAYS_INLINE simd_t nico_log(const simd_t a) { return BMVP_KERNEL_NAME(nico_log_1_wo_checks)(a); }
+ALWAYS_INLINE simd_t nico_log(const simd_t a) { return BMVP_KERNEL_NAME(nico_log_1_double_precision_wo_checks)(a); }
 
 // ---- exp(-|x|) for any x (including +-inf): nico_exp_1 on [-708, 0], and 0 below (exp(-708) = 3.3e-308)
 ALWAYS_INLINE simd_t exp_of_negative_absolute_value(const simd_t x) {
@@ -324,8 +324,8 @@ struct cutpoint_gap_constants_cache_t {
         if (!(e.lower == lower && e.upper == upper)) {
             e.lower = lower;
             e.upper = upper;
-            e.log1m_exp_of_gap = stan::math::log1m_exp(lower - upper);
-            e.inverse_expm1_of_gap = 1.0 / std::expm1(upper - lower);
+            e.log1m_exp_of_gap = nico::math::nico_log1m_exp_1(lower - upper);
+            e.inverse_expm1_of_gap = 1.0 / nico::math::nico_expm1_value(upper - lower);
         }
         return e;
 
@@ -355,8 +355,10 @@ inline void fill_cutpoint_gap_constants_of_categories_with_responses(const doubl
 
     for (int k = 2; k <= K - 1; ++k) {
         if (tables.n_responses[k] == 0) continue;
-        tables.log1m_exp_of_cutpoint_gap[k]     = stan::math::log1m_exp(cutpoints[k - 2] - cutpoints[k - 1]);
-        tables.inverse_expm1_of_cutpoint_gap[k] = 1.0 / std::expm1(cutpoints[k - 1] - cutpoints[k - 2]);
+        tables.log1m_exp_of_cutpoint_gap[k]     =
+            nico::math::nico_log1m_exp_1(cutpoints[k - 2] - cutpoints[k - 1]);
+        tables.inverse_expm1_of_cutpoint_gap[k] =
+            1.0 / nico::math::nico_expm1_value(cutpoints[k - 1] - cutpoints[k - 2]);
     }
 
 }

@@ -25,12 +25,12 @@ functions {
         return nico_AR1_recursion(shocks, carry, phi);
     }
 
-    array[] int fn_deterministic_leaf_starts(data int first, data int last, data int grainsize) {
+    array[] int fn_deterministic_leaf_starts(data int first, data int last, data int chunk_size) {
         int length_of_range = last - first + 1;
-        if (length_of_range <= grainsize) return { first };
+        if (length_of_range <= chunk_size) return { first };
         int middle = first + length_of_range %/% 2;
-        return append_array(fn_deterministic_leaf_starts(first, middle - 1, grainsize),
-                            fn_deterministic_leaf_starts(middle, last, grainsize));
+        return append_array(fn_deterministic_leaf_starts(first, middle - 1, chunk_size),
+                            fn_deterministic_leaf_starts(middle, last, chunk_size));
     }
 
     vector fn_end_of_innovation_block(vector phi_and_sigma, vector innovations,

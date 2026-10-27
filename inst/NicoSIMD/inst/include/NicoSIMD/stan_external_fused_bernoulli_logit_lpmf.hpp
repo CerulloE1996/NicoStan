@@ -4,7 +4,7 @@
 //
 // nico_bernoulli_logit_lpmf(y | f) = sum_i [ y_i f_i - log1p_exp(f_i) ], the log probability of Stan's
 // bernoulli_logit_lpmf(y | f), computed in ONE pass over the observations with the BayesMVP SIMD kernels
-// (fast_and_approx_AVX512_fns.hpp / fast_and_approx_AVX2_fns.hpp, as selected in stan_external_functions.hpp):
+// (nico_and_approx_AVX512_fns.hpp / nico_and_approx_AVX2_fns.hpp, as selected in stan_external_functions.hpp):
 //
 //     * PRIM overload (f: Eigen column vector or expression of double)  -> double (the value only)
 //     * REV  overload (f: Eigen column vector or expression of var)     -> var (ONE autodiff node)
@@ -55,7 +55,7 @@
 #include <type_traits>
 #include <vector>
 
-#if !defined(BMVP_LANES) || !defined(BMVP_KERNEL_NAME)
+#if !defined(BMVP_LANES) || (!defined(BMVP_KERNEL_NAME) && !defined(NICO_SIMD_SCALAR_KERNELS))
 #  error "stan_external_fused_bernoulli_logit_lpmf.hpp: stan_external_functions.hpp must be included first"
 #endif
 
@@ -77,7 +77,90 @@ static constexpr double min_argument_of_exp = -708.0;
 // ---- one block of BMVP_LANES observations. f: the values of f; s: 2 y - 1 (+1 or -1). Returns the log
 //      probabilities min(s f, 0) - log1p(exp(-|f|)); with compute_partials, also writes y - inv_logit(f) to
 //      partial. Kernels: nico_exp_1_wo_checks and nico_log1p_1_wo_checks of the BayesMVP kernel files.
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+
+template <bool compute_partials>
+ALWAYS_INLINE double log_probability_and_partial_of_block(const double f,
+                                                          const double s,
+                                                          double& partial) {
+
+    const double minus_abs_f = -std::fabs(f);
+    const double e           = std::exp((minus_abs_f > min_argument_of_exp) ? minus_abs_f : min_argument_of_exp);
+    const double log1p_e     = std::log1p(e);
+    const double ntheta      = s * f;
+    if constexpr (compute_partials) {
+        const double one_over_1p_e = 1.0 / (1.0 + e);
+        partial = s * ((ntheta >= 0.0) ? e * one_over_1p_e : one_over_1p_e);
+    }
+    return ((ntheta < 0.0) ? ntheta : 0.0) - log1p_e;
+
+}
+
+using bad_y_bits_t   = int;
+using nan_lanes_t    = bool;
+ALWAYS_INLINE double sign_from_y(const int* y,
+                                 bad_y_bits_t& bad_y) {
+
+    bad_y |= y[0] & ~1;
+    return std::fma(static_cast<double>(y[0]), 2.0, -1.0);
+
+}
+inline bad_y_bits_t no_bad_y_bits() {
+
+    return 0;
+
+}
+inline bool any_bad_y(const bad_y_bits_t b) {
+
+    return b != 0;
+
+}
+inline nan_lanes_t no_nan_lanes() {
+
+    return false;
+
+}
+ALWAYS_INLINE void collect_nan_lanes(nan_lanes_t& lanes,
+                                     const double f) {
+
+    lanes = lanes || std::isnan(f);
+
+}
+inline bool any_nan(const nan_lanes_t lanes) {
+
+    return lanes;
+
+}
+inline double zero_block() {
+
+    return 0.0;
+
+}
+ALWAYS_INLINE double add_blocks(const double a,
+                                const double b) {
+
+    return a + b;
+
+}
+inline double sum_of_lanes(const double x) {
+
+    return x;
+
+}
+template <typename V>
+ALWAYS_INLINE double block_from_lanes(const V& value_of_lane) {
+
+    return value_of_lane(0);
+
+}
+ALWAYS_INLINE void copy_pointers_of_block(const var* f,
+                                          vari** operands) {
+
+    operands[0] = f[0].vi_;
+
+}
+
+#elif BMVP_LANES == 8
 
 template <bool compute_partials>
 ALWAYS_INLINE __m512d log_probability_and_partial_of_block(const __m512d f, const __m512d s, __m512d& partial) {
@@ -89,7 +172,7 @@ ALWAYS_INLINE __m512d log_probability_and_partial_of_block(const __m512d f, cons
     ALIGN64  __m512d const minus_abs_f = _mm512_or_pd(f_aligned, _mm512_set1_pd(-0.0));
     ALIGN64  __m512d const e           = BMVP_KERNEL_NAME(nico_exp_1_wo_checks)(
                                     _mm512_max_pd(minus_abs_f, _mm512_set1_pd(min_argument_of_exp)));
-    ALIGN64  __m512d const log1p_e     = BMVP_KERNEL_NAME(nico_log1p_1_wo_checks)(e);
+    ALIGN64  __m512d const log1p_e     = BMVP_KERNEL_NAME(nico_log1p_1_double_precision_wo_checks)(e);
     ALIGN64  __m512d const ntheta      = _mm512_mul_pd(s_aligned, f_aligned);
     if constexpr (compute_partials) {
         ALIGN64  __m512d const one_over_1p_e = _mm512_div_pd(one, _mm512_add_pd(one, e));
@@ -162,7 +245,7 @@ ALWAYS_INLINE __m256d log_probability_and_partial_of_block(const __m256d f, cons
     ALIGN32  __m256d const minus_abs_f = _mm256_or_pd(f_aligned, _mm256_set1_pd(-0.0));
     ALIGN32  __m256d const e           = BMVP_KERNEL_NAME(nico_exp_1_wo_checks)(
                                     _mm256_max_pd(minus_abs_f, _mm256_set1_pd(min_argument_of_exp)));
-    ALIGN32  __m256d const log1p_e     = BMVP_KERNEL_NAME(nico_log1p_1_wo_checks)(e);
+    ALIGN32  __m256d const log1p_e     = BMVP_KERNEL_NAME(nico_log1p_1_double_precision_wo_checks)(e);
     ALIGN32  __m256d const ntheta      = _mm256_mul_pd(s_aligned, f_aligned);
     if constexpr (compute_partials) {
         ALIGN32  __m256d const one_over_1p_e = _mm256_div_pd(one, _mm256_add_pd(one, e));

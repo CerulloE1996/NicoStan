@@ -18,7 +18,58 @@
 
 namespace nico::math {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+//// one lane: a shift brings in zero, a broadcast is the value itself
+inline simd_t scan_set1(const double x) {
+
+    return x;
+
+}
+inline simd_t scan_zero() {
+
+    return 0.0;
+
+}
+inline simd_t scan_fmadd(const simd_t a,
+                         const simd_t b,
+                         const simd_t c) {
+
+    return std::fma(a, b, c);
+
+}
+inline simd_t scan_mul(const simd_t a,
+                       const simd_t b) {
+
+    return a * b;
+
+}
+template <int k> inline simd_t shift_up(const simd_t /*v*/) {
+
+    return 0.0;
+
+}
+template <int k> inline simd_t shift_down(const simd_t /*v*/) {
+
+    return 0.0;
+
+}
+inline simd_t shift_up_one_with(const simd_t /*v*/,
+                                const simd_t first) {
+
+    return first;
+
+}
+inline simd_t broadcast_last_lane(const simd_t v) {
+
+    return v;
+
+}
+inline simd_t broadcast_first_lane(const simd_t v) {
+
+    return v;
+
+}
+#elif BMVP_LANES == 8
 inline simd_t scan_set1(const double x)                                  { return _mm512_set1_pd(x); }
 inline simd_t scan_zero()                                                { return _mm512_setzero_pd(); }
 inline simd_t scan_fmadd(const simd_t a, const simd_t b, const simd_t c) { return _mm512_fmadd_pd(a, b, c); }

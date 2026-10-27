@@ -17,7 +17,7 @@
 // rows_per_block_run_in_parallel consecutive rows (rounded up to a multiple of 8 rows, so that every block but
 // the last is a whole number of SIMD registers with AVX2 and AVX-512 alike), which run in parallel on the
 // threads of the calling chain, one TBB task per block, as the chunks of reduce_sum_static (its simple
-// partitioner, grainsize 1). The chunking data of a Stan model (chunk_size = ceiling(N / N_chunks)) is the
+// partitioner, chunk_size 1). The chunking data of a Stan model (chunk_size = ceiling(N / N_chunks)) is the
 // argument, so N_chunks sets the number of blocks run in parallel, as for any tape-chunked model.
 //
 // Still ONE autodiff node, its partial derivatives made in the forward pass: nothing on the tape but the node,
@@ -246,7 +246,7 @@ inline double log_sum_exp_of_two_numbers(const double a, const double b) {
 
 }
 
-//// one TBB task per block (simple partitioner, grainsize 1, as reduce_sum_static), in an isolated region of the
+//// one TBB task per block (simple partitioner, chunk_size 1, as reduce_sum_static), in an isolated region of the
 //// calling arena
 template <typename Task_of_one_block>
 inline void run_one_task_per_block_in_parallel(const Eigen::Index n_blocks, const Task_of_one_block& task) {

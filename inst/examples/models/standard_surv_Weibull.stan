@@ -39,7 +39,7 @@ model {
   alpha ~ lognormal(0, 0.5);
   beta ~ normal(0, 1);
   // mu ~ normal(-1, 1.5);
-  mu ~ normal(0, 2);
+  mu ~ normal(-1, 1.5);
   
   // Likelihood for observed failures
   t ~ weibull(alpha, lambda);

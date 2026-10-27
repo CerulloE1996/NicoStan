@@ -14,7 +14,8 @@
 //   (2) nico_log_sum_exp(a, b): elementwise over two arguments (real or vector, at least one vector),
 //         log_sum_exp(a, b) = max(a, b) + log1p_exp(min(a, b) - max(a, b)),
 //         d / da = inv_logit(a - b),   d / db = inv_logit(b - a),
-//       as one block of result nodes and ONE reverse callback; with two reals, Stan's own scalar log_sum_exp;
+//       as one block of result nodes and ONE reverse callback; real/var scalars use the same native pair;
+//       other scalar AD types keep the original Stan dispatch, not a native forward-mode interface.
 //   (3) nico_log_sum_exp_2d(x): the log_sum_exp of each row of a matrix over its columns (the row-wise
 //       reduction which the latent class models compute with their own log_sum_exp_2d(), e.g. the 2-class
 //       LC-MVP and LC-MVOP), as a vector: one block of result nodes and ONE reverse callback.
@@ -46,7 +47,77 @@ using log_cumulative_sum_exp::nico_load_prefix_packet;
 using log_cumulative_sum_exp::nico_store_prefix_packet;
 using log_cumulative_sum_exp::nico_add_prefix_adjoint_packet;
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+using nico_lse_mask_t = bool;
+inline simd_t nico_lse_add(const simd_t a,
+                           const simd_t b) {
+
+    return a + b;
+
+}
+inline simd_t nico_lse_subtract(const simd_t a,
+                                const simd_t b) {
+
+    return a - b;
+
+}
+inline simd_t nico_lse_divide(const simd_t a,
+                              const simd_t b) {
+
+    return a / b;
+
+}
+inline nico_lse_mask_t nico_lse_greater(const simd_t a,
+                                        const simd_t b) {
+
+    return a > b;
+
+}
+inline nico_lse_mask_t nico_lse_equal(const simd_t a,
+                                      const simd_t b) {
+
+    return a == b;
+
+}
+inline nico_lse_mask_t nico_lse_nan(const simd_t a) {
+
+    return std::isnan(a);
+
+}
+inline nico_lse_mask_t nico_lse_finite(const simd_t a) {
+
+    return std::fabs(a) < stan::math::INFTY;
+
+}
+inline simd_t nico_lse_select(const nico_lse_mask_t mask,
+                              const simd_t yes,
+                              const simd_t no) {
+
+    return mask ? yes : no;
+
+}
+inline bool nico_lse_any(const nico_lse_mask_t mask) {
+
+    return mask;
+
+}
+inline nico_lse_mask_t nico_lse_or(const nico_lse_mask_t a,
+                                   const nico_lse_mask_t b) {
+
+    return a || b;
+
+}
+inline double nico_lse_sum(const simd_t a) {
+
+    return a;
+
+}
+inline double nico_lse_maximum(const simd_t a) {
+
+    return a;
+
+}
+#elif BMVP_LANES == 8
 using nico_lse_mask_t = __mmask8;
 inline simd_t nico_lse_add(const simd_t a, const simd_t b) { return _mm512_add_pd(a, b); }
 inline simd_t nico_lse_subtract(const simd_t a, const simd_t b) { return _mm512_sub_pd(a, b); }
@@ -132,7 +203,9 @@ inline simd_t nico_lse_maximum_packet(const simd_t a, const simd_t b) {
 //// NaNs are collected separately by the reduction; its maximum need not propagate them at every step.
 inline simd_t nico_lse_maximum_before_nan_check(const simd_t a, const simd_t b) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return (a > b) ? a : b;
+#elif BMVP_LANES == 8
     return _mm512_max_pd(a, b);
 #else
     return _mm256_max_pd(a, b);
@@ -144,7 +217,11 @@ inline simd_t nico_lse_maximum_before_nan_check(const simd_t a, const simd_t b) 
 //// retains its usual polynomial for ordinary values and its shared SIMD full-range exceptional route.
 inline simd_t nico_lse_exponential_of_nonpositive_values(const simd_t argument) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    const simd_t result = std::exp(argument);
+#else
     const simd_t result = BMVP_KERNEL_NAME(nico_exp_1)(argument);
+#endif
     //// Maximum subtraction produces exact zeros; exp(0) is exactly one, not the polynomial's constant.
     return nico_lse_select(nico_lse_equal(argument, scan_zero()), scan_set1(1.0), result);
 
@@ -152,13 +229,21 @@ inline simd_t nico_lse_exponential_of_nonpositive_values(const simd_t argument) 
 
 inline simd_t nico_lse_log_positive_normal(const simd_t a) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::log(a);
+#else
     return BMVP_KERNEL_NAME(nico_log_1_double_precision_wo_checks)(a);
+#endif
 
 }
 
 inline simd_t nico_lse_log1p_nonnegative(const simd_t a) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::log1p(a);
+#else
     return BMVP_KERNEL_NAME(nico_log1p_1_double_precision_wo_checks)(a);
+#endif
 
 }
 
@@ -732,13 +817,22 @@ inline auto nico_log_sum_exp(const T& x, std::ostream* /*pstream__*/) {
 }  // namespace nico::math
 
 using nico::math::nico_log_sum_exp;
-// (2) two arguments: two reals (Stan's own scalar log_sum_exp), or elementwise with at least one vector
+// (2) two arguments: native real/var scalars, or elementwise with at least one vector
 namespace nico::math {
 
 template <typename T1, typename T2, stan::require_all_stan_scalar_t<T1, T2>* = nullptr>
 inline auto nico_log_sum_exp(const T1& a, const T2& b, std::ostream* /*pstream__*/) {
 
-    return stan::math::log_sum_exp(a, b);
+    if constexpr (stan::is_var_or_arithmetic<T1>::value && stan::is_var_or_arithmetic<T2>::value) {
+
+        const auto result = nico::math::log_sum_exp_simd::pairs(a, b);
+        return result.coeff(0);
+
+    } else {
+
+        return stan::math::log_sum_exp(a, b);
+
+    }
 
 }
 

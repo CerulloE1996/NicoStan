@@ -91,7 +91,103 @@ static constexpr double positive_infinity = std::numeric_limits<double>::infinit
 
 // ---- the SIMD operations of the fused pass (simd_t, simd_loadu, simd_storeu, simd_load and simd_store are
 // stan_external_functions.hpp's). A lane mask selects lanes: __mmask8 (AVX-512), all bits set (AVX2).
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+using lane_mask_t = bool;
+
+inline simd_t simd_set1(const double value) {
+
+    return value;
+
+}
+
+inline simd_t simd_add(const simd_t a,
+                       const simd_t b) {
+
+    return a + b;
+
+}
+
+inline simd_t simd_sub(const simd_t a,
+                       const simd_t b) {
+
+    return a - b;
+
+}
+
+inline simd_t simd_mul(const simd_t a,
+                       const simd_t b) {
+
+    return a * b;
+
+}
+
+inline simd_t simd_div(const simd_t a,
+                       const simd_t b) {
+
+    return a / b;
+
+}
+
+inline simd_t simd_fmsub(const simd_t a,
+                         const simd_t b,
+                         const simd_t c) {
+
+    return std::fma(a, b, -c);
+
+}
+
+inline simd_t simd_select(const lane_mask_t mask,
+                          const simd_t if_true,
+                          const simd_t if_false) {
+
+    return mask ? if_true : if_false;
+
+}
+
+inline lane_mask_t mask_of_first_lanes(const int n_lanes) {
+
+    return n_lanes > 0;
+
+}
+
+inline lane_mask_t mask_with_no_lanes() {
+
+    return false;
+
+}
+
+inline lane_mask_t mask_or(const lane_mask_t a,
+                           const lane_mask_t b) {
+
+    return a || b;
+
+}
+
+inline bool mask_has_any_lane(const lane_mask_t mask) {
+
+    return mask;
+
+}
+
+inline lane_mask_t lanes_where_nan(const simd_t x) {
+
+    return std::isnan(x);
+
+}
+
+inline lane_mask_t lanes_where_not_finite(const simd_t x) {
+
+    return !std::isfinite(x);
+
+}
+
+inline lane_mask_t lanes_where_not_greater_than(const simd_t x,
+                                                const double bound) {
+
+    return !(x > bound);
+
+}
+#elif BMVP_LANES == 8
 using lane_mask_t = __mmask8;
 inline simd_t simd_set1(const double value)                               { return _mm512_set1_pd(value); }
 inline simd_t simd_add(const simd_t a, const simd_t b)                     { return _mm512_add_pd(a, b); }
@@ -175,7 +271,51 @@ inline double simd_sum_of_lanes(const simd_t x) {
 
 // ---- node pointers in SIMD registers (8 with AVX-512, 4 with AVX2): the values of a var vector in contiguous
 // memory are gathered from its nodes (vgatherqpd), and the nodes' addresses are compared with a constant spacing
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+using simd_pointers_t = std::int64_t;
+
+inline simd_pointers_t simd_load_pointers(const void* p) {
+
+    const auto* pointers = static_cast<const vari* const*>(p);
+    return reinterpret_cast<std::int64_t>(pointers[0]);
+
+}
+
+inline void simd_store_pointers(void* p,
+                                const simd_pointers_t value) {
+
+    static_cast<vari**>(p)[0] = reinterpret_cast<vari*>(value);
+
+}
+
+inline simd_pointers_t simd_add_bytes(const simd_pointers_t addresses,
+                                      const std::int64_t bytes) {
+
+    return addresses + bytes;
+
+}
+
+inline bool simd_pointers_are_equal(const simd_pointers_t a,
+                                    const simd_pointers_t b) {
+
+    return a == b;
+
+}
+
+inline simd_t simd_gather_doubles(const simd_pointers_t addresses) {
+
+    return *reinterpret_cast<const double*>(addresses);
+
+}
+
+inline simd_pointers_t simd_addresses_at_constant_spacing(const std::int64_t first,
+                                                          const std::int64_t spacing) {
+
+    static_cast<void>(spacing);
+    return first;
+
+}
+#elif BMVP_LANES == 8
 using simd_pointers_t = __m512i;
 inline simd_pointers_t simd_load_pointers(const void* p)                    { return _mm512_loadu_si512(p); }
 inline void            simd_store_pointers(void* p, const simd_pointers_t v) { _mm512_storeu_si512(p, v); }
@@ -238,7 +378,29 @@ inline simd_pointers_t simd_addresses_at_constant_spacing(const std::int64_t fir
 
 // ---- sum of log(sigma) over positive sigma, with no logarithm per element (see the header comment)
 struct sum_of_logs_accumulator {
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    double log_sum = 0.0;
+
+    static lane_mask_t lanes_where_invalid_or_exceptional(const simd_t sigma) {
+
+        return !(sigma >= std::numeric_limits<double>::min())
+               || sigma > std::numeric_limits<double>::max();
+
+    }
+    void add(const simd_t sigma) {
+
+        log_sum += nico::math::nico_log_1_double_precision(sigma);
+
+    }
+    void renormalise() {
+
+    }
+    double total() {
+
+        return log_sum;
+
+    }
+#elif BMVP_LANES == 8
     simd_t mantissa_product = _mm512_set1_pd(1.0);
     simd_t exponent_sum     = _mm512_setzero_pd();
 
@@ -964,12 +1126,22 @@ inline stan::return_type_t<T_y, T_loc, T_scale> fused_normal_log_density(const T
         double sum_of_log_sigma = 0.0;
         if constexpr (pass_t::sum_logs_of_sigma) {
             if (sum_of_logs_of_sigma_from_std_log) {
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+                for (int i = 0; i < n; ++i) {
+                    sum_of_log_sigma += nico::math::nico_log_1_double_precision(sigma_argument.value_at(i));
+                }
+#else
                 for (int i = 0; i < n; ++i) sum_of_log_sigma += std::log(sigma_argument.value_at(i));
+#endif
             } else {
                 sum_of_log_sigma = pass.sum_of_logs_of_sigma.total();
             }
         } else {
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+            sum_of_log_sigma = n * nico::math::nico_log_1_double_precision(sigma_scalar);
+#else
             sum_of_log_sigma = n * std::log(sigma_scalar);
+#endif
         }
         log_density -= sum_of_log_sigma;
     }
@@ -1021,8 +1193,6 @@ inline stan::return_type_t<T_y, T_loc, T_scale> nico_normal_lpdf(const T_y& y, c
 }  // namespace nico::math
 
 using nico::math::nico_normal_lpdf;
-
-
 
 
 

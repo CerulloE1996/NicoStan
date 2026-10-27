@@ -8,8 +8,9 @@
 // the log probability of Stan's binomial_lpmf(n | N, theta), with n and N arrays of int (data) and theta a vector
 // of probabilities. A general function: any binomial counts with their own probabilities (e.g. the counts above
 // each threshold of ordinal and continuation-ratio models, dose-response data, aggregated Bernoulli data).
-// ONE autodiff node for the whole vector, with the BayesMVP log and log1m kernels over all its elements (Stan's
-// version: one node too, but std::log, log1m and three lgamma() per element, at every call), and:
+// ONE autodiff node for the whole vector, with the BayesMVP log kernel and the double-precision log1m over all
+// its elements (Stan's version: one node too, but std::log, log1m and three lgamma() per element, at every call),
+// and:
 //   - log choose(N_i, n_i) = log N_i! - log n_i! - log (N_i - n_i)!, from a table of log k! for k < 4096 (made
 //     once, with std::lgamma(k + 1); std::lgamma above it), left out with propto, as in Stan;
 //   - n_i log(theta_i) is 0 when n_i = 0, and (N_i - n_i) log1m(theta_i) is 0 when n_i = N_i, as in Stan (so
@@ -25,7 +26,7 @@
 //
 // which also gives  nico_binomial_lupmf(n | N, theta)  and  n ~ nico_binomial(N, theta).
 //
-// It uses the namespace nico::math, BMVP_LANES and the kernels k_log() and k_log1m() of
+// It uses the namespace nico::math, BMVP_LANES, the kernel k_log() and the double-precision log1p of
 // stan_external_functions.hpp, which it includes (#pragma once), so that a user header may include this file
 // alone. Its helpers are in their own namespace, nico::math::binomial.
 //
@@ -76,6 +77,26 @@ inline double log_factorial(const int k, const double* table) {
 
 
 
+// ---- log(1 - p) in place, in double precision
+inline void log1m_in_double_precision(double* p,
+                                      const int n) {
+
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    for (int i = 0; i < n; ++i) {
+        p[i] = std::log1p(-p[i]);
+    }
+#else
+    for (int i = 0; i < n; ++i) {
+        p[i] = -p[i];
+    }
+    apply_kernel(p, n, [](const simd_t v) { return BMVP_KERNEL_NAME(nico_log1p_1_double_precision)(v); });
+#endif
+
+}
+
+
+
+
 // ---- the sum of the log probabilities, from the values of theta (M elements). log_theta and log1m_theta:
 //      buffers of M doubles; with compute_partials, d / d theta_i is written to partials[i]. Returns false,
 //      and nothing else, when the pass over the values finds a bad argument (the caller then runs Stan's
@@ -93,7 +114,7 @@ inline bool sum_of_log_probabilities(const int* n, const int* N, const double* t
     }
     if (n_bad > 0) return false;
     k_log(log_theta, M);
-    k_log1m(log1m_theta, M);
+    log1m_in_double_precision(log1m_theta, M);
     double total = 0.0;
     for (int i = 0; i < M; ++i) {
         const double successes = n[i];

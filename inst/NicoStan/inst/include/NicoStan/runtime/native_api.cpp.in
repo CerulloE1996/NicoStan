@@ -133,8 +133,10 @@ static std::atomic<long long> g_n_load{0};
 //// --------- BayesMVP includes - General functions
 #include "general_functions/fns_SIMD_and_wrappers/fn_wrappers_Stan.hpp"
 #include "general_functions/fns_SIMD_and_wrappers/fn_wrappers_Loop.hpp"
-#include "general_functions/fns_SIMD_and_wrappers/fast_and_approx_AVX2_fns.hpp" // will only compile if  AVX2 is available
-#include "general_functions/fns_SIMD_and_wrappers/fast_and_approx_AVX512_fns.hpp" // will only compile if  AVX-512 is available
+// will only compile if  AVX2 is available
+#include "general_functions/fns_SIMD_and_wrappers/nico_and_approx_AVX2_fns.hpp"
+// will only compile if  AVX-512 is available
+#include "general_functions/fns_SIMD_and_wrappers/nico_and_approx_AVX512_fns.hpp"
 // #include "general_functions/fns_SIMD_and_wrappers/fn_wrappers_SIMD_AVX2.hpp" // will only compile if AVX2 is available
 //// #include "general_functions/fns_SIMD_and_wrappers/fn_wrappers_SIMD_AVX2_test.hpp" ///////////  FOR DEBUG ONLY
 // #include "general_functions/fns_SIMD_and_wrappers/fn_wrappers_SIMD_AVX512.hpp" // will only compile if AVX-512 is available

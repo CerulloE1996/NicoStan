@@ -47,6 +47,10 @@
 
 namespace nicostan_readers_of_the_nuisance_block {
 
+//// (the node of a value is a vari_value<double>: the node size of the runs of the main tape)
+static_assert(std::is_same<decltype(stan::math::var(0.0).vi_), stan::math::vari_value<double>*>::value,
+              "var(double) makes a vari_value<double>");
+
 //// the nuisance values (inside NicoStan's gradient call: its nuisance block; outside it: the values set for use
 //// outside NicoStan, whose gradient is not kept), checked for the values first..last (0-based, inclusive), and
 //// the chunk run on this thread (both thread-local, so looked up once per read: in a model's shared library
@@ -96,14 +100,36 @@ inline stan::math::var fn_node_of_value(const values_of_the_nuisance_block_t& th
             stan::math::ChainableStack::instance_->nested_var_stack_sizes_.size() ==
             block.nested_depth_of_the_main_tape) {
 
-            if (block.nodes_by_value_on_the_main_tape.empty()) {
-                block.nodes_by_value_on_the_main_tape.resize(block.size, nullptr);
+            //// (before: a node pointer for every nuisance value, and a (value, node) entry for every value read)
+            // if (block.nodes_by_value_on_the_main_tape.empty()) {
+            //     block.nodes_by_value_on_the_main_tape.resize(block.size, nullptr);
+            // }
+            // stan::math::vari*& existing_node = block.nodes_by_value_on_the_main_tape[value];
+            // if (existing_node != nullptr) return stan::math::var(existing_node);
+            // stan::math::var node(the_values.values[value]);
+            // block.nodes_on_the_main_tape.emplace_back(value, node.vi_);
+            // existing_node = node.vi_;
+            // return node;
+            //// (values read out of order: the node pointer of every value)
+            std::vector<stan::math::vari*>& node_of_every_value = block.nodes_by_value_on_the_main_tape;
+            if (!node_of_every_value.empty()) {
+                stan::math::vari*& existing_node = node_of_every_value[value];
+                if (existing_node != nullptr) return stan::math::var(existing_node);
+                stan::math::var node(the_values.values[value]);
+                block.nodes_on_the_main_tape.emplace_back_shared(value, node.vi_);
+                existing_node = node.vi_;
+                return node;
             }
-            stan::math::vari*& existing_node = block.nodes_by_value_on_the_main_tape[value];
+            //// (the shared runs of the values read: one entry per run, never one per value)
+            stan::math::vari* existing_node = block.nodes_on_the_main_tape.shared_node_of_value(value);
             if (existing_node != nullptr) return stan::math::var(existing_node);
             stan::math::var node(the_values.values[value]);
-            block.nodes_on_the_main_tape.emplace_back(value, node.vi_);
-            existing_node = node.vi_;
+            block.nodes_on_the_main_tape.emplace_back_shared(value, node.vi_);
+            if (block.nodes_on_the_main_tape.values_read_out_of_order()) {
+                //// (the shared nodes of the runs, then this node, which may be the first of the pairs)
+                block.nodes_on_the_main_tape.fill_the_node_of_every_value(node_of_every_value, block.size);
+                node_of_every_value[value] = node.vi_;
+            }
             return node;
 
         }

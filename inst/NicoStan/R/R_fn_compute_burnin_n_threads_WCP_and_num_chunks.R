@@ -351,7 +351,12 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks <-  function(
         N_pieces_for_load_balance <-  n_threads_WCP_burnin * pieces_per_thread
         ##
         num_chunks_burnin <-  2^ceiling(log2(max(N_pieces_for_cache, N_pieces_for_load_balance)))
-        chunk_size_burnin <-  ceiling(N_units / num_chunks_burnin)
+        # chunk_size_burnin <-  ceiling(N_units / num_chunks_burnin)
+        ## (no chunk_size when the equations ask for more chunks than units: such a layout cannot run)
+        chunk_size_burnin <-  if (num_chunks_burnin > N_units) NA_integer_ else
+                                    fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                          N         = N_units,
+                                          N_chunks  = num_chunks_burnin)$chunk_size
         ##
         return(list( n_threads_WCP_burnin                 = n_threads_WCP_burnin,
                      num_chunks_burnin                    = num_chunks_burnin,
@@ -546,20 +551,27 @@ fn_time_burnin_iteration_for_each_num_chunks <-  function( init_object,
         ##
         fn_write_JSON_data_file_of_candidate <-  function(num_chunks) {
 
-              chunk_size <-  as.integer(ceiling(Stan_data_list$N / num_chunks))
-              ## (the data's JSON text itself, with the layout's chunk_size, given to the worker in place of a
+              # chunk_size <-  as.integer(ceiling(Stan_data_list$N / num_chunks))
+              ## (the data's JSON text itself, with the layout's chunks, given to the worker in place of a
               ##  file)
               if (isTRUE(pass_the_data_to_the_worker_as_JSON_text_instead_of_a_file) &&
                   !is.null(JSON_text_of_Stan_data_list)) {
-                    return(fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                    # return(fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                    #              JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
+                    #              chunk_size                   = chunk_size))
+                    return(fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks(
                                  JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
-                                 chunk_size                   = chunk_size))
+                                 N                            = Stan_data_list$N,
+                                 N_chunks                     = num_chunks))
               }
               json_file_path <-  tempfile(pattern = paste0("burnin_chunks_", num_chunks, "_"), fileext = ".json")
               if (is.null(JSON_text_of_Stan_data_list)) {
                     ## (the whole data written as JSON, about 0.7 s for N = 5000)
-                    Stan_data_for_candidate <-  Stan_data_list
-                    Stan_data_for_candidate$chunk_size <-  chunk_size
+                    # Stan_data_for_candidate <-  Stan_data_list
+                    # Stan_data_for_candidate$chunk_size <-  chunk_size
+                    Stan_data_for_candidate <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                      Stan_data_list  = Stan_data_list,
+                                                      N_chunks        = num_chunks)
                     cmdstanr::write_stan_json(data = Stan_data_for_candidate, file = json_file_path)
               } else {
                     ## (the data's JSON text, written once by fn_JSON_text_of_Stan_data_list(), with only its
@@ -568,9 +580,13 @@ fn_time_burnin_iteration_for_each_num_chunks <-  function( init_object,
                     #                               replacement = paste0("\"chunk_size\": ", chunk_size),
                     #                               x = JSON_text_of_Stan_data_list)
                     ## (sub() on the whole text re-encodes and scans all of it: 1.7 s for 37 MB; the pieces: ms)
-                    JSON_text_of_candidate <-  fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                    # JSON_text_of_candidate <-  fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                    #                                  JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
+                    #                                  chunk_size                   = chunk_size)
+                    JSON_text_of_candidate <-  fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks(
                                                      JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
-                                                     chunk_size                   = chunk_size)
+                                                     N                            = Stan_data_list$N,
+                                                     N_chunks                     = num_chunks)
                     writeChar(object = JSON_text_of_candidate, con = json_file_path, eos = NULL, useBytes = TRUE)
               }
               return(normalizePath(json_file_path, mustWork = TRUE))
@@ -603,10 +619,8 @@ fn_time_burnin_iteration_for_each_num_chunks <-  function( init_object,
         EHMC_args_as_Rcpp_List$tau_us <-  L_main * eps_main
         EHMC_Metric_as_Rcpp_List <-  init_EHMC_Metric_as_Rcpp_List( n_params_main     = n_params_main,
                                                                     n_nuisance        = n_nuisance,
-                                                                    # metric_shape_main = "dense")
-                                                                    ##  "EVERYWHERE": the main blocks are small now that every nuisance block is named)
-                                                                    # metric_shape_main = "diag")
-                                                                    metric_shape_main = "dense")
+                                                                    ##  a diagonal main metric, as Stan's
+                                                                    metric_shape_main = "diag")
         fn_small_values <-  function(n_values) 0.005 * (((seq_len(n_values) * 7) %% 5) - 2)
         ## initial_main <-  matrix(fn_small_values(n_params_main * n_chains_burnin), nrow = n_params_main)
         ## initial_nuisance <-  matrix(fn_small_values(n_nuisance * n_chains_burnin), nrow = n_nuisance)
@@ -892,6 +906,15 @@ fn_JSON_text_of_Stan_data_list_with_chunk_size <-  function( JSON_text_of_Stan_d
                                                              chunk_size
 ) {
 
+        ##
+        ## ---- A text with the blocks of its chunks: only the function below changes them all together ----------------------------
+        ##
+        if ((regexpr(pattern = "\"N_blocks\":", text = JSON_text_of_Stan_data_list, fixed = TRUE) > 0) ||
+            (regexpr(pattern = "\"block_first\":", text = JSON_text_of_Stan_data_list, fixed = TRUE) > 0)) {
+              stop(paste0("fn_JSON_text_of_Stan_data_list_with_chunk_size: the JSON text has N_blocks or ",
+                          "block_first, which a new chunk_size alone would leave wrong; use ",
+                          "fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks()."))
+        }
         key_of_text <-  paste0(nchar(JSON_text_of_Stan_data_list, type = "bytes"), "_",
                                substr(x = JSON_text_of_Stan_data_list, start = 1, stop = 400))
         pieces <-  pieces_of_the_JSON_texts_around_chunk_size[[key_of_text]]
@@ -937,6 +960,75 @@ fn_JSON_text_of_Stan_data_list_with_chunk_size <-  function( JSON_text_of_Stan_d
         #               " ", as.integer(chunk_size),
         #               substr(x = JSON_text_of_Stan_data_list, start = position_after_field + length_of_old_value,
         #                      stop = nchar(JSON_text_of_Stan_data_list, type = "bytes"))))
+
+}
+
+
+
+
+#### ---- the JSON text of Stan data with the chunks of N_chunks: chunk_size, N_blocks, block_first, block_last --
+
+## (the text of each data set without its chunk fields, kept by its length in bytes and its first 400 bytes)
+texts_of_the_JSON_data_without_their_chunks <-  new.env(parent = emptyenv())
+#' The JSON text of Stan data with chunk_size, N_blocks, block_first and block_last of N_chunks chunks
+#'
+#' The data's text without any chunk_size, N_blocks, block_first or block_last field is made ONCE per text (its
+#' top-level fields, one per line as cmdstanr::write_stan_json() writes them, found with fixed searches) and kept;
+#' every layout then appends the four fields of fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(), the
+#' block arrays always in brackets.
+#'
+#' @param JSON_text_of_Stan_data_list The data's JSON text from fn_JSON_text_of_Stan_data_list().
+#' @param N The N of the data.
+#' @param N_chunks The number of chunks.
+#' @return The JSON text with the four fields of N_chunks chunks.
+#' @export
+fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks <-  function(
+        JSON_text_of_Stan_data_list,
+        N,
+        N_chunks ) {
+
+        key_of_text <-  paste0(nchar(JSON_text_of_Stan_data_list, type = "bytes"), "_",
+                               substr(x = JSON_text_of_Stan_data_list, start = 1, stop = 400))
+        text_without_the_chunks <-  texts_of_the_JSON_data_without_their_chunks[[key_of_text]]
+        ##
+        ## ---- The text without its chunk fields, made once per text ---------------------------------------------------------------
+        ##
+        if (is.null(text_without_the_chunks)) {
+
+              starts_of_fields <-  gregexpr(pattern = "\n  \"", text = JSON_text_of_Stan_data_list, fixed = TRUE,
+                                            useBytes = TRUE)[[1]]
+              ends_of_lines <-  gregexpr(pattern = "\n}", text = JSON_text_of_Stan_data_list, fixed = TRUE,
+                                         useBytes = TRUE)[[1]]
+              if ((starts_of_fields[1] < 0) || (ends_of_lines[1] < 0)) {
+                    stop(paste0("fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks: the JSON text ",
+                                "is not one field per line as cmdstanr::write_stan_json() writes it."))
+              }
+              end_of_object <-  ends_of_lines[length(ends_of_lines)]
+              fields <-  substring(text = JSON_text_of_Stan_data_list,
+                                   first = starts_of_fields,
+                                   last = c(starts_of_fields[-1], end_of_object) - 1)
+              names_of_fields <-  sub(pattern = "^\n  \"([^\"]*)\".*$", replacement = "\\1",
+                                      x = substr(x = fields, start = 1, stop = 200))
+              fields <-  ifelse(endsWith(fields, ","), substr(x = fields, start = 1, stop = nchar(fields) - 1),
+                                fields)
+              is_a_chunk_field <-  names_of_fields %in% c("chunk_size", "N_blocks", "block_first", "block_last")
+              text_without_the_chunks <-  paste0(substr(x = JSON_text_of_Stan_data_list, start = 1,
+                                                        stop = starts_of_fields[1] - 1),
+                                                 paste(fields[!is_a_chunk_field], collapse = ","))
+              texts_of_the_JSON_data_without_their_chunks[[key_of_text]] <-  text_without_the_chunks
+
+        }
+        ##
+        ## ---- The four fields of N_chunks chunks, appended ------------------------------------------------------------------------
+        ##
+        chunks <-  fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(N         = N,
+                                                                           N_chunks  = N_chunks)
+        return(paste0(text_without_the_chunks,
+                      ",\n  \"chunk_size\": ", chunks$chunk_size,
+                      ",\n  \"N_blocks\": ", chunks$N_blocks,
+                      ",\n  \"block_first\": [", paste(chunks$block_first, collapse = ", "), "]",
+                      ",\n  \"block_last\": [", paste(chunks$block_last, collapse = ", "), "]",
+                      "\n}"))
 
 }
 
@@ -1302,8 +1394,12 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
               if (!is.null(saved_choice)) {
                     return(list( n_threads_WCP_burnin    = saved_choice$n_threads_WCP_burnin,
                                  num_chunks_burnin       = saved_choice$num_chunks_burnin,
-                                 chunk_size_burnin       = ceiling(Stan_data_list$N /
-                                                                   saved_choice$num_chunks_burnin),
+                                 # chunk_size_burnin       = ceiling(Stan_data_list$N /
+                                 #                                   saved_choice$num_chunks_burnin),
+                                 chunk_size_burnin       = fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                                 N         = Stan_data_list$N,
+                                                                 N_chunks  = saved_choice$num_chunks_burnin
+                                                           )$chunk_size,
                                  M_bytes_per_chain       = saved_choice$M_bytes_per_chain,
                                  N_units                 = Stan_data_list$N,
                                  n_chains_burnin         = n_chains_burnin,
@@ -1343,8 +1439,11 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
         ## (M_bytes/chain given, e.g. measured once for this model and N and reused for other CPUs: used as given)
         time_of_memory_measurement_start <-  proc.time()[["elapsed"]]
         if (is.null(M_bytes_per_chain)) {
-              Stan_data_list_one_piece <-  Stan_data_list
-              Stan_data_list_one_piece$chunk_size <-  as.integer(Stan_data_list$N)
+              # Stan_data_list_one_piece <-  Stan_data_list
+              # Stan_data_list_one_piece$chunk_size <-  as.integer(Stan_data_list$N)
+              Stan_data_list_one_piece <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                 Stan_data_list  = Stan_data_list,
+                                                 N_chunks        = 1)
               M_bytes_measurement_as_returned <-  fn_estimate_initial_M_bytes_per_chain(
                                             model_so_file                 = model_so_file,
                                             Stan_data_list                = Stan_data_list_one_piece,
@@ -1511,7 +1610,7 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
                                                        L2_cache_and_threads_per_core$L2_cache_size_bytes,
                                                  N_threads_per_core            =
                                                        L2_cache_and_threads_per_core$N_threads_per_core)
-        tape_fits_in_cache <-  (sampling_equation_at_full_load$num_chunks_sampling <= 1)
+        tape_fits_in_cache <-  (sampling_equation_at_full_load$num_chunks_at_one_thread_per_chain <= 1)
 ##      if (tape_fits_in_cache) {
 ##            rule$n_threads_WCP_burnin <-  1
 ##            rule$num_chunks_burnin <-  1
@@ -1757,10 +1856,14 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
                           ## (measured at the equations' burn-in N_chunks, the layout the search starts from,
                           ##  never unchunked: at a large N the unchunked gradient (one tape of GBs) can be
                           ##  many times slower than the chunked one the timings run, and L and N_iter would
-                          Stan_data_list_of_lp_grad_timing <-  Stan_data_list
+                          # Stan_data_list_of_lp_grad_timing <-  Stan_data_list
                           # Stan_data_list_of_lp_grad_timing$chunk_size <-  as.integer(Stan_data_list$N)
-                          Stan_data_list_of_lp_grad_timing$chunk_size <-
-                                as.integer(ceiling(Stan_data_list$N / num_chunks_burnin_from_equations))
+                          # Stan_data_list_of_lp_grad_timing$chunk_size <-
+                          #       as.integer(ceiling(Stan_data_list$N / num_chunks_burnin_from_equations))
+                          Stan_data_list_of_lp_grad_timing <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                                     Stan_data_list  = Stan_data_list,
+                                                                     N_chunks        =
+                                                                           num_chunks_burnin_from_equations)
                           ## JSON_text_of_lp_grad_timing <-  fn_JSON_text_of_Stan_data_list(
                           ##                                 Stan_data_list = Stan_data_list_of_lp_grad_timing)
                           ## (the data's JSON text written once, here, and the lp_grad timing's text made from it
@@ -1785,15 +1888,25 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
                                       data_file_of_init_object$JSON_text else
                                       fn_JSON_text_of_Stan_data_list(Stan_data_list = Stan_data_list)
                           }
-                          JSON_text_of_lp_grad_timing <-  fn_JSON_text_of_Stan_data_list_with_chunk_size(
-                                                                JSON_text_of_Stan_data_list =
-                                                                      JSON_text_of_Stan_data_list,
-                                                                chunk_size                  =
-                                                                      Stan_data_list_of_lp_grad_timing$chunk_size)
+                          # JSON_text_of_lp_grad_timing <-  fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                          #                                       JSON_text_of_Stan_data_list =
+                          #                                             JSON_text_of_Stan_data_list,
+                          #                                       chunk_size                  =
+                          #                                           Stan_data_list_of_lp_grad_timing$chunk_size)
+                          JSON_text_of_lp_grad_timing <-
+                                fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks(
+                                      JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
+                                      N                            = Stan_data_list$N,
+                                      N_chunks                     = num_chunks_burnin_from_equations)
                           model_of_the_fit <-  NULL
+                          ## (the fit's model is used only when its data has the same chunks: the same chunk_size
+                          ##  and, for data with blocks, the same N_blocks)
                           if (!is.null(data_file_of_init_object) &&
                               identical(as.integer(data_file_of_init_object$chunk_size),
                                         as.integer(Stan_data_list_of_lp_grad_timing$chunk_size)) &&
+                              (is.null(Stan_data_list$N_blocks) ||
+                               identical(as.integer(Stan_data_list$N_blocks),
+                                         as.integer(Stan_data_list_of_lp_grad_timing$N_blocks))) &&
                               inherits(x = init_object$bs_model, what = "StanModel") &&
                               identical(normalizePath(init_object$bs_model$.__enclos_env__$private$lib,
                                                       mustWork = FALSE),
@@ -1870,7 +1983,10 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
                     num_chunks_burnin_from_equations <-  burnin_equations_of_18_Oct$num_chunks_burnin
                     rule$n_threads_WCP_burnin <-  n_threads_WCP_burnin_from_equations
                     rule$num_chunks_burnin <-  num_chunks_burnin_from_equations
-                    rule$chunk_size_burnin <-  ceiling(Stan_data_list$N / num_chunks_burnin_from_equations)
+                    # rule$chunk_size_burnin <-  ceiling(Stan_data_list$N / num_chunks_burnin_from_equations)
+                    rule$chunk_size_burnin <-  fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                     N         = Stan_data_list$N,
+                                                     N_chunks  = num_chunks_burnin_from_equations)$chunk_size
                     rule$tape_bytes_per_piece <-  M_bytes_measurement / num_chunks_burnin_from_equations
                     rule$burnin_equations_of_18_Oct <-  burnin_equations_of_18_Oct
                     ## (under a budget, L is never lowered: a model too slow for the budget gets the equations'
@@ -2144,7 +2260,9 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
                                 num_chunks_start                = fastest_candidate$num_chunks,
                                 fn_seconds_of_each_layout       = fn_seconds_per_burnin_iteration_of_each_layout,
                                 most_threads_per_chain          = rule$n_threads_per_chain_from_hardware,
-                                most_num_chunks                 = Inf,
+                                # most_num_chunks                 = Inf,
+                                ## (at most N chunks: exactly N_chunks chunks run, none may be empty)
+                                most_num_chunks                 = Stan_data_list$N,
                                 fraction_faster_needed_to_move  = fraction_faster_needed_to_move,
                                 timings_already_made            = starting_candidates,
                                 fn_another_timing_fits_in_the_budget  = fn_another_timing_fits_in_the_budget,
@@ -2169,7 +2287,10 @@ fn_compute_burnin_n_threads_WCP_and_num_chunks_for_Stan_model <-  function(
               if (!is.null(layout_search)) {
                     rule$n_threads_WCP_burnin <-  layout_search$threads_per_chain
                     rule$num_chunks_burnin <-  layout_search$num_chunks
-                    rule$chunk_size_burnin <-  ceiling(Stan_data_list$N / layout_search$num_chunks)
+                    # rule$chunk_size_burnin <-  ceiling(Stan_data_list$N / layout_search$num_chunks)
+                    rule$chunk_size_burnin <-  fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                     N         = Stan_data_list$N,
+                                                     N_chunks  = layout_search$num_chunks)$chunk_size
                     rule$tape_bytes_per_piece <-  rule$M_bytes_per_chain / layout_search$num_chunks
                     num_chunks_check <-  layout_search
                     ## (every timing of the search, in order, with why each layout was timed and its details)
@@ -2510,21 +2631,28 @@ fn_read_threads_per_core_and_L2_cache_size_of_first_CPU_of_this_process <-  func
 
 #'
 #' \preformatted{
-#'   N_chunks  = 2^ceil( log2( max( 1, M_bytes/chain / (f x L2 per hardware thread) ) ) )
+#'   Stan-like tape  = a nico::math tape of more than 8 KiB per unit (M_bytes/chain / N_units > 8 KiB)
+#'   T               = 2 threads per chain for a Stan-like tape, 1 otherwise
+#'   N_chunks        = 2^ceil( log2( max( 1, M_bytes/chain / (f x L2 per hardware thread) ) ) ) / T
+#'   layout          = (hardware threads / T) chains : T threads per chain : N_chunks
 #' }
 #'
-#' with the L2 cache per hardware thread = L2_cache_size_bytes_per_core / N_threads_per_core, and f = 4.0 for the
-#' autodiff tape of a Stan::math library, 2.3 for the tape of a nico::math (AVX) library; one thread per chain.
-#' Fitted to the sampling ground truth of Weibull, robust-t, IRT, the hierarchical logistic model and the
-#' four-class LC-MVOP on both machines (score_the_sampling_equation_with_one_target_for_each_kind_of_tape.py, in
-#' the benchmark folder of Paper 3: 86 of 86 cases within 10% of the fastest layout, the worst 8.6%).
+#' with the L2 cache per hardware thread = L2_cache_size_bytes_per_core / N_threads_per_core, and f = 4.0 for
+#' the autodiff tape of a Stan::math library or a Stan-like tape, 2.3 for any other tape of a nico::math (AVX)
+#' library. A nico::math library that swaps only a few expensive calls keeps a tape of mostly Stan::math autodiff
+#' nodes, as large per unit as its Stan::math library's (e.g. the four-class LC-MVOP without the fused GHK node,
+#' 15-21 KB per unit); a fused nico::math tape is far smaller (at most 5.8 KB per unit). Scored against the
+#' 3-repeat sampling ground truth of Weibull, robust-t, IRT, the hierarchical logistic model and the four-class
+#' LC-MVOP (Cox held out): 96 of 96 cases within 10% of the fastest layout on the local-HPC (the worst 9.1%),
+#' 97 of 99 on the laptop.
 #'
 #' @param M_bytes_per_chain Memory, in bytes, of one full-data log-density-and-gradient evaluation of one chain.
 #' @param N_units The number of units reduce_sum_static sums over (the N of the Stan data).
 #' @param kind_of_tape "Stan_math" (a Stan::math library) or "nico_math" (a nico::math, AVX, library).
 #' @param L2_cache_size_bytes_per_core The L2 cache of one core, in bytes.
 #' @param N_threads_per_core The hardware threads of one core.
-#' @return A list with num_chunks_sampling and every intermediate quantity.
+#' @return A list with num_chunks_sampling and n_threads_WCP_sampling (the equation's layout),
+#'   num_chunks_at_one_thread_per_chain (the same f at 1 thread per chain) and every intermediate quantity.
 #' @export
 fn_sampling_num_chunks_of_Paper_1_equation <-  function( M_bytes_per_chain,
                                                          N_units,
@@ -2533,19 +2661,39 @@ fn_sampling_num_chunks_of_Paper_1_equation <-  function( M_bytes_per_chain,
                                                          N_threads_per_core
 ) {
 
+        ##
+        ## ---- The kind of tape: a nico::math tape of more than 8 KiB per unit is a Stan-like tape -----------------------------------
+        ##
         fraction_of_the_L2_cache_of_each_kind_of_tape <-  c(Stan_math = 4.0, nico_math = 2.3)
         if (!(kind_of_tape %in% names(fraction_of_the_L2_cache_of_each_kind_of_tape))) {
               stop(paste0("fn_sampling_num_chunks_of_Paper_1_equation: kind_of_tape must be \"Stan_math\" or ",
                           "\"nico_math\"; got: ", paste(as.character(kind_of_tape), collapse = ", ")))
         }
-        f <-  fraction_of_the_L2_cache_of_each_kind_of_tape[[kind_of_tape]]
+        bytes_per_unit_of_a_Stan_like_tape <-  8 * 1024
+        is_Stan_like_tape <-  (kind_of_tape == "nico_math") &&
+                              (M_bytes_per_chain / N_units > bytes_per_unit_of_a_Stan_like_tape)
+        kind_of_tape_of_f <-  if (is_Stan_like_tape) "Stan_math" else kind_of_tape
+        f <-  fraction_of_the_L2_cache_of_each_kind_of_tape[[kind_of_tape_of_f]]
+        n_threads_WCP_sampling <-  if (is_Stan_like_tape) 2 else 1
+        ##
+        ## ---- N_chunks: the pieces of f x the L2 cache of one hardware thread, a power of two, shared by T threads ------------------
+        ##
         L2_cache_size_bytes_per_hardware_thread <-  L2_cache_size_bytes_per_core / N_threads_per_core
         N_pieces_for_the_L2_cache <-  M_bytes_per_chain / (f * L2_cache_size_bytes_per_hardware_thread)
-        num_chunks_sampling <-  2^max(0, ceiling(log2(max(1, N_pieces_for_the_L2_cache))))
+        num_chunks_at_one_thread_per_chain <-  2^max(0, ceiling(log2(max(1, N_pieces_for_the_L2_cache))))
+        num_chunks_sampling <-  max(1, num_chunks_at_one_thread_per_chain / n_threads_WCP_sampling)
         ##
         return(list( num_chunks_sampling                      = num_chunks_sampling,
-                     n_threads_WCP_sampling                   = 1,
-                     chunk_size_sampling                      = ceiling(N_units / num_chunks_sampling),
+                     n_threads_WCP_sampling                   = n_threads_WCP_sampling,
+                     num_chunks_at_one_thread_per_chain       = num_chunks_at_one_thread_per_chain,
+                     is_Stan_like_tape                        = is_Stan_like_tape,
+                     # chunk_size_sampling                      = ceiling(N_units / num_chunks_sampling),
+                     ## (NA when the equation asks for more chunks than units: such a layout cannot run)
+                     chunk_size_sampling                      =
+                           if (num_chunks_sampling > N_units) NA_integer_ else
+                                 fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                       N         = N_units,
+                                       N_chunks  = num_chunks_sampling)$chunk_size,
                      fraction_of_the_L2_cache                 = f,
                      L2_cache_size_bytes_per_hardware_thread  = L2_cache_size_bytes_per_hardware_thread,
                      N_pieces_for_the_L2_cache                = N_pieces_for_the_L2_cache,
@@ -2658,7 +2806,12 @@ fn_burnin_threads_per_chain_and_num_chunks_of_Paper_1_equations <-  function(
         ##
         return(list( n_threads_WCP_burnin            = n_threads_WCP_burnin,
                      num_chunks_burnin               = num_chunks_burnin,
-                     chunk_size_burnin               = ceiling(N_units / num_chunks_burnin),
+                     # chunk_size_burnin               = ceiling(N_units / num_chunks_burnin),
+                     ## (NA when the equation asks for more chunks than units: such a layout cannot run)
+                     chunk_size_burnin               = if (num_chunks_burnin > N_units) NA_integer_ else
+                                                       fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                                             N         = N_units,
+                                                             N_chunks  = num_chunks_burnin)$chunk_size,
                      fraction_of_the_L2_cache        = chunks$fraction_of_the_L2_cache,
                      L2_cache_size_bytes_per_thread  = chunks$L2_cache_size_bytes_per_thread,
                      N_pieces_for_the_L2_cache       = chunks$N_pieces_for_the_L2_cache,

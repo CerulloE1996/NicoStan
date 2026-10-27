@@ -44,10 +44,9 @@
 //     log S_i         = -w_i,   d / d f_i = shape w_i,   d / d shape = -sum_i u_i w_i
 //
 // ---- Bernoulli-logit by group (alpha a vector of length G: each group's intercept), in the way of
-//      nico_bernoulli_logit_grouped_regression_lpmf, for any K: f row by row from the values of alpha
-//      and B (read once), BayesMVP's exp and log1p kernels over all the rows, and d / d alpha(g) = sum_{i: group_i
-//      = g} d_i, d / d B(g, k) = sum_{i: group_i = g} x(i, k) d_i, each run of rows of the same group (as in data
-//      sorted by group) summed in registers before it is added.
+//      nico_bernoulli_logit_grouped_regression_lpmf, for any K: each chunk's predictor, exp, log1p and
+//      partials use bounded row buffers; each group's intercept and coefficients are read by SIMD gathers.
+//      Runs of the same group are summed before adding their partials.
 //
 // propto: the terms of Stan's student_t_lpdf, weibull_lpdf and bernoulli_logit_lpmf, i.e. propto = true drops
 // log(sqrt(pi)), the terms in nu alone when nu is data, log(sigma) when sigma is data, log(shape) when shape is
@@ -69,6 +68,13 @@
 //     real nico_weibull_log_glm_lccdf(vector y, matrix x, real alpha, vector beta, real shape);
 //     real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, array[] int group,
 //                                                                   vector alpha, matrix B);
+//     real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, array[] int group,
+//                                                                   matrix B);
+//
+// AUTO_ROW_SUM nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf
+// AUTO_ROW_SUM_ARGUMENTS y:rows x:data_matrix_rows group:group_index alpha:group_vector B:group_matrix
+// AUTO_ROW_SUM nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf
+// AUTO_ROW_SUM_ARGUMENTS y:rows x:data_matrix_rows group:group_index B:group_matrix
 //
 // Included at the end of stan_external_functions.hpp, after stan_external_fused_bernoulli_logit_and_probit_glm_
 // lpmf.hpp; its helpers are in their own namespace, nico::math::fused_glms_by_family.
@@ -78,6 +84,8 @@
 #include "stan_external_functions.hpp"
 #include "stan_external_fused_bernoulli_logit_lpmf.hpp"
 #include "stan_external_fused_student_t_lpdf.hpp"
+#include "stan_external_lgamma.hpp"
+#include "math/nico_double_exp_log.hpp"
 #include "stan_external_fused_weibull_lpdf.hpp"
 #include "stan_external_fused_bernoulli_logit_and_probit_glm_lpmf.hpp"
 // (the kernels of nico_bernoulli_logit_grouped_regression_lpmf, used by the GLM by group)
@@ -109,7 +117,14 @@ namespace fused_w     = nico::math::fused_weibull;
 
 
 // ---- the gather of one block of BMVP_LANES values, base[indices[0]], ..., base[indices[BMVP_LANES - 1]]
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+ALWAYS_INLINE simd_t gather_of_block(const double* base,
+                                     const int* indices) {
+
+    return base[indices[0]];
+
+}
+#elif BMVP_LANES == 8
 ALWAYS_INLINE simd_t gather_of_block(const double* base, const int* indices) {
 
     ALIGN32  __m256i const index_block = _mm256_load_si256(reinterpret_cast<const __m256i*>(indices));
@@ -148,7 +163,13 @@ inline const double* data_of_y(const T_y& y, std::vector<double>& copy_of_y) {
             if (y.innerStride() == 1) return y.data();
         }
         copy_of_y.resize(y.size());
-        for (Eigen::Index i = 0; i < y.size(); ++i) copy_of_y[i] = y.coeff(i);
+        // for (Eigen::Index i = 0; i < y.size(); ++i) copy_of_y[i] = y.coeff(i);
+        const Eigen::Index size_of_y = y.size();
+        for (Eigen::Index chunk_first = 0; chunk_first < size_of_y; chunk_first += glm::rows_per_chunk) {
+            const Eigen::Index chunk_rows = std::min<Eigen::Index>(glm::rows_per_chunk, size_of_y - chunk_first);
+            Eigen::Map<Eigen::VectorXd>(copy_of_y.data() + chunk_first, chunk_rows) = y.segment(chunk_first,
+                                                                                                chunk_rows);
+        }
         return copy_of_y.data();
     }
 
@@ -195,16 +216,6 @@ struct values_of_linear_predictor {
     values_of_linear_predictor(const values_of_linear_predictor&) = delete;
     values_of_linear_predictor& operator=(const values_of_linear_predictor&) = delete;
 
-    // ---- f_i = alpha_i + x(i, ) beta, one row at a time (for the checks after the pass only)
-    double f_of_row(const int i) const {
-
-        double f_i = (pass.alpha_vector != nullptr) ? pass.alpha_vector[i] : pass.alpha_scalar;
-        for (int k = 0; k < pass.K; ++k) {
-            f_i += pass.x[static_cast<std::ptrdiff_t>(k) * pass.x_column_stride + i] * pass.beta[k];
-        }
-        return f_i;
-
-    }
 };
 
 // ---- the partials of f of one block (zero in the spare lanes of a final partial block): kept in the chunk's
@@ -404,7 +415,12 @@ struct operands_of_glm_node {
         if constexpr (alpha_is_var) {
             if constexpr (alpha_is_vector) {
                 pass.partials_of_f = partials + n_beta_operands;
-                for (int i = 0; i < pass.N; ++i) operands[n_beta_operands + i] = alpha.coeff(i).vi_;
+                // for (int i = 0; i < pass.N; ++i) operands[n_beta_operands + i] = alpha.coeff(i).vi_;
+                for (int chunk_first = 0; chunk_first < pass.N; chunk_first += glm::rows_per_chunk) {
+                    const int chunk_rows = std::min(glm::rows_per_chunk, pass.N - chunk_first);
+                    Eigen::Map<Eigen::Matrix<vari*, -1, 1>>(operands + n_beta_operands + chunk_first, chunk_rows)
+                        = alpha.segment(chunk_first, chunk_rows).vi();
+                }
             } else {
                 pass.partial_of_alpha_scalar = partials + n_beta_operands;
                 operands[n_beta_operands] = alpha.vi_;
@@ -453,9 +469,11 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_nu, T_sigma> fused_student_t_
         double value = -(half_nu + 0.5) * sums.sum_of_log1p_r;
         if (!propto) value -= N * 0.5723649429247001;   // N log(sqrt(pi))
         if (!propto || nu_is_var) {
-            value += N * (std::lgamma(half_nu + 0.5) - std::lgamma(half_nu) - 0.5 * std::log(nu_value));
+            value += N * (nico_lgamma(half_nu + 0.5, nullptr)
+                          - nico_lgamma(half_nu, nullptr)
+                          - 0.5 * nico_log_1_double_precision(nu_value));
         }
-        if (!propto || sigma_is_var) value -= N * std::log(sigma_value);
+        if (!propto || sigma_is_var) value -= N * nico_log_1_double_precision(sigma_value);
         return value;
 
     };
@@ -463,13 +481,31 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_nu, T_sigma> fused_student_t_
     auto fn_checks_after_the_pass = [&](const double value) {
 
         if (!std::isfinite(value)) {
-            for (int i = 0; i < N; ++i) {
-                stan::math::check_not_nan(function_name, "Random variable", y_data[i]);
+            // for (int i = 0; i < N; ++i) {
+            //     stan::math::check_not_nan(function_name, "Random variable", y_data[i]);
+            // }
+            for (int chunk_first = 0; chunk_first < N; chunk_first += glm::rows_per_chunk) {
+                const int chunk_rows = std::min(glm::rows_per_chunk, N - chunk_first);
+                const Eigen::Map<const Eigen::ArrayXd> y_of_chunk(y_data + chunk_first, chunk_rows);
+                if (!y_of_chunk.isNaN().any()) continue;
+                for (int row = 0; row < chunk_rows; ++row) {
+                    stan::math::check_not_nan(function_name, "Random variable", y_of_chunk[row]);
+                }
             }
             stan::math::check_finite(function_name, "Weight vector", beta);
             stan::math::check_finite(function_name, "Intercept", alpha);
-            for (int i = 0; i < N; ++i) {
-                stan::math::check_finite(function_name, "Location parameter", values.f_of_row(i));
+            // for (int i = 0; i < N; ++i) {
+            //     stan::math::check_finite(function_name, "Location parameter", values.f_of_row(i));
+            // }
+            alignas(64) double f_of_chunk[glm::rows_per_chunk];
+            for (int chunk_first = 0; chunk_first < N; chunk_first += glm::rows_per_chunk) {
+                const int chunk_rows = std::min(glm::rows_per_chunk, N - chunk_first);
+                glm::compute_f_of_chunk_into_buffer(values.pass, chunk_first, chunk_rows, f_of_chunk);
+                const Eigen::Map<const Eigen::ArrayXd> f_of_this_chunk(f_of_chunk, chunk_rows);
+                if (f_of_this_chunk.allFinite()) continue;
+                for (int row = 0; row < chunk_rows; ++row) {
+                    stan::math::check_finite(function_name, "Location parameter", f_of_this_chunk[row]);
+                }
             }
         }
 
@@ -592,8 +628,16 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_sigma> fused_normal_id_glm_lp
     auto fn_checks_after_the_pass = [&](const double value) {
 
         if (!std::isfinite(value)) {
-            for (int i = 0; i < N; ++i) {
-                stan::math::check_finite(function_name, "Vector of dependent variables", y_data[i]);
+            // for (int i = 0; i < N; ++i) {
+            //     stan::math::check_finite(function_name, "Vector of dependent variables", y_data[i]);
+            // }
+            for (int chunk_first = 0; chunk_first < N; chunk_first += glm::rows_per_chunk) {
+                const int chunk_rows = std::min(glm::rows_per_chunk, N - chunk_first);
+                const Eigen::Map<const Eigen::ArrayXd> y_of_chunk(y_data + chunk_first, chunk_rows);
+                if (y_of_chunk.allFinite()) continue;
+                for (int row = 0; row < chunk_rows; ++row) {
+                    stan::math::check_finite(function_name, "Vector of dependent variables", y_of_chunk[row]);
+                }
             }
             stan::math::check_finite(function_name, "Weight vector", beta);
             stan::math::check_finite(function_name, "Intercept", alpha);
@@ -670,18 +714,37 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> fused_weibull_log_glm(
     auto fn_checks_after_the_pass = [&](const double value) {
 
         if (!std::isfinite(value)) {
-            for (int i = 0; i < N; ++i) {
-                if constexpr (is_lccdf) {
-                    stan::math::check_nonnegative(function_name, "Random variable", y_data[i]);
-                } else {
-                    stan::math::check_finite(function_name, "Random variable", y_data[i]);
+            for (int chunk_first = 0; chunk_first < N; chunk_first += glm::rows_per_chunk) {
+                const int chunk_rows = std::min(glm::rows_per_chunk, N - chunk_first);
+                const Eigen::Map<const Eigen::ArrayXd> y_of_chunk(y_data + chunk_first, chunk_rows);
+                const bool chunk_passes = is_lccdf ? (y_of_chunk >= 0.0).all() : y_of_chunk.allFinite();
+                if (!chunk_passes) {
+                    for (int row = 0; row < chunk_rows; ++row) {
+                        if constexpr (is_lccdf) {
+                            stan::math::check_nonnegative(function_name, "Random variable", y_of_chunk[row]);
+                        } else {
+                            stan::math::check_finite(function_name, "Random variable", y_of_chunk[row]);
+                        }
+                    }
                 }
-                if (y_data[i] < 0.0) some_y_negative = true;
+                some_y_negative = some_y_negative || (y_of_chunk < 0.0).any();
             }
             stan::math::check_finite(function_name, "Weight vector", beta);
             stan::math::check_finite(function_name, "Intercept", alpha);
-            for (int i = 0; i < N; ++i) {
-                stan::math::check_positive_finite(function_name, "Scale parameter", std::exp(values.f_of_row(i)));
+            alignas(64) double f_of_chunk[glm::rows_per_chunk];
+            for (int chunk_first = 0; chunk_first < N; chunk_first += glm::rows_per_chunk) {
+                const int chunk_rows = std::min(glm::rows_per_chunk, N - chunk_first);
+                glm::compute_f_of_chunk_into_buffer(values.pass, chunk_first, chunk_rows, f_of_chunk);
+                Eigen::Map<Eigen::ArrayXd> scale_of_chunk(f_of_chunk, chunk_rows);
+                scale_of_chunk = scale_of_chunk.unaryExpr([](const double f) {
+
+                    return nico::math::nico_exp_1(f);
+
+                });
+                if ((scale_of_chunk > 0.0).all() && scale_of_chunk.allFinite()) continue;
+                for (int row = 0; row < chunk_rows; ++row) {
+                    stan::math::check_positive_finite(function_name, "Scale parameter", scale_of_chunk[row]);
+                }
             }
         }
 
@@ -907,11 +970,8 @@ inline stan::return_type_t<T_x, T_B> fused_bernoulli_logit_glm_by_group_with_gat
 
 
 // ---- Bernoulli-logit by group with each group's own intercept alpha(g) and coefficients B(g, ) (any number of
-//      columns K of x, as Stan's GLMs), in the way of nico_bernoulli_logit_grouped_regression_lpmf
-//      (K = 1 only): f row by row (no gathers), the values of alpha and B read once (not once per row),
-//      BayesMVP's exp and log1p kernels over all the rows, then the partials, each run of rows of the same group
-//      summed in registers before it is added (data sorted by group, as in the benchmark models; any order of the
-//      rows gives the same result). The inputs of one pass:
+//      columns K of x, as Stan's GLMs). Each chunk computes its predictor, log probabilities and partials;
+//      runs of the same group are accumulated across chunks, in any row order. The inputs of one pass:
 struct pass_of_glm_by_group_with_intercepts {
     const int* y = nullptr;
     int N = 0;
@@ -928,32 +988,51 @@ struct pass_of_glm_by_group_with_intercepts {
 
 // ---- each row's -s_i f_i and s_i, with s_i = 2 y_i - 1 and f_i = alpha(g) + sum_k x(i, k) B(g, k), g = group_i
 //      (K_known: the number of columns when it is 0, 1 or 2, so that the sum over k is unrolled; else -1)
+//      Called only by sum_of_glm_by_group_with_intercepts_log_probabilities, with at most rows_per_chunk rows.
 template <int K_known>
 inline void minus_signed_f_and_signs_of_rows(pass_of_glm_by_group_with_intercepts& pass, double* minus_signed_f,
                                              double* signs) {
 
     const int K = (K_known >= 0) ? K_known : pass.K;
-    bool some_y_not_binary = false;
-    bool some_group_out_of_range = false;
+    fused_logit::bad_y_bits_t bad_y = fused_logit::no_bad_y_bits();
+    alignas(64) int group_index_of_chunk[glm::rows_per_chunk];
     for (int i = 0; i < pass.N; ++i) {
-        int g = pass.group[i] - 1;
-        if (g < 0 || g >= pass.G) {
-            some_group_out_of_range = true;
-            g = 0;
-        }
-        const int y_i = pass.y[i];
-        if (y_i != 0 && y_i != 1) some_y_not_binary = true;
-        double f = pass.alpha[g];
-        for (int k = 0; k < K; ++k) {
-            f += pass.x[static_cast<std::ptrdiff_t>(k) * pass.x_column_stride + i]
-                 * pass.B[static_cast<std::ptrdiff_t>(k) * pass.G + g];
-        }
-        const double s = static_cast<double>(2 * y_i - 1);
-        minus_signed_f[i] = -s * f;
-        signs[i] = s;
+        const int group = pass.group[i];
+        const bool valid = group >= 1 && group <= pass.G;
+        pass.some_group_out_of_range |= !valid;
+        group_index_of_chunk[i] = valid ? group - 1 : 0;
     }
-    pass.some_y_not_binary = some_y_not_binary;
-    pass.some_group_out_of_range = some_group_out_of_range;
+    const int rounded_rows = ((pass.N + BMVP_LANES - 1) / BMVP_LANES) * BMVP_LANES;
+    for (int i = pass.N; i < rounded_rows; ++i) group_index_of_chunk[i] = 0;
+    for (int row = 0; row < pass.N; row += BMVP_LANES) {
+        const int count = std::min(BMVP_LANES, pass.N - row);
+        simd_t f = gather_of_block(pass.alpha, group_index_of_chunk + row);
+        for (int k = 0; k < K; ++k) {
+            const double* x_start = pass.x + static_cast<std::ptrdiff_t>(k) * pass.x_column_stride + row;
+            const simd_t x_block = count == BMVP_LANES
+                ? simd_loadu(x_start) : glm::load_first_lanes(x_start, count);
+            f = glm::multiply_and_add_blocks(
+                x_block,
+                gather_of_block(pass.B + static_cast<std::ptrdiff_t>(k) * pass.G,
+                                group_index_of_chunk + row),
+                f);
+        }
+        simd_t s;
+        if (count == BMVP_LANES) {
+            s = fused_logit::sign_from_y(pass.y + row, bad_y);
+        } else {
+            alignas(64) int y_buffer[BMVP_LANES] = {0};
+            for (int lane = 0; lane < count; ++lane) y_buffer[lane] = pass.y[row + lane];
+            s = fused_logit::sign_from_y(y_buffer, bad_y);
+        }
+        const simd_t minus_s = glm::multiply_and_add_blocks(
+            glm::set_all_lanes(-1.0), s, fused_logit::zero_block());
+        const simd_t minus_signed_f_block = glm::multiply_and_add_blocks(
+            minus_s, f, fused_logit::zero_block());
+        simd_storeu(minus_signed_f + row, minus_signed_f_block);
+        simd_storeu(signs + row, s);
+    }
+    pass.some_y_not_binary |= fused_logit::any_bad_y(bad_y);
 
 }
 
@@ -988,8 +1067,6 @@ inline void add_partials_of_alpha_and_B(const pass_of_glm_by_group_with_intercep
     const int N = pass.N;
     const int G = pass.G;
     const int K = (K_known >= 0) ? K_known : pass.K;
-    std::fill(partials_of_alpha, partials_of_alpha + G, 0.0);
-    std::fill(partials_of_B, partials_of_B + static_cast<std::ptrdiff_t>(G) * K, 0.0);
     if constexpr (K_known >= 0) {
         int i = 0;
         while (i < N) {
@@ -1031,25 +1108,50 @@ inline double sum_of_glm_by_group_with_intercepts_log_probabilities(pass_of_glm_
                                                                     double* partials_of_B) {
 
     namespace grouped = ::nico::math::grouped_bernoulli;
-    const int N = pass.N;
+    const int K = (K_known >= 0) ? K_known : pass.K;
+    if constexpr (compute_partials) {
+        for (int first = 0; first < pass.G; first += glm::rows_per_chunk) {
+            const int count = std::min(glm::rows_per_chunk, pass.G - first);
+            std::fill_n(partials_of_alpha + first, count, 0.0);
+        }
+        for (int k = 0; k < K; ++k) {
+            double* column = partials_of_B + static_cast<std::ptrdiff_t>(k) * pass.G;
+            for (int first = 0; first < pass.G; first += glm::rows_per_chunk) {
+                const int count = std::min(glm::rows_per_chunk, pass.G - first);
+                std::fill_n(column + first, count, 0.0);
+            }
+        }
+    }
     auto& buffers = nico::math::scratch();
-    buffers.ensure(N);
+    buffers.ensure(glm::rows_per_chunk);
     double* minus_signed_f = buffers.a.data();
     double* log_probabilities = buffers.b.data();
     double* partials_of_f = buffers.c.data();
-    minus_signed_f_and_signs_of_rows<K_known>(pass, minus_signed_f, partials_of_f);
-    // (a group out of range or a y not in {0, 1}: the caller's checks throw, with Stan's messages)
+    double sum = 0.0;
+    for (int first = 0; first < pass.N; first += glm::rows_per_chunk) {
+        pass_of_glm_by_group_with_intercepts chunk = pass;
+        chunk.N = std::min(glm::rows_per_chunk, pass.N - first);
+        chunk.y = pass.y + first;
+        chunk.group = pass.group + first;
+        chunk.x = K > 0 ? pass.x + first : pass.x;
+        chunk.some_y_not_binary = false;
+        chunk.some_group_out_of_range = false;
+        minus_signed_f_and_signs_of_rows<K_known>(chunk, minus_signed_f, partials_of_f);
+        pass.some_y_not_binary |= chunk.some_y_not_binary;
+        pass.some_group_out_of_range |= chunk.some_group_out_of_range;
+        if (chunk.some_group_out_of_range || chunk.some_y_not_binary) continue;
+        grouped::negative_abs(minus_signed_f, chunk.N, log_probabilities);
+        nico::math::k_exp(log_probabilities, chunk.N);
+        if constexpr (compute_partials) {
+            grouped::derivatives(minus_signed_f, log_probabilities, partials_of_f, chunk.N, partials_of_f);
+        }
+        nico::math::k_log1p(log_probabilities, chunk.N);
+        sum += grouped::sum_log_probability(minus_signed_f, log_probabilities, chunk.N);
+        if constexpr (compute_partials) {
+            add_partials_of_alpha_and_B<K_known>(chunk, partials_of_f, partials_of_alpha, partials_of_B);
+        }
+    }
     if (pass.some_group_out_of_range || pass.some_y_not_binary) return 0.0;
-    grouped::negative_abs(minus_signed_f, N, log_probabilities);
-    nico::math::k_exp(log_probabilities, N);
-    if constexpr (compute_partials) {
-        grouped::derivatives(minus_signed_f, log_probabilities, partials_of_f, N, partials_of_f);
-    }
-    nico::math::k_log1p(log_probabilities, N);
-    const double sum = grouped::sum_log_probability(minus_signed_f, log_probabilities, N);
-    if constexpr (compute_partials) {
-        add_partials_of_alpha_and_B<K_known>(pass, partials_of_f, partials_of_alpha, partials_of_B);
-    }
     return sum;
 
 }
@@ -1161,11 +1263,21 @@ inline stan::return_type_t<T_x, T_alpha, T_B> fused_bernoulli_logit_glm_by_group
         vari** operands = arena.alloc_array<vari*>(n_operands);
         int operand = 0;
         if constexpr (alpha_is_var) {
-            for (int g = 0; g < G; ++g) operands[operand++] = alpha_ref.coeff(g).vi_;
+            for (int first = 0; first < G; first += glm::rows_per_chunk) {
+                const int count = std::min(glm::rows_per_chunk, G - first);
+                for (int i = 0; i < count; ++i) {
+                    operands[operand++] = alpha_ref.coeff(first + i).vi_;
+                }
+            }
         }
         if constexpr (B_is_var) {
             for (int k = 0; k < K; ++k) {
-                for (int g = 0; g < G; ++g) operands[operand++] = B_ref.coeff(g, k).vi_;
+                for (int first = 0; first < G; first += glm::rows_per_chunk) {
+                    const int count = std::min(glm::rows_per_chunk, G - first);
+                    for (int i = 0; i < count; ++i) {
+                        operands[operand++] = B_ref.coeff(first + i, k).vi_;
+                    }
+                }
             }
         }
         double* partials_of_operands = alpha_is_var ? partials : partials + G;

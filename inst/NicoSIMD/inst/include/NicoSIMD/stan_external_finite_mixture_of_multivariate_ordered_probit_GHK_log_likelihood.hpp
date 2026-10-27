@@ -164,7 +164,54 @@ static constexpr double LARGEST_WIDTH_OF_A_NARROW_INTERVAL = 1e-5;
 ////      math/nico_and_approx_*_fns.hpp); the same functions here take BayesMVP's double-precision log and log1p
 ////      (nico_log_1_double_precision, nico_log1p_1_double_precision) instead, with the same other kernels
 ////      (nico_exp_1, nico_Phi, nico_inverse_mills_ratio_tail, the AS241 cases of nico_inv_Phi_wo_checks)
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+using simd_mask_t = bool;
+inline simd_t simd_of(const double x) {
+
+    return x;
+
+}
+inline simd_t simd_absolute_value_of(const simd_t x) {
+
+    return std::fabs(x);
+
+}
+inline simd_mask_t simd_less_than(const simd_t x,
+                                  const simd_t y) {
+
+    return x < y;
+
+}
+inline simd_mask_t simd_greater_than(const simd_t x,
+                                     const simd_t y) {
+
+    return x > y;
+
+}
+inline simd_mask_t simd_less_than_or_equal(const simd_t x,
+                                           const simd_t y) {
+
+    return x <= y;
+
+}
+inline simd_t simd_where(const simd_mask_t mask,
+                         const simd_t if_true,
+                         const simd_t if_false) {
+
+    return mask ? if_true : if_false;
+
+}
+inline bool simd_no_lane(const simd_mask_t mask) {
+
+    return !mask;
+
+}
+inline bool simd_every_lane(const simd_mask_t mask) {
+
+    return mask;
+
+}
+#elif BMVP_LANES == 8
 using simd_mask_t = __mmask8;
 inline simd_t simd_of(const double x) { return _mm512_set1_pd(x); }
 inline simd_t simd_absolute_value_of(const simd_t x) { return _mm512_abs_pd(x); }
@@ -207,7 +254,9 @@ inline bool simd_every_lane(const simd_mask_t mask) { return _mm256_movemask_pd(
 #endif
 inline simd_t simd_sum(const simd_t x, const simd_t y) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return x + y;
+#elif BMVP_LANES == 8
     return _mm512_add_pd(x, y);
 #else
     return _mm256_add_pd(x, y);
@@ -216,7 +265,9 @@ inline simd_t simd_sum(const simd_t x, const simd_t y) {
 }
 inline simd_t simd_difference(const simd_t x, const simd_t y) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return x - y;
+#elif BMVP_LANES == 8
     return _mm512_sub_pd(x, y);
 #else
     return _mm256_sub_pd(x, y);
@@ -225,7 +276,9 @@ inline simd_t simd_difference(const simd_t x, const simd_t y) {
 }
 inline simd_t simd_product(const simd_t x, const simd_t y) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return x * y;
+#elif BMVP_LANES == 8
     return _mm512_mul_pd(x, y);
 #else
     return _mm256_mul_pd(x, y);
@@ -234,7 +287,9 @@ inline simd_t simd_product(const simd_t x, const simd_t y) {
 }
 inline simd_t simd_quotient(const simd_t x, const simd_t y) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return x / y;
+#elif BMVP_LANES == 8
     return _mm512_div_pd(x, y);
 #else
     return _mm256_div_pd(x, y);
@@ -243,7 +298,9 @@ inline simd_t simd_quotient(const simd_t x, const simd_t y) {
 }
 inline simd_t simd_minimum(const simd_t x, const simd_t y) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return (x < y) ? x : y;
+#elif BMVP_LANES == 8
     return _mm512_min_pd(x, y);
 #else
     return _mm256_min_pd(x, y);
@@ -252,7 +309,9 @@ inline simd_t simd_minimum(const simd_t x, const simd_t y) {
 }
 inline simd_t simd_maximum(const simd_t x, const simd_t y) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return (x > y) ? x : y;
+#elif BMVP_LANES == 8
     return _mm512_max_pd(x, y);
 #else
     return _mm256_max_pd(x, y);
@@ -261,7 +320,9 @@ inline simd_t simd_maximum(const simd_t x, const simd_t y) {
 }
 inline simd_t simd_square_root(const simd_t x) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::sqrt(x);
+#elif BMVP_LANES == 8
     return _mm512_sqrt_pd(x);
 #else
     return _mm256_sqrt_pd(x);
@@ -270,27 +331,42 @@ inline simd_t simd_square_root(const simd_t x) {
 }
 inline simd_t simd_log_in_double_precision(const simd_t x) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::log(x);
+#else
     return BMVP_KERNEL_NAME(nico_log_1_double_precision)(x);
+#endif
 
 }
 inline simd_t simd_log1p_in_double_precision(const simd_t x) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::log1p(x);
+#else
     return BMVP_KERNEL_NAME(nico_log1p_1_double_precision)(x);
+#endif
 
 }
 //// log_inv_logit(x) = min(x, 0) - log1p(exp(-|x|))
 inline simd_t simd_log_inv_logit_in_double_precision(const simd_t x) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return stan::math::log_inv_logit(x);
+#else
     const simd_t exp_of_minus_absolute_x = BMVP_KERNEL_NAME(nico_exp_1)(
           simd_difference(simd_of(0.0), simd_absolute_value_of(x)));
     return simd_difference(simd_minimum(x, simd_of(0.0)),
                            simd_log1p_in_double_precision(exp_of_minus_absolute_x));
+#endif
 
 }
 //// log1m_exp(x) = log(1 - exp(x)), x <= 0: log1p(-exp(x)) for x < -ln 2, log(-expm1(x)) nearer 0 (BayesMVP's
 //// expm1, simd_expm1_of of stan_external_functions.hpp)
 inline simd_t simd_log1m_exp_in_double_precision(const simd_t x) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return stan::math::log1m_exp(x);
+#else
     const simd_mask_t far_from_zero = simd_less_than(x, simd_of(-LN2));
     simd_t far_result = simd_of(0.0);
     simd_t near_result = simd_of(0.0);
@@ -302,12 +378,22 @@ inline simd_t simd_log1m_exp_in_double_precision(const simd_t x) {
         near_result = simd_log_in_double_precision(simd_difference(simd_of(0.0), simd_expm1_of(x)));
     }
     return simd_where(far_from_zero, far_result, near_result);
+#endif
 
 }
 //// log Phi(x): log(nico_Phi(x)) for x >= -2.5; -x^2 / 2 - log(2 pi) / 2 - log(1 / R(-x)) below (R the Mills
 //// ratio, nico_inverse_mills_ratio_tail), as nico_log_Phi
 inline simd_t simd_log_Phi_in_double_precision(const simd_t x) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    if (x < -2.5) {
+        const double t = -x;
+        double f = t;
+        for (int k_reversed = 1; k_reversed <= 40; ++k_reversed) f = t + (41 - k_reversed) / f;
+        return -0.5 * x * x + (-0.91893853320467274178) + std::log(1.0 / f);
+    }
+    return std::log(0.5 * std::erfc(-x * 0.70710678118654752440));
+#else
     const simd_mask_t in_the_tail = simd_less_than(x, simd_of(-NORMAL_TAIL_THRESH));
     simd_t body = simd_of(0.0);
     simd_t tail = simd_of(0.0);
@@ -320,12 +406,16 @@ inline simd_t simd_log_Phi_in_double_precision(const simd_t x) {
                                simd_log_in_double_precision(inverse_Mills_ratio));
     }
     return simd_where(in_the_tail, tail, body);
+#endif
 
 }
 //// Phi^{-1}(p) by AS241, as nico_inv_Phi_wo_checks: the central case for |p - 1/2| <= 0.425, otherwise the tail
 //// cases of r = sqrt(-log(min(p, 1 - p)))
 inline simd_t simd_inv_Phi_in_double_precision(const simd_t p) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return stan::math::inv_Phi(p);
+#else
     const simd_t q = simd_difference(p, simd_of(0.5));
     const simd_mask_t central = simd_less_than_or_equal(simd_absolute_value_of(q), simd_of(0.425));
     const simd_t central_value = BMVP_KERNEL_NAME(nico_inv_Phi_wo_checks_case_1)(p, q);
@@ -341,12 +431,16 @@ inline simd_t simd_inv_Phi_in_double_precision(const simd_t p) {
     tail_value = simd_where(simd_less_than(q, simd_of(0.0)), simd_difference(simd_of(0.0), tail_value),
                             tail_value);
     return simd_where(central, central_value, tail_value);
+#endif
 
 }
 //// inv_Phi_approx_from_logit_prob(L) = C2 sinh(asinh(C1 L) / 3), as simd_inv_Phi_approx_from_logit_prob_of of
 //// stan_external_functions.hpp, with the double-precision log1p in its asinh
 inline simd_t simd_inv_Phi_approx_from_logit_prob_in_double_precision(const simd_t logit_p) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return 5.494448514153059 * std::sinh(0.33333333333333331483 * std::asinh(0.34176618822627863 * logit_p));
+#else
     static constexpr double odd_inverse_factorials[8] = { 1.0 / 1307674368000.0, 1.0 / 6227020800.0,
                                                           1.0 / 39916800.0, 1.0 / 362880.0, 1.0 / 5040.0,
                                                           1.0 / 120.0, 1.0 / 6.0, 1.0 };
@@ -370,6 +464,7 @@ inline simd_t simd_inv_Phi_approx_from_logit_prob_in_double_precision(const simd
     const simd_t sinh_y = simd_where(simd_less_than_or_equal(y, simd_of(0.5)), series, from_exp);
     const simd_t value = simd_product(simd_of(INV_PHI_APPROX_C2), sinh_y);
     return simd_where(simd_less_than(logit_p, simd_of(0.0)), simd_difference(simd_of(0.0), value), value);
+#endif
 
 }
 inline void k_log1p_in_double_precision(double* p, const int n) {
@@ -405,9 +500,43 @@ inline void k_inv_Phi_approx_from_logit_prob_in_double_precision(double* p, cons
 
 //// ---- z = Phi^{-1}(p) from log(p) and log(1 - p), in SIMD (BayesMVP's AS241 kernel), on n doubles; a partial
 ////      final SIMD vector is padded with the last valid element, as in apply_kernel
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+inline double log_Phi_stable(const double x) {
+
+    if (x < -10.0) {
+        const double t = -x;
+        double r = 0.0;
+        for (int k = 1; k <= 20; ++k) r = (21.0 - k) / (t + r);
+        return -0.5 * stan::math::square(x) - 0.5 * std::log(2.0 * stan::math::pi()) - std::log(t + r);
+    }
+    if (x <= 0.0) return std::log(stan::math::erfc(-x / std::sqrt(2.0))) - std::log(2.0);
+    return stan::math::log1m(0.5 * stan::math::erfc(x / std::sqrt(2.0)));
+
+}
+inline double inv_Phi_from_log_lower(const double log_p) {
+
+    double z = -std::sqrt(-2.0 * log_p);
+    for (int i = 1; i <= 5; ++i) {
+        const double lp = log_Phi_stable(z);
+        z -= (lp - log_p) * std::exp(lp - stan::math::std_normal_lpdf(z));
+    }
+    return z;
+
+}
+inline double normal_from_log_uniform(const double log_u,
+                                      const double log1m_u) {
+
+    if (log_u <= -std::log(2.0)) return inv_Phi_from_log_lower(log_u);
+    return -inv_Phi_from_log_lower(log1m_u);
+
+}
+#endif
 inline void k_inv_Phi_from_log_p_of_two_buffers(const double* log_p, const double* log_1m_p, const int n,
                                                 double* z) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    for (int i = 0; i < n; ++i) z[i] = normal_from_log_uniform(log_p[i], log_1m_p[i]);
+#else
     int i = 0;
     for (; i + BMVP_LANES <= n; i += BMVP_LANES) {
         simd_storeu(z + i, BMVP_KERNEL_NAME(nico_inv_Phi_from_log_p_wo_checks)(simd_loadu(log_p + i),
@@ -425,6 +554,7 @@ inline void k_inv_Phi_from_log_p_of_two_buffers(const double* log_p, const doubl
                                                                                      simd_load(padded_log_1m_p)));
         for (int lane = 0; lane < remaining; ++lane) z[i + lane] = padded_log_p[lane];
     }
+#endif
 
 }
 

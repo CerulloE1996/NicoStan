@@ -52,7 +52,21 @@ inline void sums_of_entries_times_adjoints_below_the_diagonal(const double* entr
                                                               double& sum_of_products,
                                                               double& sum_of_products_times_squared_distances) {
 
-#if BMVP_LANES == 8
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    sum_of_products = 0.0;
+    sum_of_products_times_squared_distances = 0.0;
+    for (int j = 0; j < n; ++j) {
+        const double* entries_of_column  = entries  + static_cast<std::ptrdiff_t>(j) * n;
+        const double* adjoints_of_column = adjoints + static_cast<std::ptrdiff_t>(j) * n;
+        for (int i = j + 1; i < n; ++i) {
+            const double product = entries_of_column[i] * adjoints_of_column[i];
+            const double distance = x[i] - x[j];
+            sum_of_products += product;
+            sum_of_products_times_squared_distances = std::fma(product * distance, distance,
+                                                               sum_of_products_times_squared_distances);
+        }
+    }
+#elif BMVP_LANES == 8
     ALIGN64  __m512d sums_of_products = _mm512_setzero_pd();
     ALIGN64  __m512d sums_of_products_times_squared_distances = _mm512_setzero_pd();
     for (int j = 0; j < n; ++j) {

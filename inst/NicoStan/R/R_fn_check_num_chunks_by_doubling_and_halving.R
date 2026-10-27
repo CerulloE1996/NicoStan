@@ -63,6 +63,13 @@ fn_check_num_chunks_by_doubling_and_halving <-  function( num_chunks_start,
         num_chunks_doubled <-  fn_allowed_num_chunks(2 * num_chunks_current)
         num_chunks_halved <-  fn_allowed_num_chunks(num_chunks_current / 2)
         num_chunks_timed <-  unique(c(num_chunks_current, num_chunks_doubled, num_chunks_halved))
+        ## (most_num_chunks is the N of the data: exactly N_chunks chunks run, so that more chunks than units
+        ##  would leave chunks empty)
+        num_chunks_timed <-  num_chunks_timed[num_chunks_timed <= most_num_chunks]
+        if (num_chunks_current > most_num_chunks) {
+              stop(paste0("fn_check_num_chunks_by_doubling_and_halving: the starting N_chunks = ", num_chunks_current,
+                          " is larger than most_num_chunks = ", most_num_chunks, " (the N of the data)."))
+        }
         seconds_timed <-  fn_median_seconds_per_iteration_of_each_num_chunks(num_chunks_timed)
         timings <-  data.frame( num_chunks                    = num_chunks_timed,
                                 median_seconds_per_iteration  = seconds_timed)
@@ -90,7 +97,9 @@ fn_check_num_chunks_by_doubling_and_halving <-  function( num_chunks_start,
               if (is.null(fraction)) return(NULL)
               num_chunks_doubled <-  fn_allowed_num_chunks(2 * num_chunks)
               num_chunks_doubled_twice <-  fn_allowed_num_chunks(4 * num_chunks)
-              if ((num_chunks_doubled == num_chunks) || (num_chunks_doubled_twice == num_chunks_doubled)) {
+              # if ((num_chunks_doubled == num_chunks) || (num_chunks_doubled_twice == num_chunks_doubled)) {
+              if ((num_chunks_doubled == num_chunks) || (num_chunks_doubled_twice == num_chunks_doubled) ||
+                  (num_chunks_doubled_twice > most_num_chunks)) {
                     return(NULL)
               }
               if (abs(seconds_of_doubling - seconds_of_num_chunks) > fraction * seconds_of_num_chunks) {
@@ -124,7 +133,9 @@ fn_check_num_chunks_by_doubling_and_halving <-  function( num_chunks_start,
         while (multiplier != 0) {
               ##
               num_chunks_next <-  fn_allowed_num_chunks(multiplier * num_chunks_current)
-              if (num_chunks_next == num_chunks_current) break
+              # if (num_chunks_next == num_chunks_current) break
+              ## (and never more chunks than most_num_chunks, the N of the data)
+              if ((num_chunks_next == num_chunks_current) || (num_chunks_next > most_num_chunks)) break
               num_chunks_pair <-  c(num_chunks_current, num_chunks_next)
               seconds_pair <-  fn_median_seconds_per_iteration_of_each_num_chunks(num_chunks_pair)
               n_timings <-  n_timings + 2

@@ -117,7 +117,7 @@ model {
   alpha ~ lognormal(0, 0.5);
   beta ~ normal(0, 1);
   // mu ~ normal(-1, 1.5);
-  mu ~ normal(0, 2);
+  mu ~ normal(-1, 1.5);
 
   // Likelihood for observed failures and for censored observations (reduce_sum_static over the observed
   // failures, in chunks of chunk_size, each chunk with its share of the censored observations; see the header)

@@ -12,7 +12,11 @@ namespace nico::math {
 //// simd_t is the selected SIMD register: four doubles on AVX2, eight doubles on AVX-512.
 inline simd_t nico_simd_exp_in_double_precision(const simd_t argument) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::exp(argument);
+#else
     return BMVP_KERNEL_NAME(nico_exp_1)(argument);
+#endif
 
 }
 

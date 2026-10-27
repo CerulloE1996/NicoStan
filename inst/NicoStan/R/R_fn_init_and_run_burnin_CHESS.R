@@ -456,6 +456,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            pooled_metric_signal_to_noise_centred = FALSE,
                                            metric_update_rescales_eps_and_tau = TRUE,
                                            # metric_update_rescales_eps_and_tau = FALSE,
+                                           M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                            resident_burnin = TRUE,
                                            resident_burnin_joint_block = TRUE,
@@ -2889,6 +2890,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         stop("metric_update_rescales_eps_and_tau must be TRUE or FALSE.")
   }
   ##  tests of the checks of 17 Oct 17:57 showed that its removal cost 2-25x in min ESS per gradient: "YES")
+  ## ---- M_update_rescale_guard: the inclusive bounds a metric update's rescale factor must lie within for the
+  ##      rescale of eps and tau to be applied; outside them that rescale is skipped, the factor is never clamped,
+  ##      and the metric update itself still happens:
+  if (!is.numeric(M_update_rescale_guard) || length(M_update_rescale_guard) != 2 ||
+      anyNA(M_update_rescale_guard) || !is.finite(M_update_rescale_guard[1]) ||
+      !(M_update_rescale_guard[1] >= 0) || !(M_update_rescale_guard[2] > M_update_rescale_guard[1])) {
+        stop("M_update_rescale_guard must be two numbers, lower >= 0 finite and upper > lower ",
+             "(upper may be Inf), e.g. c(0.5, 2.0).")
+  }
+  ##
   metric_update_rescale_active <-  metric_update_rescales_eps_and_tau && !isTRUE(manual_tau)
   metric_update_rescale_us_active <-  metric_update_rescale_active && isTRUE(partitioned_HMC) &&
                                       isTRUE(sample_nuisance)
@@ -2896,6 +2907,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ## NA = no rescale), main and nuisance block:
   metric_update_eps_tau_rescale_factor_vec    <-  rep(x = NA_real_, times = n_burnin)
   metric_update_eps_tau_rescale_factor_us_vec <-  rep(x = NA_real_, times = n_burnin)
+  ## (TRUE where a metric update's factor fell outside M_update_rescale_guard, so its rescale was skipped;
+  ##  FALSE where the rescale was applied; NA where there was no metric update at that iteration)
+  metric_update_rescale_skipped_by_the_guard_vec    <-  rep(x = NA, times = n_burnin)
+  metric_update_rescale_skipped_by_the_guard_us_vec <-  rep(x = NA, times = n_burnin)
   ## the factor on ratio_M applied at each metric update, main and nuisance block (NA = no update):
   pooled_metric_weight_factor_main_update_vec <-  rep(x = NA_real_, times = n_burnin)
   pooled_metric_weight_factor_us_update_vec   <-  rep(x = NA_real_, times = n_burnin)
@@ -4915,7 +4930,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            if (identical(metric_type_main, "Empirical"))
                                                  pooled_metric_weight_factor else 1)
                                }
+                               rescale_factor_main_within_the_guard <-
+                                     is.finite(rescale_factor_main) &&
+                                     rescale_factor_main >= M_update_rescale_guard[1] &&
+                                     rescale_factor_main <= M_update_rescale_guard[2]
                                if (is.finite(rescale_factor_main)) {
+                                     metric_update_rescale_skipped_by_the_guard_vec[ii] <-
+                                           !rescale_factor_main_within_the_guard
+                               }
+                               if (rescale_factor_main_within_the_guard) {
                                      EHMC_args_as_Rcpp_List <-  fn_rescale_eps_and_tau_of_block(
                                            EHMC_args_as_Rcpp_List, "main", rescale_factor_main)
                                      if (!isTRUE(partitioned_HMC)) {
@@ -5082,7 +5105,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                  M_inv_us_diagonal_before_update,
                                                  EHMC_Metric_as_Rcpp_List$M_inv_us_vec,
                                                  pooled_metric_weight_factor_us_used)
+                                           rescale_factor_us_within_the_guard <-
+                                                 is.finite(rescale_factor_us) &&
+                                                 rescale_factor_us >= M_update_rescale_guard[1] &&
+                                                 rescale_factor_us <= M_update_rescale_guard[2]
                                            if (is.finite(rescale_factor_us)) {
+                                                 metric_update_rescale_skipped_by_the_guard_us_vec[ii] <-
+                                                       !rescale_factor_us_within_the_guard
+                                           }
+                                           if (rescale_factor_us_within_the_guard) {
                                                  EHMC_args_as_Rcpp_List <-  fn_rescale_eps_and_tau_of_block(
                                                        EHMC_args_as_Rcpp_List, "us", rescale_factor_us)
                                                  if (use_eps_warm_start && ii <= eps_initial_iter) {
@@ -7535,7 +7566,12 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                    " main-block rescales",
                                    if (length(rescale_factors_main) > 0)
                                        paste0(" (factors ", signif(min(rescale_factors_main), 4), " to ",
-                                              signif(max(rescale_factors_main), 4), ")") else ""),
+                                              signif(max(rescale_factors_main), 4), ")") else "",
+                                   ", ", sum(metric_update_rescale_skipped_by_the_guard_vec %in% TRUE),
+                                   " main-block rescales skipped by M_update_rescale_guard (",
+                                   paste(signif(M_update_rescale_guard, 4), collapse = ", "), ")",
+                                   ", ", sum(metric_update_rescale_skipped_by_the_guard_us_vec %in% TRUE),
+                                   " nuisance-block rescales skipped"),
                             "cyan"))
     }
     ##
@@ -7935,6 +7971,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                 # metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
                 metric_update_rescales_eps_and_tau_active = metric_update_rescale_active,
                 metric_update_eps_tau_rescale_factor_vec = metric_update_eps_tau_rescale_factor_vec,
+                metric_update_rescale_skipped_by_the_guard_vec =
+                      metric_update_rescale_skipped_by_the_guard_vec,
+                metric_update_rescale_skipped_by_the_guard_us_vec =
+                      metric_update_rescale_skipped_by_the_guard_us_vec,
                 metric_update_eps_tau_rescale_factor_us_vec = metric_update_eps_tau_rescale_factor_us_vec,
                 ## burn-in record for metric diagnosis (see its allocation):
                 burnin_trace_main_all_chains = burnin_trace_main_all_chains,

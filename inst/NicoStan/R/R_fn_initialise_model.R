@@ -36,6 +36,7 @@ initialise_model <- function( Model_type,
                               Stan_cpp_flags = NULL,
                               stanc_args = NULL,
                               make_args = NULL,
+                              auto_chunking = TRUE,
                               ##
                               Stan_model_math_functions = "Stan_math",
                               BayesMVP_AVX_headers_folder = NULL
@@ -146,6 +147,28 @@ initialise_model <- function( Model_type,
             is.null(names_of_the_nuisance_blocks_of_a_regular_library)) {
               names_of_the_nuisance_blocks_of_a_regular_library <-  character(0)
         }
+        ##
+        ## ---- A Stan model that calls neither reduce_sum nor map_rect: Stan holds its nuisance blocks -------------------------------
+        ##
+        ## (nothing to chunk, so no nico_reduce_sum version: the nuisance blocks stay in the model's own parameters
+        ##  block, declared first, as cmdstanr runs it, and NicoStan samples them as its nuisance block)
+        if (Model_type == "Stan" && is.character(nuisance_params) && length(nuisance_params) > 0 &&
+            !R_fn_Stan_model_calls_reduce_sum_or_map_rect(Stan_model_file_path  = Stan_model_file_path,
+                                                          stanc_args            = stanc_args)) {
+
+              Stan_model_file_path <-  R_fn_write_Stan_model_with_the_nuisance_blocks_declared_first(
+                                             Stan_model_file_path  = Stan_model_file_path,
+                                             nuisance_params       = nuisance_params)
+              names_of_the_nuisance_blocks_of_a_regular_library <-  nuisance_params
+              sample_nuisance <-  TRUE
+              message(colourise(paste0("no reduce_sum or map_rect: the nuisance blocks ",
+                                       paste(nuisance_params, collapse = ", "),
+                                       " are held by Stan, declared first, and sampled by NicoStan as its ",
+                                       "nuisance block: ", Stan_model_file_path),
+                                "cyan"))
+              nuisance_params <-  NULL
+
+        }
         if (!is.null(nuisance_params) && (Model_type != "Stan" || !is.character(nuisance_params) ||
                                        length(nuisance_params) > 0)) {
               ##
@@ -197,16 +220,9 @@ initialise_model <- function( Model_type,
               ##
         }
         ##
-        ## ---- The math functions of a Stan model (Stan_model_math_functions): "Stan_math" (the default)
-        ##      compiles the Stan model as it is. "NicoSIMD_AVX2", "NicoSIMD_AVX512" or
-        ##      "NicoSIMD_AVX512_if_supported_else_AVX2" (NicoSIMD's nico_ functions), or "BayesMVP_AVX2",
-        ##      "BayesMVP_AVX512" or "BayesMVP_AVX512_if_supported_else_AVX2" (BayesMVP's fast_ functions: the
-        ##      same C++), write the AVX version of the Stan model next to it
-        ##      (every call of a Stan function which BayesMVP replaces, for the argument types it supports,
-        ##      becomes BayesMVP's AVX function) and its user header, and the AVX version is then compiled, with
-        ##      the instruction-set make arguments, and used as the Stan model, as any Stan model
-        ##      (R_fn_Stan_model_math_functions_BayesMVP_AVX.R). The SIMD lanes of the compiled AVX version are
-        ##      checked below, once its BridgeStan model exists:
+        ##
+        ## ---- Write the requested AVX backend from NicoSIMD's nico_ functions:
+        ##
         ##
         BayesMVP_AVX_version_of_Stan_model <-  NULL
         ##
@@ -218,6 +234,11 @@ initialise_model <- function( Model_type,
                                 "\" is only for Model_type = \"Stan\" (the built-in models set their SIMD ",
                                 "functions with model_args_list$vect_type)."))
               }
+              Stan_model_math_functions_uses_NicoSIMD <-
+                    is.character(Stan_model_math_functions) &&
+                    length(Stan_model_math_functions) == 1 &&
+                    !is.na(Stan_model_math_functions) &&
+                    startsWith(Stan_model_math_functions, "NicoSIMD_")
               ##
               BayesMVP_AVX_version_of_Stan_model <-
                     R_fn_write_BayesMVP_AVX_version_of_Stan_model_and_user_header(
@@ -226,7 +247,10 @@ initialise_model <- function( Model_type,
                           Stan_cpp_user_header         = Stan_cpp_user_header,
                           stanc_args                   = stanc_args,
                           make_args                    = make_args,
-                          BayesMVP_AVX_headers_folder  = BayesMVP_AVX_headers_folder)
+                          BayesMVP_AVX_headers_folder  = if (Stan_model_math_functions_uses_NicoSIMD) NULL else
+                                                              BayesMVP_AVX_headers_folder,
+                          NicoSIMD_headers_folder      = if (Stan_model_math_functions_uses_NicoSIMD)
+                                                              BayesMVP_AVX_headers_folder else NULL)
               ##
               Stan_model_file_path <-  BayesMVP_AVX_version_of_Stan_model$Stan_model_file_path
               Stan_cpp_user_header <-  BayesMVP_AVX_version_of_Stan_model$Stan_cpp_user_header
@@ -286,6 +310,7 @@ initialise_model <- function( Model_type,
                                             Stan_model_file_path = Stan_model_file_path,
                                             stanc_args = stanc_args,
                                             make_args = make_args,
+                                            auto_chunking = auto_chunking,
                                             ##
                                             sample_nuisance = sample_nuisance,
                                             n_nuisance_override = n_nuisance_override,
@@ -304,6 +329,19 @@ initialise_model <- function( Model_type,
         if (!is.null(BayesMVP_AVX_version_of_Stan_model)) {
               ##
               AVX_version <-  BayesMVP_AVX_version_of_Stan_model
+              ##
+              ## (a model whose nuisance blocks NicoStan holds reads them in its generated quantities: zeros are
+              ##  set first, as the SIMD lanes do not depend on them)
+              name_of_the_model_library <-  sub("\\.so$", "",
+                                                basename(outs_model_info$outs_bs_model$model_so_file))
+              if (!is.null(n_nuisance_override) && (n_nuisance_override > 0) &&
+                  is.loaded("nicostan_set_the_nuisance_values_used_outside_NicoStan_R",
+                            PACKAGE = name_of_the_model_library)) {
+                    do.call(".C", list( "nicostan_set_the_nuisance_values_used_outside_NicoStan_R",
+                                        as.double(rep(0, n_nuisance_override)),
+                                        as.integer(n_nuisance_override),
+                                        PACKAGE = name_of_the_model_library))
+              }
               ##
               BayesMVP_AVX_version_of_Stan_model$SIMD_lanes_reported_by_compiled_model <-
                     R_fn_check_SIMD_lanes_reported_by_compiled_BayesMVP_AVX_Stan_model(
@@ -428,6 +466,8 @@ initialise_model <- function( Model_type,
                        force_recompile = force_recompile,
                        n_nuisance_override = n_nuisance_override,
                        nuisance_blocks_held_by_NicoStan = nuisance_blocks_held_by_NicoStan,
+                       names_of_the_nuisance_blocks_of_a_regular_library =
+                             names_of_the_nuisance_blocks_of_a_regular_library,
                        ##
                        n_nuisance = n_nuisance,
                        n_params_main = n_params_main,
@@ -471,6 +511,7 @@ initialise_model <- function( Model_type,
                        Stan_cpp_flags = Stan_cpp_flags,
                        stanc_args = stanc_args,
                        make_args = make_args,
+                       auto_chunking = auto_chunking,
                        ##
                        ## (NULL when this initialisation compiled the given Stan model as it is; with BayesMVP's
                        ##  AVX functions, the AVX version written and compiled by this initialisation)

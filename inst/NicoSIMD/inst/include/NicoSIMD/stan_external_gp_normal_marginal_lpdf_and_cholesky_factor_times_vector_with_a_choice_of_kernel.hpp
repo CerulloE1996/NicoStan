@@ -119,14 +119,21 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include "nico_simd_exp_in_double_precision.hpp"
+#if !defined(NICO_SIMD_SCALAR_KERNELS)
+#  include "nico_simd_exp_in_double_precision.hpp"
+#endif
+#if defined(NICO_GPC_COVARIANCE_EXP_DEGREE_13)
+#  include "math/nico_GPC_covariance_exp_degree_13.hpp"
+#endif
 
 #ifndef BMVP_LANES
 #  error "the GP functions with a choice of kernel need the kernels of stan_external_functions.hpp"
 #endif
 
-// ---- the alignment of every SIMD variable (the macros: ALIGN64 for AVX-512, ALIGN32 for AVX2)
-#if BMVP_LANES == 8
+// ---- the alignment of every SIMD variable (ALIGN64 for AVX-512, ALIGN32 for AVX2, none for one double)
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+#  define BMVP_ALIGN_OF_A_SIMD_VARIABLE
+#elif BMVP_LANES == 8
 #  define BMVP_ALIGN_OF_A_SIMD_VARIABLE ALIGN64
 #else
 #  define BMVP_ALIGN_OF_A_SIMD_VARIABLE ALIGN32
@@ -155,8 +162,70 @@ static constexpr double square_root_of_5 = 2.2360679774997896964091736687313;
 static constexpr double two_pi           = 6.2831853071795864769252867665590;
 
 
-// ---- the SIMD operations (AVX-512: 8 lanes; AVX2: 4 lanes)
-#if BMVP_LANES == 8
+// ---- the SIMD operations (AVX-512: 8 lanes; AVX2: 4 lanes; scalar kernels: one double)
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+inline simd_t simd_all_lanes(const double value) { return value; }
+inline simd_t simd_zero() { return 0.0; }
+inline simd_t simd_add(const simd_t a, const simd_t b) { return a + b; }
+inline simd_t simd_subtract(const simd_t a, const simd_t b) { return a - b; }
+inline simd_t simd_multiply(const simd_t a, const simd_t b) { return a * b; }
+//  (a b + c, fused)
+inline simd_t simd_multiply_add(const simd_t a, const simd_t b, const simd_t c) {
+
+    return std::fma(a, b, c);
+
+}
+//  (a b - c, fused)
+inline simd_t simd_multiply_subtract(const simd_t a, const simd_t b, const simd_t c) {
+
+    return std::fma(a, b, -c);
+
+}
+inline simd_t simd_square_root(const simd_t a) { return std::sqrt(a); }
+inline double simd_sum_of_the_lanes(const simd_t a) { return a; }
+//  (the first count lanes from p, 0 in the others; nothing read beyond them)
+inline simd_t simd_load_first_lanes(const double* p, const int count) {
+
+    return count >= 1 ? *p : 0.0;
+
+}
+//  (the first count lanes into p; nothing written beyond them)
+inline void simd_store_first_lanes(double* p, const simd_t a, const int count) {
+
+    if (count >= 1) *p = a;
+
+}
+//  (numerator / denominator where the denominator is positive, 0 elsewhere)
+inline simd_t simd_divide_where_positive(const simd_t numerator, const simd_t denominator) {
+
+    return denominator > 0.0 ? numerator / denominator : 0.0;
+
+}
+inline simd_t simd_inclusive_prefix_sums(const simd_t a) { return a; }
+inline simd_t simd_inclusive_suffix_sums(const simd_t a) { return a; }
+inline simd_t simd_shift_down_by_one_lane(const simd_t /* a */) { return 0.0; }
+inline simd_t simd_first_lane_in_every_lane(const simd_t a) { return a; }
+inline simd_t simd_last_lane_in_every_lane(const simd_t a) { return a; }
+//  (to the nearest integer, ties to even)
+inline simd_t simd_round_to_nearest_integer(const simd_t a) { return std::nearbyint(a); }
+inline simd_t simd_floor(const simd_t a) { return std::floor(a); }
+//  (the sine and cosine of the reduced argument swapped where the quadrant is odd, and negated where the quadrant
+//   is 2 or 3 (sine) or 1 or 2 (cosine))
+inline void simd_place_by_quadrant(const simd_t quadrant,
+                                   const simd_t sine_of_reduced,
+                                   const simd_t cosine_of_reduced,
+                                   simd_t& sine,
+                                   simd_t& cosine) {
+
+    const bool odd = (quadrant == 1.0) || (quadrant == 3.0);
+    sine = odd ? cosine_of_reduced : sine_of_reduced;
+    cosine = odd ? sine_of_reduced : cosine_of_reduced;
+    if ((quadrant == 2.0) || (quadrant == 3.0)) sine = -sine;
+    if ((quadrant == 1.0) || (quadrant == 2.0)) cosine = -cosine;
+
+}
+
+#elif BMVP_LANES == 8
 inline simd_t simd_all_lanes(const double value) { return _mm512_set1_pd(value); }
 inline simd_t simd_zero() { return _mm512_setzero_pd(); }
 inline simd_t simd_add(const simd_t a, const simd_t b) { return _mm512_add_pd(a, b); }
@@ -375,9 +444,21 @@ inline void simd_place_by_quadrant(const simd_t quadrant, const simd_t sine_of_r
 //      lanes with |a| >= 708.4
 inline simd_t simd_exp(const simd_t a) {
 
+#if defined(NICO_SIMD_SCALAR_KERNELS)
+    return std::exp(a);
+#else
     return nico_simd_exp_in_double_precision(a);
+#endif
 
 }
+
+// ---- the exp of the squared-exponential kernel: the degree-13 one only in the builds that define
+//      NICO_GPC_COVARIANCE_EXP_DEGREE_13 (the GPC builds)
+#if defined(NICO_GPC_COVARIANCE_EXP_DEGREE_13)
+#  define NICO_GP_SQUARED_EXPONENTIAL_KERNEL_EXP nico_GPC_covariance_exp_degree_13
+#else
+#  define NICO_GP_SQUARED_EXPONENTIAL_KERNEL_EXP simd_exp
+#endif
 
 // ---- the sine and cosine of a packet (general; for the periodic kernel): v = q pi / 2 + r with q the nearest
 //      integer to 2 v / pi and r = v - q pi / 2 in [-pi / 4, pi / 4] (pi / 2 in three parts, Cody and Waite, so
@@ -453,7 +534,8 @@ ALWAYS_INLINE void kernel_value_and_derivative_weight_of_a_packet(
 
     if constexpr (kernel == squared_exponential_kernel) {
         kernel_value = simd_multiply(squared_sigma,
-                                     simd_exp(simd_multiply(simd_all_lanes(-0.5), squared_distance)));
+                                     NICO_GP_SQUARED_EXPONENTIAL_KERNEL_EXP(
+                                           simd_multiply(simd_all_lanes(-0.5), squared_distance)));
         if constexpr (derivative_weight_wanted) derivative_weight = kernel_value;
     } else if constexpr (kernel == Matern_1_2_kernel) {
         BMVP_ALIGN_OF_A_SIMD_VARIABLE simd_t const distance = simd_square_root(squared_distance);

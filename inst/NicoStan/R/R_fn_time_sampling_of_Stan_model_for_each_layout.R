@@ -15,8 +15,8 @@
 ## sampling of hundreds of iterations. The seconds of each call are those of its chains alone (from the start of
 ## the chains to the end of the last chain), when the sampler returns them (sampling_call_timing), and otherwise
 ## its wall seconds, setup included (the difference then cancels the setup only as far as it is the same in both
-## calls). The long call has at least minimum_seconds_per_timing seconds of iterations (as estimated from the
-## short call). Each layout's data are the Stan data with chunk_size = ceiling(N / N_chunks), as in
+## calls). The seconds setting caps each layout separately; only its shortest call may exceed it. Each
+## layout's data are the Stan data with chunk_size = ceiling(N / N_chunks), as in
 ## fn_time_burnin_iteration_for_each_num_chunks(). The user-mode and kernel-mode CPU seconds of the two calls are
 ## returned too, and, when fn_snapshot_hardware_counters is given, it is called just before and just after each
 ## of them (e.g. to snapshot Paper 1's E4 counter tool pmc_stat, which counts user-mode cycles), so that the clock
@@ -46,8 +46,8 @@ environment_of_the_data_files_of_each_chunk_size_written_by_this_R_process <-  n
 #' @param Stan_data_list The Stan data (with integer fields N and chunk_size).
 #' @param layouts A data frame with columns n_chains (the sampling chains, run in parallel), n_threads_WCP
 #'   (within-chain threads) and num_chunks.
-#' @param minimum_seconds_per_timing The shortest time of the iterations of each layout's long call (default
-#'   2 s; the long call is made again, longer, when its iterations took less).
+#' @param minimum_seconds_per_timing The cap on each layout timed in one call; 0 keeps a fixed call.
+#'   Its shortest call may exceed the cap when one iteration with one leapfrog step is already longer.
 #' @param n_iterations_of_short_call The iterations of the short call (default 1).
 #' @param time_layout_in_one_call TRUE (default): each layout is timed in ONE sampling call: each chain runs
 #'   n_iterations_of_untimed_warm_up_call untimed iterations, then its timed iterations
@@ -111,9 +111,10 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                                                             L_of_the_untimed_iterations    = NULL) {
 
         minimum_seconds_argument_was_given <-  !missing(minimum_seconds_per_timing)
-        minimum_seconds_enforced_for_this_call <-  0
-        if (minimum_seconds_argument_was_given && !is.null(n_iterations_of_long_call)) {
-              minimum_seconds_enforced_for_this_call <-  minimum_seconds_per_timing
+        seconds_cap <-  minimum_seconds_per_timing
+        if (!minimum_seconds_argument_was_given && !is.null(n_iterations_of_long_call)) seconds_cap <-  0
+        if (!is.finite(seconds_cap) || seconds_cap < 0) {
+              stop("The timed-call cap must be finite and nonnegative.")
         }
         ##
         columns_of_layouts <-  c("n_chains", "n_threads_WCP", "num_chunks")
@@ -132,10 +133,51 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
         if (is.null(JSON_text_of_Stan_data_list)) {
               Stan_data_with_a_chunk_size <-  Stan_data_list
               if (is.null(Stan_data_with_a_chunk_size$chunk_size)) {
-                    Stan_data_with_a_chunk_size$chunk_size <-  as.integer(Stan_data_list$N)
+                    # Stan_data_with_a_chunk_size$chunk_size <-  as.integer(Stan_data_list$N)
+                    Stan_data_with_a_chunk_size <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                          Stan_data_list  = Stan_data_list,
+                                                          N_chunks        = 1)
               }
               JSON_text_of_Stan_data_list <-  fn_JSON_text_of_Stan_data_list(
                                                     Stan_data_list = Stan_data_with_a_chunk_size)
+        }
+        ##
+        ## ---- AUTO-CHUNKING's number of chunks, read from the data of a library built by
+        ##      R_fn_prepare_auto_chunked_BridgeStan_build() (N_chunks_of_auto_chunking): with the layouts'
+        ##      num_chunks alone, AUTO-CHUNKING takes num_chunks and the model's reduce_sum one chunk
+        ##      (chunk_size = N); with a column num_chunks_of_auto_chunking too (both on), the model's reduce_sum
+        ##      and AUTO-CHUNKING take the same num_chunks, one shared count, never two:
+        ##
+        library_is_auto_chunked <-  grepl(pattern = "_auto_chunked_model[.]so$", x = init_object$model_so_file)
+        layouts_give_the_chunks_of_auto_chunking <-  "num_chunks_of_auto_chunking" %in% names(layouts)
+        if (layouts_give_the_chunks_of_auto_chunking && !library_is_auto_chunked) {
+              stop("num_chunks_of_auto_chunking is given for a library that is not auto-chunked: ",
+                   init_object$model_so_file)
+        }
+        if (layouts_give_the_chunks_of_auto_chunking &&
+            !isTRUE(all(layouts$num_chunks_of_auto_chunking == layouts$num_chunks))) {
+              stop("with both on, reduce_sum and AUTO-CHUNKING take the same num_chunks: a layout gives two counts")
+        }
+        if (library_is_auto_chunked && !layouts_give_the_chunks_of_auto_chunking &&
+            !isTRUE(all(layouts$n_threads_WCP == 1L))) {
+              stop("AUTO-CHUNKING alone has no WCP: every layout has 1 thread per chain")
+        }
+        if (grepl(pattern = "\"N_chunks_of_auto_chunking\"", x = JSON_text_of_Stan_data_list, fixed = TRUE)) {
+              stop("the Stan data already hold N_chunks_of_auto_chunking: it is set for each layout")
+        }
+        fn_chunks_of_the_layout <-  function(layout_index) {
+
+              if (!library_is_auto_chunked) {
+                    return(list(num_chunks                   = layouts$num_chunks[layout_index],
+                                num_chunks_of_auto_chunking  = NA_integer_))
+              }
+              if (layouts_give_the_chunks_of_auto_chunking) {
+                    return(list(num_chunks                   = layouts$num_chunks[layout_index],
+                                num_chunks_of_auto_chunking  = layouts$num_chunks_of_auto_chunking[layout_index]))
+              }
+              return(list(num_chunks                   = 1L,
+                          num_chunks_of_auto_chunking  = layouts$num_chunks[layout_index]))
+
         }
         ##
         ## ---- each layout's data file: the Stan data with chunk_size = ceiling(N / N_chunks). With the data's
@@ -146,30 +188,60 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
         ##      substituted and written again for every layout (at N = 50,000 that substitution and write took
         ##      up to seconds per layout for the models with the largest data):
         ##
-        fn_write_JSON_data_file_of_layout <-  function(num_chunks) {
+        fn_write_JSON_data_file_of_layout <-  function(num_chunks,
+                                                       num_chunks_of_auto_chunking) {
 
-              chunk_size <-  as.integer(ceiling(Stan_data_list$N / num_chunks))
-              ## (the data's JSON text itself, with the layout's chunk_size, given to the sampler in place of a
+              # chunk_size <-  as.integer(ceiling(Stan_data_list$N / num_chunks))
+              chunk_size <-  fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                   N         = Stan_data_list$N,
+                                   N_chunks  = num_chunks)$chunk_size
+              ## (an auto-chunked library's data also hold N_chunks_of_auto_chunking, first in the JSON text)
+              fn_with_the_chunks_of_auto_chunking <-  function(JSON_text) {
+
+                    if (is.na(num_chunks_of_auto_chunking)) return(JSON_text)
+                    return(sub(pattern = "^\\s*\\{",
+                               replacement = paste0("{\"N_chunks_of_auto_chunking\": ",
+                                                    as.integer(num_chunks_of_auto_chunking), ", "),
+                               x = JSON_text))
+
+              }
+              ## (the data's JSON text itself, with the layout's chunks, given to the sampler in place of a
               ##  file)
               if (isTRUE(pass_the_data_to_the_sampler_as_JSON_text_instead_of_a_file) &&
                   !is.null(JSON_text_of_Stan_data_list)) {
-                    return(fn_JSON_text_of_Stan_data_list_with_chunk_size(
-                                 JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
-                                 chunk_size                   = chunk_size))
+                    # return(fn_JSON_text_of_Stan_data_list_with_chunk_size(
+                    #              JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
+                    #              chunk_size                   = chunk_size))
+                    return(fn_with_the_chunks_of_auto_chunking(
+                                 JSON_text = fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                   JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
+                                                   N                            = Stan_data_list$N,
+                                                   N_chunks                     = num_chunks)))
               }
               if (is.null(JSON_text_of_Stan_data_list)) {
                     json_file_path <-  tempfile(pattern = paste0("sampling_chunks_", num_chunks, "_"),
                                                 fileext = ".json")
-                    Stan_data_of_layout <-  Stan_data_list
-                    Stan_data_of_layout$chunk_size <-  chunk_size
+                    # Stan_data_of_layout <-  Stan_data_list
+                    # Stan_data_of_layout$chunk_size <-  chunk_size
+                    Stan_data_of_layout <-  fn_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                  Stan_data_list  = Stan_data_list,
+                                                  N_chunks        = num_chunks)
+                    if (!is.na(num_chunks_of_auto_chunking)) {
+                          Stan_data_of_layout$N_chunks_of_auto_chunking <-  as.integer(
+                                                                                 num_chunks_of_auto_chunking)
+                    }
                     cmdstanr::write_stan_json(data = Stan_data_of_layout, file = json_file_path)
                     return(normalizePath(json_file_path, mustWork = TRUE))
               }
-              ## (the file of this data text and chunk size, if this R process has written it already: the key
-              ##  is the text's length in bytes and the chunk size, and the text itself is compared, so that two
+              ## (the file of this data text and N_chunks, if this R process has written it already: the key is
+              ##  the text's length in bytes and the N_chunks (two N_chunks with one chunk_size have the same
+              ##  chunks, so the same data, kept once per N_chunks), and the text itself is compared, so that two
               ##  data sets of the same length never share a file)
+              # key_of_data_file <-  paste0(nchar(JSON_text_of_Stan_data_list, type = "bytes"),
+              #                             "_bytes_chunk_size_", chunk_size)
               key_of_data_file <-  paste0(nchar(JSON_text_of_Stan_data_list, type = "bytes"),
-                                          "_bytes_chunk_size_", chunk_size)
+                                          "_bytes_N_chunks_", num_chunks,
+                                          "_N_chunks_of_auto_chunking_", num_chunks_of_auto_chunking)
               data_file_kept <-  environment_of_the_data_files_of_each_chunk_size_written_by_this_R_process[[
                                        key_of_data_file]]
               if (!is.null(data_file_kept) &&
@@ -177,11 +249,17 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                   file.exists(data_file_kept$json_file_path)) {
                     return(data_file_kept$json_file_path)
               }
-              json_file_path <-  tempfile(pattern = paste0("sampling_data_chunk_size_", chunk_size, "_"),
+              json_file_path <-  tempfile(pattern = paste0("sampling_data_chunk_size_", chunk_size, "_N_chunks_",
+                                                           num_chunks, "_"),
                                           fileext = ".json")
-              JSON_text_of_layout <-  sub(pattern = "\"chunk_size\":[[:space:]]*[0-9]+",
-                                          replacement = paste0("\"chunk_size\": ", chunk_size),
-                                          x = JSON_text_of_Stan_data_list)
+              # JSON_text_of_layout <-  sub(pattern = "\"chunk_size\":[[:space:]]*[0-9]+",
+              #                             replacement = paste0("\"chunk_size\": ", chunk_size),
+              #                             x = JSON_text_of_Stan_data_list)
+              JSON_text_of_the_chunks <-  fn_JSON_text_of_Stan_data_list_with_the_chunks_of_N_chunks(
+                                                JSON_text_of_Stan_data_list  = JSON_text_of_Stan_data_list,
+                                                N                            = Stan_data_list$N,
+                                                N_chunks                     = num_chunks)
+              JSON_text_of_layout <-  fn_with_the_chunks_of_auto_chunking(JSON_text = JSON_text_of_the_chunks)
               writeChar(object = JSON_text_of_layout, con = json_file_path, eos = NULL, useBytes = TRUE)
               json_file_path <-  normalizePath(json_file_path, mustWork = TRUE)
               assign(x = key_of_data_file,
@@ -209,7 +287,7 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                                    fn_data_files_kept_for_this_R_process())), add = TRUE)
         ##
         ## ---- the sampler's arguments: diffusion HMC (kick-flow-kick), a fixed trajectory of L_main leapfrog
-        ##      "r we using dense metric for these? if so, fucking dont, use diag"):
+        ##      steps and a diagonal main metric:
         ##
         EHMC_args_as_Rcpp_List <-  init_EHMC_args_as_Rcpp_List( diffusion_HMC            = TRUE,
                                                                 diffusion_HMC_integrator = "kick_flow_kick")
@@ -221,12 +299,8 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
         EHMC_args_as_Rcpp_List$store_log_lik_trace <-  FALSE
         EHMC_Metric_as_Rcpp_List <-  init_EHMC_Metric_as_Rcpp_List( n_params_main     = n_params_main,
                                                                     n_nuisance        = n_nuisance,
-                                                                    # metric_shape_main = "dense")
-                                                                    ##  21:3x: "DENSE METRIC REMEMBER. USE DENSE";
-                                                                    ##  "EVERYWHERE": the main blocks are small
-                                                                    ##  now that every nuisance block is named)
-                                                                    # metric_shape_main = "diag")
-                                                                    metric_shape_main = "dense")
+                                                                    ##  a diagonal main metric, as Stan's
+                                                                    metric_shape_main = "diag")
         stopifnot(nuisance_metric_of_the_timings %in% c("identity", "diagonal"))
         if (nuisance_metric_of_the_timings == "diagonal" && n_nuisance > 0) {
 
@@ -339,7 +413,16 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
               time_layout_start <-  proc.time()[["elapsed"]]
               n_chains <-  layouts$n_chains[layout_index]
               n_threads_WCP <-  layouts$n_threads_WCP[layout_index]
-              json_file_path <-  fn_write_JSON_data_file_of_layout(layouts$num_chunks[layout_index])
+              chunks_of_the_layout <-  fn_chunks_of_the_layout(layout_index = layout_index)
+              if (library_is_auto_chunked) {
+                    message(paste0("layout ", layout_index, ": ", n_chains, " chains x ", n_threads_WCP,
+                                   " threads; chunks of the model's reduce_sum ", chunks_of_the_layout$num_chunks,
+                                   ", of AUTO-CHUNKING ", chunks_of_the_layout$num_chunks_of_auto_chunking))
+              }
+              json_file_path <-  fn_write_JSON_data_file_of_layout(
+                                       num_chunks                   = chunks_of_the_layout$num_chunks,
+                                       num_chunks_of_auto_chunking  =
+                                             chunks_of_the_layout$num_chunks_of_auto_chunking)
               json_file_paths <-  c(json_file_paths, json_file_path)
               Model_args_as_Rcpp_List <-  init_object$Model_args_as_Rcpp_List
               Model_args_as_Rcpp_List$json_file_path <-  json_file_path
@@ -411,41 +494,19 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                     ## (0 allowed: the timed window then starts at the chain's first iteration, so that the
                     ##  check of the timing method can measure what the untimed iteration absorbs)
                     n_untimed_iterations <-  max(0, n_iterations_of_untimed_warm_up_call)
-                    ## (the timed iterations: as given; otherwise enough for minimum_seconds_per_timing, from the
-                    ##  seconds per iteration of the previous layout of this call, or, for the first layout, of a
-                    ##  sizing call of one untimed and one timed iteration)
-                    n_timed_iterations <-  n_iterations_of_long_call
-                    if (is.null(n_timed_iterations)) {
-                          if (is.na(seconds_per_iteration_of_previous_layout)) {
-                                EHMC_args_of_sizing_call <-  EHMC_args_as_Rcpp_List
-                                EHMC_args_of_sizing_call$n_untimed_iterations_before_timed_iterations <-  1
-                                EHMC_args_of_sizing_call$release_memory_of_the_Stan_model_after_sampling <-  0
-                                EHMC_args_as_Rcpp_List_of_all_calls <-  EHMC_args_as_Rcpp_List
-                                EHMC_args_as_Rcpp_List <-  EHMC_args_of_sizing_call
-                                sizing_call <-  fn_timed_call(function() fn_sampling_call(2, 1))
-                                EHMC_args_as_Rcpp_List <-  EHMC_args_as_Rcpp_List_of_all_calls
-                                seconds_per_iteration_of_previous_layout <-
-                                      max(sizing_call$seconds_of_timed_iterations_of_each_chain)
-                                ##  the chains did not run it (seen on the laptop with the per-chain TBB arena,
-                                ##  SV AVX2 at N = 500: the iteration count became Inf, as.integer gave NA and
-                                ##  the sampler died with std::bad_alloc); stopped here with the cause instead)
-                                if (!is.finite(seconds_per_iteration_of_previous_layout) ||
-                                    (seconds_per_iteration_of_previous_layout < 1e-6)) {
-
-                                      stop(paste0("The sizing call of the first layout (", n_chains, " chains x ",
-                                                  n_threads_WCP, " threads, ", layouts$num_chunks[layout_index],
-                                                      " chunks) measured ",
-                                                  signif(seconds_per_iteration_of_previous_layout, 3),
-                                                  " seconds for its timed iteration: the chains did not run it ",
-                                                  "(timed seconds of each chain: ",
-                                                  paste(signif(
-                                                        sizing_call$seconds_of_timed_iterations_of_each_chain, 3),
-                                                        collapse = ", "), ")."))
-                                }
-
-                          }
-                          n_timed_iterations <-  max(3, ceiling(minimum_seconds_per_timing /
-                                                                seconds_per_iteration_of_previous_layout))
+                    ##
+                    ## ---- Each layout starts with its shortest call -----------------------------------------------------------------
+                    ##
+                    L_of_this_layout <-  L_main
+                    predicted_seconds_of_call <-  NA_real_
+                    seconds_per_iteration_measured <-  NA_real_
+                    sizing_the_layout <-  seconds_cap > 0
+                    if (sizing_the_layout) {
+                          n_timed_iterations <-  1L
+                          L_of_this_layout <-  1L
+                    } else {
+                          n_timed_iterations <-  n_iterations_of_long_call
+                          if (is.null(n_timed_iterations)) n_timed_iterations <-  1L
                     }
                     EHMC_args_of_one_call <-  EHMC_args_as_Rcpp_List
                     EHMC_args_of_one_call$n_untimed_iterations_before_timed_iterations <-
@@ -459,7 +520,15 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                     }
                     EHMC_args_as_Rcpp_List_of_all_calls <-  EHMC_args_as_Rcpp_List
                     sampling_timing_attempts <-  list()
+                    lowering_L_between_straddling_counts <-  FALSE
+                    longest_call_under_cap <-  NULL
+                    use_longest_call_under_cap <-  FALSE
+                    ##
+                    ## ---- Measure and resize each layout -----------------------------------------------------------------------------
+                    ##
                     repeat {
+                          EHMC_args_of_one_call$tau_main <-  L_of_this_layout * eps_main
+                          EHMC_args_of_one_call$tau_us <-  L_of_this_layout * eps_main
                           EHMC_args_as_Rcpp_List <-  EHMC_args_of_one_call
                           one_call <-  fn_timed_call(function() fn_sampling_call(n_untimed_iterations +
                                                                                 n_timed_iterations, 1))
@@ -478,6 +547,13 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                           attempt <-  data.frame(
                                 attempt_index             = length(sampling_timing_attempts) + 1,
                                 n_timed_iterations        = n_timed_iterations,
+                                L                         = L_of_this_layout,
+                                seconds_cap               = seconds_cap,
+                                band_lower_seconds        = max(0, seconds_cap - 0.1),
+                                predicted_seconds         = predicted_seconds_of_call,
+                                shortest_call             = n_timed_iterations == 1 && L_of_this_layout == 1,
+                                in_band                   = seconds_of_timed_iterations <= seconds_cap &&
+                                      seconds_of_timed_iterations >= max(0, seconds_cap - 0.1),
                                 seconds_of_timed_iterations = seconds_of_timed_iterations,
                                 wall_seconds              = one_call$seconds,
                                 user_CPU_seconds          = one_call$user_CPU_seconds,
@@ -486,24 +562,139 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                                 counter_snapshot_after    = one_call$snapshot_after,
                                 n_divergent_transitions    = one_call$n_divergent_transitions,
                                 n_transitions             = one_call$n_transitions,
-                                minimum_seconds_argument_value = minimum_seconds_per_timing,
-                                minimum_seconds_argument_was_given = minimum_seconds_argument_was_given,
-                                minimum_seconds_enforced = minimum_seconds_enforced_for_this_call,
-                                qualifies_for_requested_minimum =
-                                      if (minimum_seconds_enforced_for_this_call > 0)
-                                            seconds_of_timed_iterations >= minimum_seconds_enforced_for_this_call
-                                      else NA)
+                                seconds_setting           = minimum_seconds_per_timing)
                           attempt$seconds_of_timed_iterations_of_each_chain <-
                                 I(list(seconds_of_timed_iterations_of_each_chain))
                           sampling_timing_attempts[[length(sampling_timing_attempts) + 1]] <-  attempt
-                          if (minimum_seconds_enforced_for_this_call <= 0 ||
-                              seconds_of_timed_iterations >= minimum_seconds_enforced_for_this_call) break
-                          n_timed_iterations <-  ceiling(1.1 * n_timed_iterations *
-                                                          minimum_seconds_enforced_for_this_call /
-                                                          seconds_of_timed_iterations)
-                          if (!is.finite(n_timed_iterations) || n_timed_iterations > .Machine$integer.max) {
-                                stop("The sampling iteration count needed for the timed minimum is too large.")
+                          if (seconds_cap <= 0) break
+                          ##
+                          ## ---- Retain the longest measured call below the cap ---------------------------------------------------------
+                          ##
+                          if (seconds_of_timed_iterations <= seconds_cap &&
+                              (is.null(longest_call_under_cap) ||
+                               seconds_of_timed_iterations > longest_call_under_cap$seconds)) {
+
+                                longest_call_under_cap <-  list(
+                                      seconds = seconds_of_timed_iterations,
+                                      one_call = one_call,
+                                      iterations = n_timed_iterations,
+                                      L = L_of_this_layout,
+                                      predicted = predicted_seconds_of_call)
+
                           }
+                          ##
+                          ## ---- Bound noisy resizing without interrupting a sampling call ------------------------------------------------
+                          ##
+                          if (length(sampling_timing_attempts) >= 2 * L_main + 4 &&
+                              !is.null(longest_call_under_cap)) {
+
+                                use_longest_call_under_cap <-  TRUE
+                                break
+
+                          }
+                          seconds_per_iteration_measured <-  seconds_of_timed_iterations / n_timed_iterations
+                          if (sizing_the_layout) {
+                                sizing_the_layout <-  FALSE
+                                if (seconds_of_timed_iterations > seconds_cap) break
+                                L_of_this_layout <-  max(1, min(L_main,
+                                      floor(seconds_cap / seconds_per_iteration_measured)))
+                                n_timed_iterations <-  max(1, floor(seconds_cap /
+                                      (L_of_this_layout * seconds_per_iteration_measured)))
+                                predicted_seconds_of_call <-  n_timed_iterations * L_of_this_layout *
+                                      seconds_per_iteration_measured
+                                if (n_timed_iterations == 1 && L_of_this_layout == 1 &&
+                                    seconds_of_timed_iterations < max(0, seconds_cap - 0.1)) {
+                                      n_timed_iterations <-  2L
+                                }
+                                next
+                          }
+                          if (seconds_of_timed_iterations <= seconds_cap) {
+                                if (seconds_of_timed_iterations >= max(0, seconds_cap - 0.1)) break
+                                if (lowering_L_between_straddling_counts) {
+                                      use_longest_call_under_cap <-  TRUE
+                                      break
+                                }
+                                seconds_per_step_measured <-  seconds_per_iteration_measured / L_of_this_layout
+                                L_next <-  min(L_main, max(1, floor(seconds_cap / seconds_per_step_measured)))
+                                iterations_next <-  max(1, floor(seconds_cap /
+                                      (L_next * seconds_per_step_measured)))
+                                tried_next <-  vapply(sampling_timing_attempts, function(previous) {
+                                      previous$L == L_next && previous$n_timed_iterations == iterations_next
+                                }, logical(1))
+                                ##
+                                ## ---- Adjacent iteration counts straddle the band -------------------------------------------------------
+                                ##
+                                if (any(tried_next)) {
+
+                                      if (lowering_L_between_straddling_counts) {
+                                            use_longest_call_under_cap <-  TRUE
+                                            break
+                                      }
+                                      larger_count <-  n_timed_iterations + 1L
+                                      over_at_this_L <-  vapply(sampling_timing_attempts, function(previous) {
+
+                                            previous$L == L_of_this_layout &&
+                                                  previous$n_timed_iterations == larger_count &&
+                                                  previous$seconds_of_timed_iterations > seconds_cap
+
+                                      }, logical(1))
+                                      n_timed_iterations <-  larger_count
+                                      lowering_L_between_straddling_counts <-  TRUE
+                                      if (any(over_at_this_L) && L_of_this_layout > 1) {
+                                            L_of_this_layout <-  L_of_this_layout - 1L
+                                      }
+                                      predicted_seconds_of_call <-  n_timed_iterations * L_of_this_layout *
+                                            seconds_per_step_measured
+                                      next
+
+                                }
+                                L_of_this_layout <-  L_next
+                                n_timed_iterations <-  iterations_next
+                                predicted_seconds_of_call <-  n_timed_iterations * L_of_this_layout *
+                                      seconds_per_step_measured
+                                next
+                          }
+                          ##
+                          ## ---- Keep the larger count while closing a measured gap -----------------------------------------------------
+                          ##
+                          if (lowering_L_between_straddling_counts) {
+
+                                if (L_of_this_layout <= 1) {
+                                      use_longest_call_under_cap <-  TRUE
+                                      break
+                                }
+                                L_of_this_layout <-  L_of_this_layout - 1L
+                                predicted_seconds_of_call <-  n_timed_iterations * seconds_per_iteration_measured *
+                                      L_of_this_layout / attempt$L
+                                next
+
+                          }
+                          if (n_timed_iterations > 1) {
+                                n_timed_iterations <-  max(1, min(n_timed_iterations - 1,
+                                      floor(n_timed_iterations * seconds_cap / seconds_of_timed_iterations)))
+                          } else if (L_of_this_layout > 1) {
+                                L_of_this_layout <-  max(1, min(L_of_this_layout - 1,
+                                      floor(L_of_this_layout * seconds_cap / seconds_of_timed_iterations)))
+                          } else {
+                                break
+                          }
+                          predicted_seconds_of_call <-  n_timed_iterations * seconds_per_iteration_measured *
+                                L_of_this_layout / attempt$L
+
+                    }
+                    ##
+                    ## ---- Keep a measured under-cap call when whole counts miss the band -------------------------------------------------
+                    ##
+                    if (use_longest_call_under_cap) {
+
+                          one_call <-  longest_call_under_cap$one_call
+                          n_timed_iterations <-  longest_call_under_cap$iterations
+                          L_of_this_layout <-  longest_call_under_cap$L
+                          predicted_seconds_of_call <-  longest_call_under_cap$predicted
+                          seconds_of_timed_iterations <-  longest_call_under_cap$seconds
+                          seconds_of_timed_iterations_of_each_chain <-
+                                one_call$seconds_of_timed_iterations_of_each_chain
+
                     }
                     sampling_timing_attempts <-  do.call(rbind, sampling_timing_attempts)
                     layouts$n_timed_sampling_attempts[layout_index] <-  nrow(sampling_timing_attempts)
@@ -521,6 +712,19 @@ fn_time_sampling_of_Stan_model_for_each_layout <-  function( init_object,
                           reserved = TRUE)
                     seconds_per_iteration <-  max(seconds_of_timed_iterations_of_each_chain) / n_timed_iterations
                     seconds_per_iteration_of_previous_layout <-  seconds_per_iteration
+                    layouts$L_of_the_timed_call[layout_index] <-  L_of_this_layout
+                    layouts$seconds_cap[layout_index] <-  seconds_cap
+                    layouts$predicted_seconds_of_timed_call[layout_index] <-  predicted_seconds_of_call
+                    layouts$actual_seconds_of_timed_call[layout_index] <-  seconds_of_timed_iterations
+                    layouts$in_band[layout_index] <-  seconds_cap > 0 &&
+                          seconds_of_timed_iterations >= max(0, seconds_cap - 0.1) &&
+                          seconds_of_timed_iterations <= seconds_cap
+                    layouts$used_longest_call_under_cap[layout_index] <-  use_longest_call_under_cap
+                    layouts$shortest_call_exceeds_cap[layout_index] <-  seconds_cap > 0 &&
+                          seconds_of_timed_iterations > seconds_cap && n_timed_iterations == 1 &&
+                          L_of_this_layout == 1
+                    layouts$seconds_per_iteration_at_requested_L[layout_index] <-
+                          seconds_per_iteration * L_main / L_of_this_layout
                     layouts$seconds_per_iteration[layout_index] <-  seconds_per_iteration
                     layouts$seconds_per_draw_over_all_chains[layout_index] <-  seconds_per_iteration / n_chains
                     layouts$timed_by_chains_seconds_of_the_sampler[layout_index] <-  TRUE

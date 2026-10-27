@@ -24,9 +24,10 @@
 //
 // with every constant (log choose(n_previous_k, n_k)) unless propto, as binomial_lpmf, in ONE autodiff node in
 // place of about eight: the forward pass and the reverse pass over all K elements, with BayesMVP's SIMD kernels
-// for Phi, inv_logit, exp, log and log1m (the same kernels as nico_Phi, nico_inv_logit and nico_binomial_lpmf,
-// so the same values), and the element-wise arithmetic in branch-free loops over the elements (each element
-// reads only its own values and its predecessor's S, so there is no recurrence and the compiler vectorises them).
+// for Phi, inv_logit, exp and log, the double-precision log1m (the same kernels as nico_Phi, nico_inv_logit and
+// nico_binomial_lpmf, so the same values), and the element-wise arithmetic in branch-free loops over the elements
+// (each element reads only its own values and its predecessor's S, so there is no recurrence and the compiler
+// vectorises them).
 // The counts are checked as in nico_binomial_lpmf: Stan's checks run only when the pass over the values finds a
 // bad one.
 //
@@ -103,7 +104,7 @@ inline bool forward_pass(const int* n, const int* n_previous, const double* late
         log1m_p[k] = after_fmax;
     }
     k_log(log_p, K);
-    k_log1m(log1m_p, K);
+    binomial::log1m_in_double_precision(log1m_p, K);
     double total = 0.0;
     for (int k = 0; k < K; ++k) {
         const double successes = n[k];

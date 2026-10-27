@@ -20,7 +20,7 @@
 // row by row (beta_raw[1, 1], beta_raw[1, 2], beta_raw[2, 1], ...) in place of column by column; the names are
 // the same.
 // The chunks: N_chunks = ceiling(N / chunk_size), from NicoStan's chunk_size of the observations (N, the units
-// of the chunks), each of groups_per_chunk = ceiling(K / N_chunks) groups (the grainsize of reduce_sum_static
+// of the chunks), each of groups_per_chunk = ceiling(K / N_chunks) groups (the chunk size of reduce_sum_static
 // over the groups).
 //
 // The header of the tape-chunked model this one comes from (the next 9 lines):
@@ -32,7 +32,7 @@
 // coefficients (and not all K of them); each chunk's term is the original likelihood statement restricted to its
 // groups' observations, vectorised over them. The chunks: N_chunks = ceiling(N / chunk_size), from NicoStan's
 // chunk_size of the observations (N, the units of the chunks), each of groups_per_chunk = ceiling(K / N_chunks)
-// groups (the grainsize of reduce_sum_static over the groups).
+// groups (the chunk size of reduce_sum_static over the groups).
 //
 // The previous tape-chunked model (beta, all K rows, shared by every chunk) is kept below, commented out; its
 // header was (the next 9 lines):
@@ -121,7 +121,7 @@ data {
     array[N] int<lower=1, upper=K> group; // group indicator for each observation
     vector[N] x;                       // predictor variable
     array[N] int<lower=0, upper=1> y;  // binary outcome
-    // int<lower=1> grainsize;            // observations per chunk (reduce_sum_static)
+    // int<lower=1> chunk_size;            // observations per chunk (reduce_sum_static)
     int<lower=1> chunk_size;           // observations per chunk (reduce_sum_static)
 }
 
@@ -191,7 +191,7 @@ model {
     // (added inside the chunks, group by group: see partial_sum_groups_lpdf)
 
     // Likelihood (reduce_sum_static over the observations, in chunks of chunk_size)
-    // target += reduce_sum_static(partial_sum_observations_lupmf, y, grainsize, group, x, beta);
+    // target += reduce_sum_static(partial_sum_observations_lupmf, y, chunk_size, group, x, beta);
     // target += reduce_sum_static(partial_sum_observations_lupmf, y, chunk_size, group, x, beta);
 
     // Likelihood (reduce_sum_static over the groups, in chunks of groups_per_chunk groups, each group's
