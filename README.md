@@ -1505,17 +1505,17 @@ for the other seven models, the rule gave 1 chunk.
 The first four tables below are an estimate, made without new runs, of NicoStan's speed-up over Stan (NUTS) in
 the sampling time per effective sample (the burn-in, which is shorter for NicoStan, is left out), at three N of each
 model, on each machine.
-Each value is NicoStan's speed-up per gradient over the naive Stan model, times NicoStan's minimum ESS per gradient
+Each value is NicoStan's speed-up per gradient over the standard (i.e., non-chunked) Stan model, times NicoStan's minimum ESS per gradient
 over Stan's (i.e., the best NicoStan configuration over the best Stan configuration, over every warm-up / burn-in
 length).
 The speed-up per gradient is that of the faster of NicoStan's two chunking methods, auto-chunking and
 `nico_reduce_sum` (see
-[Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model) and
-[nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model)), from the same saved
+[Auto-chunking over the standard (i.e., non-chunked) Stan model](#auto-chunking-over-the-standard-ie-non-chunked-stan-model) and
+[nico_reduce_sum over the standard (i.e., non-chunked) Stan model](#nico_reduce_sum-over-the-standard-ie-non-chunked-stan-model)), from the same saved
 timings.
 The versions with fused functions (the nico::math model with the fused nico_ functions, and the Stan::math model
-with Stan's fused functions) are compared with the naive Stan model with Stan's fused functions, and the versions
-without fused functions with the naive Stan model without them.
+with Stan's fused functions) are compared with the standard (i.e., non-chunked) Stan model with Stan's fused functions, and the versions
+without fused functions with the standard (i.e., non-chunked) Stan model without them.
 
 NicoStan's minimum ESS per gradient over Stan's is:
 
@@ -1536,7 +1536,7 @@ than that of NUTS.
 
 **Bold**: 10x or more.
 
-**(1) nico::math with the fused nico_ functions, over the naive Stan model with Stan's fused functions:**
+**(1) nico::math with the fused nico_ functions, over the standard (i.e., non-chunked) Stan model with Stan's fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -1547,7 +1547,7 @@ than that of NUTS.
 | Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | **19.6x** | **17.6x** | **130.6x** | **19.9x** | **20.5x** | **54.6x** |
 | Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | **45.9x** | **44.9x** | **277.2x** | **37.3x** | **41.2x** | **126.2x** |
 
-**(2) nico::math without fused functions, over the naive Stan model without fused functions:**
+**(2) nico::math without fused functions, over the standard (i.e., non-chunked) Stan model without fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -1558,7 +1558,7 @@ than that of NUTS.
 | Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | **10.6x** | **15.5x** | **115.2x** | **12.7x** | **12.9x** | **50.8x** |
 | Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | **11.0x** | **10.1x** | **55.7x** | 9.2x | 8.9x | **22.7x** |
 
-**(3) Stan::math with Stan's fused functions, over the naive Stan model with Stan's fused functions:**
+**(3) Stan::math with Stan's fused functions, over the standard (i.e., non-chunked) Stan model with Stan's fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -1568,7 +1568,7 @@ than that of NUTS.
 | Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.6x | **10.6x** | **44.6x** | 1.9x | 7.2x | **21.5x** |
 | Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | 3.5x | 2.6x | **20.8x** | 4.4x | 4.1x | **11.1x** |
 
-**(4) Stan::math without fused functions, over the naive Stan model without fused functions:**
+**(4) Stan::math without fused functions, over the standard (i.e., non-chunked) Stan model without fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -1579,7 +1579,7 @@ than that of NUTS.
 | Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | 9.4x | **14.4x** | **98.1x** | **11.6x** | **10.7x** | **45.9x** |
 | Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | 9.8x | 9.4x | **46.5x** | 8.5x | 8.2x | **21.1x** |
 
-The 4LC-MVOP has only the naive Stan model without fused functions, hence in table (1) it is compared with that
+The 4LC-MVOP has only the standard (i.e., non-chunked) Stan model without fused functions, hence in table (1) it is compared with that
 model; it is not in table (3), since none of its versions uses Stan's fused functions.
 The Stochastic volatility, Latent diffusion survival, Joint longitudinal and survival and Gaussian process
 regression models are not in the auto-chunking and `nico_reduce_sum` tables, hence they have no estimate at these N.
@@ -2067,22 +2067,22 @@ It is turned on with `auto_chunking = TRUE` (`FALSE` turns it off), and it is in
 not yet in the released package.
 
 
-### Auto-chunking over the naive Stan model
+### Auto-chunking over the standard (i.e., non-chunked) Stan model
 
 Each ratio is the sampling speed (`TP_iter`, i.e., iterations per second over all chains, per 10 leapfrog steps) of a
-NicoStan version over that of the naive Stan model: the same model written as a normal Stan model and run with
+NicoStan version over that of the standard (i.e., non-chunked) Stan model: the same model written as a normal Stan model and run with
 Stan::math only, with no chunking of any kind (no `reduce_sum`, no `map_rect`, no auto-chunking).
 Each version is timed at its own fastest layout; each side of a ratio is a median of repeated timings (3 for
-each NicoStan version, 2 or 3 for the naive model).
+each NicoStan version, 2 or 3 for the standard (i.e., non-chunked) model).
 Below each ratio is its layout: chains x threads per chain (number of chunks).
 **Bold**: more than 5x.
 The middle and larger N are 10,000 and 100,000 (Graded response IRT and 4LC-MVOP: 5000 and 50,000).
 The NicoStan versions are the same models, also written as normal Stan models, run with auto-chunking on.
 Comparisons 3 and 4, with `nico_reduce_sum`, are in
-[nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model).
+[nico_reduce_sum over the standard (i.e., non-chunked) Stan model](#nico_reduce_sum-over-the-standard-ie-non-chunked-stan-model).
 
 **Comparison 1:** the nico::math (AVX) model with the fused nico_ functions, auto-chunking on, over the faster of the
-two naive Stan models, with Stan's own fused functions (`student_t` for the Robust Student-t regression,
+two standard (i.e., non-chunked) Stan models, with Stan's own fused functions (`student_t` for the Robust Student-t regression,
 `poisson_log_glm` for the Weibull survival and `bernoulli_logit_glm` for the Hierarchical logistic regression) and
 without them (the 4LC-MVOP has only the one without).
 
@@ -2095,7 +2095,7 @@ without them (the 4LC-MVOP has only the one without).
 | Graded response IRT (500, 5000, 50,000) | 4.59x<br><sub>180 x 1 (1)</sub> | 3.92x<br><sub>180 x 1 (8)</sub> | **5.87x**<br><sub>180 x 1 (128)</sub> | 3.23x<br><sub>16 x 1 (2)</sub> | 2.29x<br><sub>16 x 1 (8)</sub> | 4.77x<br><sub>16 x 1 (128)</sub> |
 | Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP; 500, 5000, 50,000) | **12.48x**<br><sub>180 x 1 (1)</sub> | **17.69x**<br><sub>180 x 1 (32)</sub> | **24.73x**<br><sub>180 x 1 (128)</sub> | **8.42x**<br><sub>16 x 1 (4)</sub> | **8.09x**<br><sub>16 x 1 (64)</sub> | **16.99x**<br><sub>16 x 1 (256)</sub> |
 
-**Comparison 2:** the nico::math (AVX) model without fused functions, auto-chunking on, over the naive Stan model
+**Comparison 2:** the nico::math (AVX) model without fused functions, auto-chunking on, over the standard (i.e., non-chunked) Stan model
 without fused functions.
 
 | Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
@@ -2172,21 +2172,21 @@ rising with N.
 The speed-ups of the nico::math (AVX) versions over Stan::math for every benchmark model are in [AVX-512 and AVX2 speed-ups over Stan::math](#avx-512-and-avx2-speed-ups-over-stanmath).
 
 
-### nico_reduce_sum over the naive Stan model
+### nico_reduce_sum over the standard (i.e., non-chunked) Stan model
 
 Each ratio is the sampling speed (`TP_iter`, i.e., iterations per second over all chains, per 10 leapfrog steps) of a
-NicoStan version over that of the naive Stan model: the same model written as a normal Stan model and run with
+NicoStan version over that of the standard (i.e., non-chunked) Stan model: the same model written as a normal Stan model and run with
 Stan::math only, with no chunking of any kind (no `reduce_sum`, no `map_rect`, no auto-chunking).
 Each version is timed at its own fastest layout; each side of a ratio is a median of repeated timings (3 for
-each NicoStan version, 2 or 3 for the naive model).
+each NicoStan version, 2 or 3 for the standard (i.e., non-chunked) model).
 Below each ratio is its layout: chains x threads per chain (number of chunks).
 **Bold**: more than 5x.
 The middle and larger N are 10,000 and 100,000 (Graded response IRT and 4LC-MVOP: 5000 and 50,000).
 Comparisons 1 and 2, with auto-chunking, are in
-[Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model).
+[Auto-chunking over the standard (i.e., non-chunked) Stan model](#auto-chunking-over-the-standard-ie-non-chunked-stan-model).
 
 **Comparison 3:** the nico::math (AVX) model with the fused nico_ functions and `nico_reduce_sum` (the Shared-frailty
-Cox survival model also with `nico_map_rect`), auto-chunking off, over the faster of the two naive Stan models.
+Cox survival model also with `nico_map_rect`), auto-chunking off, over the faster of the two standard (i.e., non-chunked) Stan models.
 
 | Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -2198,7 +2198,7 @@ Cox survival model also with `nico_map_rect`), auto-chunking off, over the faste
 | Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP; 500, 5000, 50,000) | **10.86x**<br><sub>180 x 1 (2)</sub> | **15.92x**<br><sub>180 x 1 (8)</sub> | **21.07x**<br><sub>180 x 1 (128)</sub> | **7.79x**<br><sub>16 x 1 (2)</sub> | **10.41x**<br><sub>16 x 1 (32)</sub> | **14.96x**<br><sub>16 x 1 (512)</sub> |
 
 **Comparison 4:** the nico::math (AVX) model without fused functions, with `nico_reduce_sum` (the Shared-frailty Cox
-survival model also with `nico_map_rect`), auto-chunking off, over the naive Stan model without fused functions.
+survival model also with `nico_map_rect`), auto-chunking off, over the standard (i.e., non-chunked) Stan model without fused functions.
 
 | Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -2420,7 +2420,7 @@ A speed-up is TP_iter(AVX) / TP_iter(Stan::math), where TP_iter is the number of
 
 Every timed call starts its clock at its first iteration. A timed call with a divergent transition is not used. Where the fastest layouts were timed again 3 times, the speed-up uses the median of the 3 repeats ("median of 3"); otherwise it uses the single timing of the layout search ("single"). Where the two sides differ, the column gives the first version named in "Versions compared" first; a few cases have only 2 repeats ("median of 2").
 
-Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan::math with Stan's reduce_sum, and nico_reduce_sum against nico_reduce_sum. The second table compares nico::math (AVX) with the fused nico_ functions (e.g. the fused GHK) against Stan::math with Stan's fused functions (e.g. bernoulli_logit_glm), for the models where Stan has such a function. The speed-ups of NicoStan over the naive Stan model are in [Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model) (with auto-chunking) and in [nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model) (with nico_reduce_sum). Where a model has more than one Stan file for the same version, the fastest one is used.
+Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan::math with Stan's reduce_sum, and nico_reduce_sum against nico_reduce_sum. The second table compares nico::math (AVX) with the fused nico_ functions (e.g. the fused GHK) against Stan::math with Stan's fused functions (e.g. bernoulli_logit_glm), for the models where Stan has such a function. The speed-ups of NicoStan over the standard (i.e., non-chunked) Stan model are in [Auto-chunking over the standard (i.e., non-chunked) Stan model](#auto-chunking-over-the-standard-ie-non-chunked-stan-model) (with auto-chunking) and in [nico_reduce_sum over the standard (i.e., non-chunked) Stan model](#nico_reduce_sum-over-the-standard-ie-non-chunked-stan-model) (with nico_reduce_sum). Where a model has more than one Stan file for the same version, the fastest one is used.
 
 ### nico::math (AVX) over Stan::math
 
