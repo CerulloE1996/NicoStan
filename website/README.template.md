@@ -1502,10 +1502,15 @@ as given by NicoStan's cache-based chunking rule (`fn_compute_initial_N_chunks()
 for the other seven models, the rule gave 1 chunk.
 
 
-The two tables below give NicoStan's gains over Stan (NUTS): Stan's (projected) time needed to reach a minimum
-ESS of 1000 divided by NicoStan's (the measured warm-up or burn-in time, plus 1000 times the measured sampling
-time divided by the minimum ESS), and NicoStan's minimum ESS per 1000 sampling gradient evaluations divided by
-Stan's
+The two tables below give NicoStan's gains over Stan (NUTS).
+The first is an estimate made without new runs: for each model, the measured speed-up in the (projected) time
+needed to reach a minimum ESS of 1000 (the measured warm-up or burn-in time, plus 1000 times the measured
+sampling time divided by the minimum ESS), with both samplers on the same Stan model and Stan::math, times the
+speed-up per gradient of NicoStan's fastest version of the model over Stan (its last column).
+NicoStan's burn-in and sampling both run its gradient, so a gradient that is k times faster makes its time about
+k times shorter, while Stan's time is unchanged.
+The second table gives the measured minimum ESS per 1000 sampling gradient evaluations of NicoStan over Stan,
+which does not depend on the speed per gradient
 (geometric means over 5 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
 i.e., of the SD, of the main parameters).
 
@@ -1516,41 +1521,66 @@ and NicoStan's those of its burn-in and sampling;
 every timed phase starts its clock at its first iteration (0 untimed iterations),
 and, for both samplers, the times exclude the compilation and loading of the model.
 **Bold**: the higher of the two NicoStan columns of the row (and any within 1% of it).
-The ratios are of the times and minimum ESS values rounded to three significant digits, so they can differ
-by up to 0.1x from the speed-ups given in the text after the tables, which come from the unrounded values.
+
+The speed-ups per gradient are those of Table 21 of Paper 1 at N = 500 on the local-HPC (see
+[Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model-paper-1-table-21) and
+[nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model-paper-1-table-21)):
+the faster of the nico::math (AVX) model with the fused nico_ functions with auto-chunking (Shared-frailty Cox
+survival, Four-class LC-MVOP) or with `nico_reduce_sum` (Hierarchical logistic regression, Weibull survival,
+Robust Student-t regression), over the faster of the two naive Stan models.
+The Stochastic volatility, Latent diffusion survival and Joint longitudinal and survival models are not in
+Table 21, so theirs are those of the nico::math tables of this README at N = 500 on the local-HPC: the nico::math
+(AVX) version with `nico_reduce_sum` over its Stan::math version (Stochastic volatility, see
+[What nico_reduce_sum gives](#what-nico_reduce_sum-gives)); nico::math (AVX) over Stan::math, both with Stan's
+`reduce_sum` (Latent diffusion survival); and nico::math (AVX) with the fused nico_ functions over Stan::math with
+Stan's fused functions, both with Stan's `reduce_sum` (Joint longitudinal and survival).
+NicoStan's version of the Gaussian process regression has not been timed yet, so its measured value is kept.
+
+The Four-class LC-MVOP was not part of this benchmark: its time column is NicoStan's minimum ESS per gradient
+over Stan's, times its speed-up per gradient (its burn-in time is left out), and its minimum ESS per gradient is
+that of the latent class multivariate ordinal probit (LC-MVOP) model of Paper 1's E3 (N = 250, laptop: the best
+NicoStan configuration over the best Stan configuration at each burn-in length; every NicoStan run of this model
+in E3 used diffusion HMC and 125 or 250 burn-in iterations).
+
+The measured ratios are of the times and minimum ESS values rounded to three significant digits, so they can
+differ by up to 0.1x from the measured speed-ups given in the text after the tables, which come from the
+unrounded values.
 
 
-**Speed-up over Stan (NUTS) in the time to reach a minimum ESS of 1000 (Stan's time divided by NicoStan's; higher is better):**
+**Estimated speed-up over Stan (NUTS) in the time to reach a minimum ESS of 1000, with NicoStan's current speed per gradient (higher is better):**
 
-| Model | Stan warm-up iterations | NicoStan burn-in iterations | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
-|---|---:|---:|---:|---:|
-| Stochastic volatility | 250 | 125 | **4.0x** | 3.8x |
-| Stochastic volatility | 500 | 250 | **4.0x** | 3.8x |
-| Stochastic volatility | 1000 | 500 | **3.2x** | 3.1x |
-| Shared-frailty Cox survival | 250 | 125 | **6.6x** | 5.6x |
-| Shared-frailty Cox survival | 500 | 250 | **5.2x** | **5.2x** |
-| Shared-frailty Cox survival | 1000 | 500 | **5.3x** | 4.4x |
-| Latent diffusion survival | 250 | 125 | **3.9x** | **3.9x** |
-| Latent diffusion survival | 500 | 250 | **2.9x** | 2.9x |
-| Latent diffusion survival | 1000 | 500 | **2.1x** | **2.1x** |
-| Joint longitudinal and survival | 250 | 125 | **12.2x** | 11.8x |
-| Joint longitudinal and survival | 500 | 250 | **9.3x** | 9.2x |
-| Joint longitudinal and survival | 1000 | 500 | **7.3x** | **7.3x** |
-| Hierarchical logistic regression | 250 | 125 | **4.6x** | 4.4x |
-| Hierarchical logistic regression | 500 | 250 | **3.2x** | 3.1x |
-| Hierarchical logistic regression | 1000 | 500 | **2.7x** | 2.6x |
-| Gaussian process regression | 250 | 125 | (no nuisance block) | **2.3x** |
-| Gaussian process regression | 500 | 250 | (no nuisance block) | **2.0x** |
-| Gaussian process regression | 1000 | 500 | (no nuisance block) | **1.7x** |
-| Weibull survival | 250 | 125 | (no nuisance block) | **2.3x** |
-| Weibull survival | 500 | 250 | (no nuisance block) | **1.7x** |
-| Weibull survival | 1000 | 500 | (no nuisance block) | **1.1x** |
-| Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **3.1x** |
-| Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **2.6x** |
-| Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **2.2x** |
+| Model | Stan warm-up iterations | NicoStan burn-in iterations | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC | NicoStan's speed-up per gradient used |
+|---|---:|---:|---:|---:|---:|
+| Stochastic volatility | 250 | 125 | **12.1x** | 11.4x | 3.02x |
+| Stochastic volatility | 500 | 250 | **12.2x** | 11.5x | 3.02x |
+| Stochastic volatility | 1000 | 500 | **9.7x** | 9.3x | 3.02x |
+| Shared-frailty Cox survival | 250 | 125 | **12.5x** | 10.4x | 1.88x |
+| Shared-frailty Cox survival | 500 | 250 | **9.8x** | **9.8x** | 1.88x |
+| Shared-frailty Cox survival | 1000 | 500 | **9.9x** | 8.3x | 1.88x |
+| Latent diffusion survival | 250 | 125 | **12.1x** | **12.1x** | 3.09x |
+| Latent diffusion survival | 500 | 250 | **9.1x** | 8.9x | 3.09x |
+| Latent diffusion survival | 1000 | 500 | **6.6x** | **6.6x** | 3.09x |
+| Joint longitudinal and survival | 250 | 125 | **33.7x** | 32.5x | 2.75x |
+| Joint longitudinal and survival | 500 | 250 | **25.5x** | 25.2x | 2.75x |
+| Joint longitudinal and survival | 1000 | 500 | **20.1x** | **20.0x** | 2.75x |
+| Hierarchical logistic regression | 250 | 125 | **10.0x** | 9.6x | 2.16x |
+| Hierarchical logistic regression | 500 | 250 | **6.9x** | 6.8x | 2.16x |
+| Hierarchical logistic regression | 1000 | 500 | **5.8x** | 5.7x | 2.16x |
+| Gaussian process regression | 250 | 125 | (no nuisance block) | **2.3x** | not timed (measured value kept) |
+| Gaussian process regression | 500 | 250 | (no nuisance block) | **2.0x** | not timed (measured value kept) |
+| Gaussian process regression | 1000 | 500 | (no nuisance block) | **1.7x** | not timed (measured value kept) |
+| Weibull survival | 250 | 125 | (no nuisance block) | **9.5x** | 4.11x |
+| Weibull survival | 500 | 250 | (no nuisance block) | **7.0x** | 4.11x |
+| Weibull survival | 1000 | 500 | (no nuisance block) | **4.6x** | 4.11x |
+| Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **16.6x** | 5.40x |
+| Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **14.1x** | 5.40x |
+| Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **12.0x** | 5.40x |
+| Four-class LC-MVOP | 250 | 125 | **27.7x** | (not run) | 12.48x |
+| Four-class LC-MVOP | 500 | 250 | **31.6x** | (not run) | 12.48x |
+| Four-class LC-MVOP | 1000 | 500 | (no NicoStan run with 500 burn-in iterations) | (not run) | 12.48x |
 
 
-**Minimum ESS per 1000 sampling gradient evaluations, NicoStan over Stan (NUTS) (higher is better):**
+**Minimum ESS per 1000 sampling gradient evaluations, NicoStan over Stan (NUTS) (measured; higher is better):**
 
 | Model | Stan warm-up iterations | NicoStan burn-in iterations | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
 |---|---:|---:|---:|---:|
@@ -1578,9 +1608,13 @@ by up to 0.1x from the speed-ups given in the text after the tables, which come 
 | Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **1.5x** |
 | Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **2.0x** |
 | Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **2.0x** |
+| Four-class LC-MVOP | 250 | 125 | **2.2x** | (not run) |
+| Four-class LC-MVOP | 500 | 250 | **2.5x** | (not run) |
+| Four-class LC-MVOP | 1000 | 500 | (no NicoStan run with 500 burn-in iterations) | (not run) |
 
 
-NicoStan reached the target faster than Stan for every model and warm-up / burn-in length.
+With the same Stan model and Stan::math on both sides (the measured times, before the estimate above), NicoStan
+reached the target faster than Stan for every model and warm-up / burn-in length.
 
 
 For the fastest configuration of each sampler (for every model, Stan's 250 warm-up iterations and NicoStan's
