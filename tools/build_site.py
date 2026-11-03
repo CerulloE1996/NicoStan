@@ -252,7 +252,8 @@ benchmark_models = [
     ("Spatial logistic regression with a Hilbert space approximate Gaussian process",
      "spatial_logistic_regression_with_a_Hilbert_space_approximate_Gaussian_process"),
     ("Four-class latent class multivariate ordinal probit (LC-MVOP)", "four_class_LC_MVOP"),
-    ("Network meta-analysis of test accuracy (Xu et al., fixed cutpoints)",
+    ("Network meta-analysis of test accuracy (ordinal-bivariate model, Cerullo et al, 2025, "
+     "fixed-effects cutpoints)",
      "network_meta_analysis_Xu_fixed_cutpoints"),
 ]
 kinds_of_benchmark_file = [("unchunked, with Stan's fused functions",

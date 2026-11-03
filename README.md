@@ -10,6 +10,7 @@
 [Automatic test (column) reordering](#automatic-test-column-reordering) ·
 [Benchmarks](#benchmarks) ·
 [Models with nuisance parameters (diffusion-pathspace HMC)](#models-with-nuisance-parameters-diffusion-pathspace-hmc) ·
+[Auto-chunking](#auto-chunking) ·
 [nico_reduce_sum and nico_map_rect](#nico_reduce_sum-and-nico_map_rect) ·
 [AVX-512 and AVX2 speed-ups over Stan::math](#avx-512-and-avx2-speed-ups-over-stanmath) ·
 [How NicoStan works](#how-nicostan-works) ·
@@ -1028,17 +1029,17 @@ The R script prints the posterior means of the correlation matrix from both fits
 within MCMC error).
 
 
-### Example 4: network meta-analysis of test accuracy with multiple thresholds (MetaOrdDTA's Xu model)
+### Example 4: network meta-analysis of test accuracy with multiple thresholds (MetaOrdDTA's ordinal-bivariate model)
 
 
 [MetaOrdDTA](https://github.com/CerulloE1996/MetaOrdDTA)'s network meta-analysis (NMA) model of diagnostic test
-accuracy, i.e., the NMA model of Nyaga et al.
-([ANOVA model for network meta-analysis of diagnostic test accuracy data](https://doi.org/10.1177/0962280216669182))
-with the fixed cutpoints of Xu et al.
-([Evaluating accuracy of diagnostic tests with intermediate results in the absence of a gold standard](https://doi.org/10.1002/sim.5695)),
+accuracy, i.e., the NMA extension of the ordinal-bivariate model
+([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)) with fixed-effects cutpoints,
+which uses the arm-based NMA structure of Nyaga et al.
+([ANOVA model for network meta-analysis of diagnostic test accuracy data](https://doi.org/10.1177/0962280216669182)),
 is a [Stan](https://mc-stan.org/) model which NicoStan fits unchanged.
 The model and MetaOrdDTA are described in
-[Ordinal regression for meta-analysis of test accuracy: a flexible approach for utilising all threshold data](https://arxiv.org/abs/2505.23393).
+[Ordinal regression for meta-analysis of test accuracy: a flexible approach for utilizing all threshold data](https://arxiv.org/abs/2505.23393).
 In this model, each test has one set of cutpoints per disease class, shared by every study.
 
 
@@ -1257,7 +1258,7 @@ the other three scripts name their nuisance blocks with `nuisance_params`.
 | Robust Student-t regression | none | [robust_regression_t4.stan](inst/examples/models/robust_regression_t4.stan) | [robust_regression_t4_avx.stan](inst/examples/models/robust_regression_t4_avx.stan) (`nico_log1p`) | - | [Run_robust_t4_regression.R](inst/examples/Run_robust_t4_regression.R) (N = 250, 1000, 3000) |
 | Gaussian process regression (marginal) | none (the latent GP is integrated out) | [Gaussian_process.stan](inst/examples/models/Gaussian_process.stan) | [Gaussian_process_avx.stan](inst/examples/models/Gaussian_process_avx.stan) (`nico_exp`) | - | [Run_Gaussian_process.R](inst/examples/Run_Gaussian_process.R) (N = 40, 80, 160) |
 | One-class multivariate ordered probit (the real NHANES data of the [hexbin](https://cran.r-project.org/package=hexbin) package) | `u_raw[N]` (row vectors) | - | - | `one_class_MVOP_with_the_fused_GHK_log_likelihood.stan` (NicoSIMD's fused GHK function) | `Run_one_class_MVOP_with_the_fused_GHK_log_likelihood_and_BayesMVP.R` (N = 9575) |
-| Network meta-analysis of test accuracy, Xu model with fixed cutpoints ([MetaOrdDTA](https://github.com/CerulloE1996/MetaOrdDTA)) | `beta_eta_z`, `beta_delta_z_vec` | [DTA_NMA_Nyaga_Xu_FIXEDthr.stan](https://github.com/CerulloE1996/MetaOrdDTA/blob/main/inst/stan_models/stan_models_NMA/DTA_NMA_Nyaga_Xu_FIXEDthr.stan) (in MetaOrdDTA) | - | [DTA_NMA_Nyaga_Xu_FIXEDthr_NicoStan_fused_AVX.stan](https://github.com/CerulloE1996/MetaOrdDTA/blob/main/inst/stan_models/stan_models_NMA/DTA_NMA_Nyaga_Xu_FIXEDthr_NicoStan_fused_AVX.stan) (in MetaOrdDTA) | `Run_network_meta_analysis_of_test_accuracy_Xu_fixed_cutpoints_with_MetaOrdDTA_and_NicoStan.R` (simulated data, 80 studies) |
+| Network meta-analysis of test accuracy, ordinal-bivariate model ([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)) with fixed-effects cutpoints ([MetaOrdDTA](https://github.com/CerulloE1996/MetaOrdDTA)) | `beta_eta_z`, `beta_delta_z_vec` | [DTA_NMA_Nyaga_Xu_FIXEDthr.stan](https://github.com/CerulloE1996/MetaOrdDTA/blob/main/inst/stan_models/stan_models_NMA/DTA_NMA_Nyaga_Xu_FIXEDthr.stan) (in MetaOrdDTA) | - | [DTA_NMA_Nyaga_Xu_FIXEDthr_NicoStan_fused_AVX.stan](https://github.com/CerulloE1996/MetaOrdDTA/blob/main/inst/stan_models/stan_models_NMA/DTA_NMA_Nyaga_Xu_FIXEDthr_NicoStan_fused_AVX.stan) (in MetaOrdDTA) | `Run_network_meta_analysis_of_test_accuracy_Xu_fixed_cutpoints_with_MetaOrdDTA_and_NicoStan.R` (simulated data, 80 studies) |
 
 
 The one-class multivariate ordered probit has no Stan::math version, because Stan has no fused GHK function;
@@ -1501,9 +1502,10 @@ as given by NicoStan's cache-based chunking rule (`fn_compute_initial_N_chunks()
 for the other seven models, the rule gave 1 chunk.
 
 
-The two tables below show the (projected) time needed to reach a minimum ESS of 1000
-(the measured warm-up or burn-in time, plus 1000 times the measured sampling time divided by the minimum ESS;
-in seconds) and the minimum ESS per 1000 sampling gradient evaluations
+The two tables below give NicoStan's gains over Stan (NUTS): Stan's (projected) time needed to reach a minimum
+ESS of 1000 divided by NicoStan's (the measured warm-up or burn-in time, plus 1000 times the measured sampling
+time divided by the minimum ESS), and NicoStan's minimum ESS per 1000 sampling gradient evaluations divided by
+Stan's
 (geometric means over 5 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
 i.e., of the SD, of the main parameters).
 
@@ -1513,67 +1515,69 @@ for the sampling, this includes the staggered launch of its 180 processes),
 and NicoStan's those of its burn-in and sampling;
 every timed phase starts its clock at its first iteration (0 untimed iterations),
 and, for both samplers, the times exclude the compilation and loading of the model.
-**Bold**: the best of the row for each endpoint (and any within 1% of it).
+**Bold**: the higher of the two NicoStan columns of the row (and any within 1% of it).
+The ratios are of the times and minimum ESS values rounded to three significant digits, so they can differ
+by up to 0.1x from the speed-ups given in the text after the tables, which come from the unrounded values.
 
 
-**Time to reach a minimum ESS of 1000 (seconds; lower is better):**
+**Speed-up over Stan (NUTS) in the time to reach a minimum ESS of 1000 (Stan's time divided by NicoStan's; higher is better):**
 
-| Model | Stan warm-up iterations | NicoStan burn-in iterations | Stan (NUTS) | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
-|---|---:|---:|---:|---:|---:|
-| Stochastic volatility | 250 | 125 | 2.08 | **0.52** | 0.55 |
-| Stochastic volatility | 500 | 250 | 2.90 | **0.72** | 0.76 |
-| Stochastic volatility | 1000 | 500 | 3.93 | **1.22** | 1.27 |
-| Shared-frailty Cox survival | 250 | 125 | 10.5 | **1.58** | 1.89 |
-| Shared-frailty Cox survival | 500 | 250 | 14.4 | **2.77** | **2.76** |
-| Shared-frailty Cox survival | 1000 | 500 | 22.3 | **4.23** | 5.06 |
-| Latent diffusion survival | 250 | 125 | 1.17 | 0.30 | **0.30** |
-| Latent diffusion survival | 500 | 250 | 1.47 | **0.50** | 0.51 |
-| Latent diffusion survival | 1000 | 500 | 1.91 | **0.89** | **0.89** |
-| Joint longitudinal and survival | 250 | 125 | 13.1 | **1.07** | 1.11 |
-| Joint longitudinal and survival | 500 | 250 | 15.3 | **1.65** | 1.67 |
-| Joint longitudinal and survival | 1000 | 500 | 19.7 | **2.69** | **2.71** |
-| Hierarchical logistic regression | 250 | 125 | 1.29 | **0.28** | 0.29 |
-| Hierarchical logistic regression | 500 | 250 | 1.60 | **0.50** | **0.51** |
-| Hierarchical logistic regression | 1000 | 500 | 2.45 | **0.92** | 0.93 |
-| Gaussian process regression | 250 | 125 | 0.89 | (no nuisance block) | **0.38** |
-| Gaussian process regression | 500 | 250 | 1.39 | (no nuisance block) | **0.70** |
-| Gaussian process regression | 1000 | 500 | 2.29 | (no nuisance block) | **1.32** |
-| Weibull survival | 250 | 125 | 0.37 | (no nuisance block) | **0.16** |
-| Weibull survival | 500 | 250 | 0.48 | (no nuisance block) | **0.28** |
-| Weibull survival | 1000 | 500 | 0.58 | (no nuisance block) | **0.52** |
-| Robust Student-t regression (t4 errors) | 250 | 125 | 0.46 | (no nuisance block) | **0.15** |
-| Robust Student-t regression (t4 errors) | 500 | 250 | 0.68 | (no nuisance block) | **0.26** |
-| Robust Student-t regression (t4 errors) | 1000 | 500 | 1.07 | (no nuisance block) | **0.48** |
+| Model | Stan warm-up iterations | NicoStan burn-in iterations | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
+|---|---:|---:|---:|---:|
+| Stochastic volatility | 250 | 125 | **4.0x** | 3.8x |
+| Stochastic volatility | 500 | 250 | **4.0x** | 3.8x |
+| Stochastic volatility | 1000 | 500 | **3.2x** | 3.1x |
+| Shared-frailty Cox survival | 250 | 125 | **6.6x** | 5.6x |
+| Shared-frailty Cox survival | 500 | 250 | **5.2x** | **5.2x** |
+| Shared-frailty Cox survival | 1000 | 500 | **5.3x** | 4.4x |
+| Latent diffusion survival | 250 | 125 | **3.9x** | **3.9x** |
+| Latent diffusion survival | 500 | 250 | **2.9x** | 2.9x |
+| Latent diffusion survival | 1000 | 500 | **2.1x** | **2.1x** |
+| Joint longitudinal and survival | 250 | 125 | **12.2x** | 11.8x |
+| Joint longitudinal and survival | 500 | 250 | **9.3x** | 9.2x |
+| Joint longitudinal and survival | 1000 | 500 | **7.3x** | **7.3x** |
+| Hierarchical logistic regression | 250 | 125 | **4.6x** | 4.4x |
+| Hierarchical logistic regression | 500 | 250 | **3.2x** | 3.1x |
+| Hierarchical logistic regression | 1000 | 500 | **2.7x** | 2.6x |
+| Gaussian process regression | 250 | 125 | (no nuisance block) | **2.3x** |
+| Gaussian process regression | 500 | 250 | (no nuisance block) | **2.0x** |
+| Gaussian process regression | 1000 | 500 | (no nuisance block) | **1.7x** |
+| Weibull survival | 250 | 125 | (no nuisance block) | **2.3x** |
+| Weibull survival | 500 | 250 | (no nuisance block) | **1.7x** |
+| Weibull survival | 1000 | 500 | (no nuisance block) | **1.1x** |
+| Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **3.1x** |
+| Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **2.6x** |
+| Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **2.2x** |
 
 
-**Minimum ESS per 1000 sampling gradient evaluations (higher is better):**
+**Minimum ESS per 1000 sampling gradient evaluations, NicoStan over Stan (NUTS) (higher is better):**
 
-| Model | Stan warm-up iterations | NicoStan burn-in iterations | Stan (NUTS) | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
-|---|---:|---:|---:|---:|---:|
-| Stochastic volatility | 250 | 125 | 7.0 | **11.4** | 7.8 |
-| Stochastic volatility | 500 | 250 | 6.0 | **11.3** | 8.7 |
-| Stochastic volatility | 1000 | 500 | 7.9 | **14.3** | 8.5 |
-| Shared-frailty Cox survival | 250 | 125 | 23.7 | **28.8** | 17.9 |
-| Shared-frailty Cox survival | 500 | 250 | 23.3 | 29.9 | **32.1** |
-| Shared-frailty Cox survival | 1000 | 500 | 23.6 | **39.9** | 26.8 |
-| Latent diffusion survival | 250 | 125 | 2.8 | 7.2 | **7.6** |
-| Latent diffusion survival | 500 | 250 | 2.8 | **7.3** | 6.4 |
-| Latent diffusion survival | 1000 | 500 | 2.8 | **8.7** | 7.3 |
-| Joint longitudinal and survival | 250 | 125 | 6.7 | 8.6 | **9.0** |
-| Joint longitudinal and survival | 500 | 250 | 6.2 | **10.1** | 8.0 |
-| Joint longitudinal and survival | 1000 | 500 | 6.1 | **7.2** | 5.9 |
-| Hierarchical logistic regression | 250 | 125 | 8.8 | **15.0** | 12.4 |
-| Hierarchical logistic regression | 500 | 250 | 8.7 | **15.8** | 11.8 |
-| Hierarchical logistic regression | 1000 | 500 | 9.5 | **15.0** | 11.9 |
-| Gaussian process regression | 250 | 125 | 86.5 | (no nuisance block) | **101.9** |
-| Gaussian process regression | 500 | 250 | 86.3 | (no nuisance block) | **116.4** |
-| Gaussian process regression | 1000 | 500 | 78.9 | (no nuisance block) | **107.5** |
-| Weibull survival | 250 | 125 | 78.9 | (no nuisance block) | **108.9** |
-| Weibull survival | 500 | 250 | 79.7 | (no nuisance block) | **132.2** |
-| Weibull survival | 1000 | 500 | 86.6 | (no nuisance block) | **116.2** |
-| Robust Student-t regression (t4 errors) | 250 | 125 | 114.3 | (no nuisance block) | **171.2** |
-| Robust Student-t regression (t4 errors) | 500 | 250 | 110.3 | (no nuisance block) | **224.1** |
-| Robust Student-t regression (t4 errors) | 1000 | 500 | 114.0 | (no nuisance block) | **232.7** |
+| Model | Stan warm-up iterations | NicoStan burn-in iterations | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
+|---|---:|---:|---:|---:|
+| Stochastic volatility | 250 | 125 | **1.6x** | 1.1x |
+| Stochastic volatility | 500 | 250 | **1.9x** | 1.4x |
+| Stochastic volatility | 1000 | 500 | **1.8x** | 1.1x |
+| Shared-frailty Cox survival | 250 | 125 | **1.2x** | 0.8x |
+| Shared-frailty Cox survival | 500 | 250 | 1.3x | **1.4x** |
+| Shared-frailty Cox survival | 1000 | 500 | **1.7x** | 1.1x |
+| Latent diffusion survival | 250 | 125 | 2.6x | **2.7x** |
+| Latent diffusion survival | 500 | 250 | **2.6x** | 2.3x |
+| Latent diffusion survival | 1000 | 500 | **3.1x** | 2.6x |
+| Joint longitudinal and survival | 250 | 125 | 1.3x | **1.3x** |
+| Joint longitudinal and survival | 500 | 250 | **1.6x** | 1.3x |
+| Joint longitudinal and survival | 1000 | 500 | **1.2x** | 1.0x |
+| Hierarchical logistic regression | 250 | 125 | **1.7x** | 1.4x |
+| Hierarchical logistic regression | 500 | 250 | **1.8x** | 1.4x |
+| Hierarchical logistic regression | 1000 | 500 | **1.6x** | 1.3x |
+| Gaussian process regression | 250 | 125 | (no nuisance block) | **1.2x** |
+| Gaussian process regression | 500 | 250 | (no nuisance block) | **1.3x** |
+| Gaussian process regression | 1000 | 500 | (no nuisance block) | **1.4x** |
+| Weibull survival | 250 | 125 | (no nuisance block) | **1.4x** |
+| Weibull survival | 500 | 250 | (no nuisance block) | **1.7x** |
+| Weibull survival | 1000 | 500 | (no nuisance block) | **1.3x** |
+| Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **1.5x** |
+| Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **2.0x** |
+| Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **2.0x** |
 
 
 NicoStan reached the target faster than Stan for every model and warm-up / burn-in length.
@@ -1589,7 +1593,7 @@ survival) that of Stan.
 
 
 Within NicoStan, diffusion HMC reached the target faster than standard HMC in 12 of the 15 cells with a nuisance
-block (i.e., combinations of model and burn-in length; for the latent diffusion survival model with 500 burn-in iterations, the two are level at 0.89 s),
+block (i.e., combinations of model and burn-in length; for the latent diffusion survival model with 500 burn-in iterations, the two are level),
 and it had a higher minimum ESS per gradient in 12 of them.
 
 
@@ -1910,7 +1914,7 @@ Similarly, the nico_reduce_sum version of the NMA holds its study effects as fou
 | | $\boldsymbol{\beta} \in \mathbb{R}^3$ (`beta`) | coefficients of the covariates | 3 | main (fixed size) |
 | | $\sigma_{\text{gp}}$ (`sigma_gp`) | marginal standard deviation of the spatial effect | 1 | main (fixed size) |
 | | $\ell$ (`length_scale`) | length scale of the spatial effect (units of location) | 1 | main (fixed size) |
-| NMA, Xu fixed cutpoints | $\mathbf{Z}_{\eta}$ (`beta_eta_z`) | standard normal study effects, shared by the tests (one per class and study) | $2 \times n_{\text{studies}}$ | nuisance (standard normal study effects, grow with the studies) |
+| NMA, ordinal-bivariate model ([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)), fixed-effects cutpoints | $\mathbf{Z}_{\eta}$ (`beta_eta_z`) | standard normal study effects, shared by the tests (one per class and study) | $2 \times n_{\text{studies}}$ | nuisance (standard normal study effects, grow with the studies) |
 | | $\mathbf{z}_{\delta, c}$, $c = 1, 2$ (`beta_delta_z_vec`) | standard normal test-specific study effects | $2 \times n_{\text{obs}}$ | nuisance (standard normal, grow with the studies) |
 | | $\boldsymbol{\beta}_{\mu, t}$ (`beta_mu`) | mean locations of each test and class (with the covariate effects) | $n_{\text{tests}} \times 2 \times n_{\text{cov}}$ | main (fixed size) |
 | | $\mathbf{C}^{\text{raw}}_c$, $c = 1, 2$ (`C_raw_vec`) | raw log-differences of the cutpoints, shared by the studies (fixed cutpoints) | $2 \times n_C$ | main (fixed size) |
@@ -1998,6 +2002,65 @@ log density and its gradient.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+## Auto-chunking
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
+
+
+Auto-chunking chunks the log density and its gradient automatically, inside Stan's autodiff system
+(`stan::math::var`), on the user's unchanged Stan model: there is no `reduce_sum`, `nico_reduce_sum` or `map_rect`,
+no partial-sum function and no change to the `.stan` file.
+As with `nico_reduce_sum` (see [nico_reduce_sum and nico_map_rect](#nico_reduce_sum-and-nico_map_rect)), each chunk
+runs its own part of the computation in turn, with containers of values and derivatives the size of one chunk.
+Given the number of chunks, the chunk size is ceiling(N / number of chunks), and the chunks are exactly those of
+Stan's `reduce_sum_static`; every container whose size grows with N (e.g., a nuisance block with one value per
+individual) is cut into these chunks, and small fixed-size parameters are kept whole.
+Auto-chunking runs with one thread per chain.
+It is turned on with `auto_chunking = TRUE` (`FALSE` turns it off), and it is in the development version of NicoStan,
+not yet in the released package.
+
+
+### Auto-chunking over the naive Stan model (Paper 1, Table 21)
+
+Each ratio is the sampling speed (`TP_iter`, i.e., iterations per second over all chains, per 10 leapfrog steps) of a
+NicoStan version over that of the naive Stan model: the same model written as a normal Stan model and run with
+Stan::math only, with no chunking of any kind (no `reduce_sum`, no `map_rect`, no auto-chunking).
+Each version is timed at its own fastest layout; each side of a ratio is a median of repeated timings (3 for
+each NicoStan version, 2 or 3 for the naive model).
+Below each ratio is its layout: chains x threads per chain (number of chunks).
+**Bold**: more than 5x.
+The middle and larger N are 10,000 and 100,000 (Graded response IRT and Four-class LC-MVOP: 5000 and 50,000).
+The NicoStan versions are the same models, also written as normal Stan models, run with auto-chunking on.
+Comparisons 3 and 4 of Table 21, with `nico_reduce_sum`, are in
+[nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model-paper-1-table-21).
+
+**Comparison 1:** the nico::math (AVX) model with the fused nico_ functions, auto-chunking on, over the faster of the
+two naive Stan models, with Stan's own fused functions (`student_t` for the Robust Student-t regression,
+`poisson_log_glm` for the Weibull survival and `bernoulli_logit_glm` for the Hierarchical logistic regression) and
+without them (the Four-class LC-MVOP has only the one without).
+
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.88x<br><sub>180 x 1 (1)</sub> | 1.37x<br><sub>180 x 1 (8)</sub> | 2.27x<br><sub>180 x 1 (128)</sub> | 0.82x<br><sub>16 x 1 (1)</sub> | 0.73x<br><sub>16 x 1 (8)</sub> | 1.55x<br><sub>16 x 1 (256)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | 4.34x<br><sub>180 x 1 (1)</sub> | **7.78x**<br><sub>180 x 1 (2)</sub> | **29.59x**<br><sub>180 x 1 (8)</sub> | 3.54x<br><sub>16 x 1 (1)</sub> | **5.25x**<br><sub>16 x 1 (2)</sub> | **18.08x**<br><sub>16 x 1 (8)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 3.41x<br><sub>180 x 1 (1)</sub> | **5.94x**<br><sub>180 x 1 (2)</sub> | **23.61x**<br><sub>180 x 1 (8)</sub> | 2.86x<br><sub>16 x 1 (1)</sub> | 3.64x<br><sub>16 x 1 (2)</sub> | **13.72x**<br><sub>16 x 1 (8)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 1.14x<br><sub>180 x 1 (2)</sub> | 1.39x<br><sub>180 x 1 (2)</sub> | **5.68x**<br><sub>180 x 1 (128)</sub> | 1.28x<br><sub>16 x 1 (1)</sub> | 1.53x<br><sub>16 x 1 (4)</sub> | 3.79x<br><sub>16 x 1 (128)</sub> |
+| Graded response IRT (500, 5000, 50,000) | 4.59x<br><sub>180 x 1 (1)</sub> | 3.92x<br><sub>180 x 1 (8)</sub> | **5.87x**<br><sub>180 x 1 (128)</sub> | 3.23x<br><sub>16 x 1 (2)</sub> | 2.29x<br><sub>16 x 1 (8)</sub> | 4.77x<br><sub>16 x 1 (128)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | **12.48x**<br><sub>180 x 1 (1)</sub> | **17.69x**<br><sub>180 x 1 (32)</sub> | **24.73x**<br><sub>180 x 1 (128)</sub> | **8.42x**<br><sub>16 x 1 (4)</sub> | **8.09x**<br><sub>16 x 1 (64)</sub> | **16.99x**<br><sub>16 x 1 (256)</sub> |
+
+**Comparison 2:** the nico::math (AVX) model without fused functions, auto-chunking on, over the naive Stan model
+without fused functions.
+
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.25x<br><sub>180 x 1 (1)</sub> | 1.63x<br><sub>180 x 1 (8)</sub> | 3.04x<br><sub>180 x 1 (256)</sub> | 1.49x<br><sub>16 x 1 (1)</sub> | 1.43x<br><sub>16 x 1 (32)</sub> | 2.05x<br><sub>16 x 1 (128)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | 1.38x<br><sub>180 x 1 (1)</sub> | 2.90x<br><sub>180 x 1 (32)</sub> | **6.86x**<br><sub>180 x 1 (128)</sub> | 1.72x<br><sub>16 x 1 (1)</sub> | 3.37x<br><sub>16 x 1 (32)</sub> | **5.18x**<br><sub>16 x 1 (256)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 1.22x<br><sub>180 x 1 (2)</sub> | 3.26x<br><sub>180 x 1 (8)</sub> | **8.00x**<br><sub>180 x 1 (64)</sub> | 1.39x<br><sub>16 x 1 (4)</sub> | 2.66x<br><sub>16 x 1 (8)</sub> | **5.65x**<br><sub>16 x 1 (32)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 1.55x<br><sub>180 x 1 (1)</sub> | **7.13x**<br><sub>180 x 1 (4)</sub> | **10.13x**<br><sub>180 x 1 (256)</sub> | 1.73x<br><sub>16 x 1 (1)</sub> | 4.24x<br><sub>8 x 1 (8)</sub> | **7.26x**<br><sub>16 x 1 (128)</sub> |
+| Graded response IRT (500, 5000, 50,000) | 2.89x<br><sub>180 x 1 (2)</sub> | **6.09x**<br><sub>180 x 1 (32)</sub> | **10.28x**<br><sub>180 x 1 (256)</sub> | 2.88x<br><sub>16 x 1 (4)</sub> | 3.10x<br><sub>16 x 1 (32)</sub> | **6.84x**<br><sub>16 x 1 (64)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | 2.46x<br><sub>180 x 1 (8)</sub> | 3.98x<br><sub>180 x 1 (64)</sub> | 4.59x<br><sub>180 x 1 (1024)</sub> | 2.07x<br><sub>16 x 1 (16)</sub> | 1.77x<br><sub>8 x 1 (64)</sub> | 3.05x<br><sub>8 x 1 (1024)</sub> |
+
+
+<!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 ## nico_reduce_sum and nico_map_rect
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
 
@@ -2061,6 +2124,44 @@ rising with N.
 The speed-ups of the nico::math (AVX) versions over Stan::math for every benchmark model are in [AVX-512 and AVX2 speed-ups over Stan::math](#avx-512-and-avx2-speed-ups-over-stanmath).
 
 
+### nico_reduce_sum over the naive Stan model (Paper 1, Table 21)
+
+Each ratio is the sampling speed (`TP_iter`, i.e., iterations per second over all chains, per 10 leapfrog steps) of a
+NicoStan version over that of the naive Stan model: the same model written as a normal Stan model and run with
+Stan::math only, with no chunking of any kind (no `reduce_sum`, no `map_rect`, no auto-chunking).
+Each version is timed at its own fastest layout; each side of a ratio is a median of repeated timings (3 for
+each NicoStan version, 2 or 3 for the naive model).
+Below each ratio is its layout: chains x threads per chain (number of chunks).
+**Bold**: more than 5x.
+The middle and larger N are 10,000 and 100,000 (Graded response IRT and Four-class LC-MVOP: 5000 and 50,000).
+Comparisons 1 and 2 of Table 21, with auto-chunking, are in
+[Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model-paper-1-table-21).
+
+**Comparison 3:** the nico::math (AVX) model with the fused nico_ functions and `nico_reduce_sum` (the Shared-frailty
+Cox survival model also with `nico_map_rect`), auto-chunking off, over the faster of the two naive Stan models.
+
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.62x<br><sub>180 x 1 (1)</sub> | 0.67x<br><sub>180 x 1 (2)</sub> | 2.23x<br><sub>180 x 1 (128)</sub> | 1.38x<br><sub>16 x 1 (1)</sub> | 0.85x<br><sub>16 x 1 (8)</sub> | 1.42x<br><sub>16 x 1 (128)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | **5.40x**<br><sub>180 x 1 (1)</sub> | **5.50x**<br><sub>180 x 1 (2)</sub> | **20.84x**<br><sub>180 x 1 (8)</sub> | **5.40x**<br><sub>16 x 1 (1)</sub> | 4.53x<br><sub>16 x 1 (2)</sub> | **11.91x**<br><sub>16 x 1 (8)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 4.11x<br><sub>180 x 1 (1)</sub> | **5.24x**<br><sub>180 x 1 (2)</sub> | **19.27x**<br><sub>180 x 1 (8)</sub> | 3.87x<br><sub>16 x 1 (1)</sub> | 3.22x<br><sub>16 x 1 (2)</sub> | **12.23x**<br><sub>16 x 1 (8)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 2.16x<br><sub>180 x 1 (1)</sub> | 1.79x<br><sub>180 x 1 (2)</sub> | **10.78x**<br><sub>180 x 1 (8)</sub> | 2.63x<br><sub>16 x 1 (1)</sub> | 1.98x<br><sub>16 x 1 (2)</sub> | **6.84x**<br><sub>16 x 1 (8)</sub> |
+| Graded response IRT (500, 5000, 50,000) | **5.33x**<br><sub>180 x 1 (2)</sub> | **6.94x**<br><sub>180 x 1 (2)</sub> | **11.65x**<br><sub>180 x 1 (32)</sub> | 4.49x<br><sub>16 x 1 (2)</sub> | **5.16x**<br><sub>16 x 1 (4)</sub> | **7.35x**<br><sub>16 x 1 (32)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | **10.86x**<br><sub>180 x 1 (2)</sub> | **15.92x**<br><sub>180 x 1 (8)</sub> | **21.07x**<br><sub>180 x 1 (128)</sub> | **7.79x**<br><sub>16 x 1 (2)</sub> | **10.41x**<br><sub>16 x 1 (32)</sub> | **14.96x**<br><sub>16 x 1 (512)</sub> |
+
+**Comparison 4:** the nico::math (AVX) model without fused functions, with `nico_reduce_sum` (the Shared-frailty Cox
+survival model also with `nico_map_rect`), auto-chunking off, over the naive Stan model without fused functions.
+
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.13x<br><sub>180 x 1 (1)</sub> | 1.17x<br><sub>180 x 1 (4)</sub> | 2.60x<br><sub>180 x 1 (128)</sub> | 1.76x<br><sub>16 x 1 (1)</sub> | 1.07x<br><sub>16 x 1 (8)</sub> | 1.86x<br><sub>16 x 1 (256)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | 0.95x<br><sub>180 x 1 (1)</sub> | 1.57x<br><sub>180 x 1 (8)</sub> | **7.17x**<br><sub>180 x 1 (64)</sub> | 1.16x<br><sub>16 x 1 (1)</sub> | 1.88x<br><sub>16 x 1 (4)</sub> | 4.74x<br><sub>8 x 2 (64)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 1.01x<br><sub>180 x 1 (1)</sub> | 2.17x<br><sub>180 x 1 (8)</sub> | **6.46x**<br><sub>90 x 2 (64)</sub> | 1.19x<br><sub>16 x 1 (1)</sub> | 1.87x<br><sub>16 x 1 (8)</sub> | 4.63x<br><sub>16 x 1 (64)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 1.27x<br><sub>180 x 1 (1)</sub> | **5.02x**<br><sub>180 x 1 (8)</sub> | **9.11x**<br><sub>180 x 1 (128)</sub> | 1.51x<br><sub>16 x 1 (1)</sub> | 3.38x<br><sub>16 x 1 (8)</sub> | **6.42x**<br><sub>16 x 1 (64)</sub> |
+| Graded response IRT (500, 5000, 50,000) | 2.23x<br><sub>180 x 1 (2)</sub> | 4.87x<br><sub>180 x 1 (32)</sub> | **7.38x**<br><sub>180 x 1 (256)</sub> | 2.12x<br><sub>16 x 1 (4)</sub> | 3.25x<br><sub>16 x 1 (64)</sub> | 4.51x<br><sub>16 x 1 (512)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | 2.99x<br><sub>180 x 1 (8)</sub> | 3.95x<br><sub>180 x 1 (64)</sub> | 4.97x<br><sub>90 x 2 (512)</sub> | 1.75x<br><sub>16 x 1 (8)</sub> | 2.25x<br><sub>16 x 1 (128)</sub> | 2.98x<br><sub>4 x 4 (1024)</sub> |
+
+
 ### Map jobs in a shared-frailty Cox model
 
 
@@ -2079,7 +2180,7 @@ job, rather than first gathering the nuisance values of all blocks into job-argu
 
 
 For each pair, the scalar reducer and its nuisance-reader code are identical; only the map changes.
-Each arm uses its own layout, chosen by the same search.
+Each of the two versions (with `map_rect` and with `nico_map_rect`) uses its own layout, chosen by the same search.
 The comparison covers both math backends, both machines, and N = 10,000, 25,000, 50,000 and 200,000, with
 J = N/2 (two subjects per frailty group).
 
@@ -2271,7 +2372,7 @@ A speed-up is TP_iter(AVX) / TP_iter(Stan::math), where TP_iter is the number of
 
 Every timed call starts its clock at its first iteration. A timed call with a divergent transition is not used. Where the fastest layouts were timed again 3 times, the speed-up uses the median of the 3 repeats ("median of 3"); otherwise it uses the single timing of the ground-truth search ("single"). Where the two sides differ, the column gives the first version named in "Versions compared" first; a few cases have only 2 repeats ("median of 2").
 
-Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan::math with Stan's reduce_sum, and nico_reduce_sum against nico_reduce_sum. The second table compares nico::math (AVX) with the fused nico_ functions (e.g. the fused GHK) against Stan::math with Stan's fused functions (e.g. bernoulli_logit_glm), for the models where Stan has such a function. The third set of tables (Table 21 of Paper 1) gives the speed-ups of NicoStan over the naive Stan model, with auto-chunking or with nico_reduce_sum. Where a model has more than one Stan file for the same version, the fastest one is used.
+Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan::math with Stan's reduce_sum, and nico_reduce_sum against nico_reduce_sum. The second table compares nico::math (AVX) with the fused nico_ functions (e.g. the fused GHK) against Stan::math with Stan's fused functions (e.g. bernoulli_logit_glm), for the models where Stan has such a function. The speed-ups of NicoStan over the naive Stan model (Table 21 of Paper 1) are in [Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model-paper-1-table-21) (with auto-chunking) and in [nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model-paper-1-table-21) (with nico_reduce_sum). Where a model has more than one Stan file for the same version, the fastest one is used.
 
 ### nico::math (AVX) over Stan::math
 
@@ -2308,10 +2409,10 @@ Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan
 | Latent diffusion survival | 10,000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 5.86x | single | 5.80x | single |
 | Latent diffusion survival | 50,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 6.18x | median of 3 / single | 5.64x | single |
 | Latent diffusion survival | 50,000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 6.24x | single | 5.58x | single |
-| Network meta-analysis (Xu, fixed cutpoints) | 10 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 0.84x | single | 0.92x | single |
-| Network meta-analysis (Xu, fixed cutpoints) | 10 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.07x | single | not timed |  |
-| Network meta-analysis (Xu, fixed cutpoints) | 25 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 0.78x | single | 0.83x | single |
-| Network meta-analysis (Xu, fixed cutpoints) | 25 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.53x | single | not timed |  |
+| Network meta-analysis, ordinal-bivariate model ([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)), fixed-effects cutpoints | 10 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 0.84x | single | 0.92x | single |
+| Network meta-analysis, ordinal-bivariate model ([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)), fixed-effects cutpoints | 10 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.07x | single | not timed |  |
+| Network meta-analysis, ordinal-bivariate model ([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)), fixed-effects cutpoints | 25 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 0.78x | single | 0.83x | single |
+| Network meta-analysis, ordinal-bivariate model ([Cerullo et al, 2025](https://arxiv.org/abs/2505.23393)), fixed-effects cutpoints | 25 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.53x | single | not timed |  |
 | One-class MVOP | 500 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.27x | single | 1.17x | single |
 | One-class MVOP | 10,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.27x | single | 1.21x | single |
 | One-class MVOP | 50,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.18x | single | 1.11x | single |
@@ -2403,70 +2504,6 @@ Geometric means over the models at each N (number of models in brackets):
 | nico::math (AVX) fused, nico_reduce_sum over Stan::math fused, nico_reduce_sum | 500 | 3.08x (4) | 2.28x (4) |
 | nico::math (AVX) fused, nico_reduce_sum over Stan::math fused, nico_reduce_sum | 10,000 | 3.90x (4) | 2.91x (4) |
 | nico::math (AVX) fused, nico_reduce_sum over Stan::math fused, nico_reduce_sum | 50,000 | 3.90x (4) | 3.64x (4) |
-
-
-### NicoStan over the naive Stan model (Paper 1, Table 21)
-
-Each ratio is the sampling speed (`TP_iter`, i.e., iterations per second over all chains, per 10 leapfrog steps) of a
-NicoStan version over that of the naive Stan model: the same model written as a normal Stan model and run with
-Stan::math only, with no chunking of any kind (no `reduce_sum`, no `map_rect`, no auto-chunking).
-Each version is timed at its own fastest layout; each side of a ratio is a median of repeated timings (3 for
-each NicoStan version, 2 or 3 for the naive model).
-Below each ratio is its layout: chains x threads per chain (number of chunks).
-**Bold**: more than 5x.
-The middle and larger N are 10,000 and 100,000 (Graded response IRT and Four-class LC-MVOP: 5000 and 50,000).
-Comparisons 1 and 2 use auto-chunking, which is in the development version of NicoStan and not yet in the released
-package.
-
-**Comparison 1:** the nico::math (AVX) model with the fused nico_ functions, auto-chunking on, over the faster of the
-two naive Stan models, with Stan's own fused functions (`student_t` for the Robust Student-t regression,
-`poisson_log_glm` for the Weibull survival and `bernoulli_logit_glm` for the Hierarchical logistic regression) and
-without them (the Four-class LC-MVOP has only the one without).
-
-| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
-|---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.88x<br><sub>180 x 1 (1)</sub> | 1.37x<br><sub>180 x 1 (8)</sub> | 2.27x<br><sub>180 x 1 (128)</sub> | 0.82x<br><sub>16 x 1 (1)</sub> | 0.73x<br><sub>16 x 1 (8)</sub> | 1.55x<br><sub>16 x 1 (256)</sub> |
-| Robust Student-t regression (500, 10,000, 100,000) | 4.34x<br><sub>180 x 1 (1)</sub> | **7.78x**<br><sub>180 x 1 (2)</sub> | **29.59x**<br><sub>180 x 1 (8)</sub> | 3.54x<br><sub>16 x 1 (1)</sub> | **5.25x**<br><sub>16 x 1 (2)</sub> | **18.08x**<br><sub>16 x 1 (8)</sub> |
-| Weibull survival (500, 10,000, 100,000) | 3.41x<br><sub>180 x 1 (1)</sub> | **5.94x**<br><sub>180 x 1 (2)</sub> | **23.61x**<br><sub>180 x 1 (8)</sub> | 2.86x<br><sub>16 x 1 (1)</sub> | 3.64x<br><sub>16 x 1 (2)</sub> | **13.72x**<br><sub>16 x 1 (8)</sub> |
-| Hierarchical logistic regression (500, 10,000, 100,000) | 1.14x<br><sub>180 x 1 (2)</sub> | 1.39x<br><sub>180 x 1 (2)</sub> | **5.68x**<br><sub>180 x 1 (128)</sub> | 1.28x<br><sub>16 x 1 (1)</sub> | 1.53x<br><sub>16 x 1 (4)</sub> | 3.79x<br><sub>16 x 1 (128)</sub> |
-| Graded response IRT (500, 5000, 50,000) | 4.59x<br><sub>180 x 1 (1)</sub> | 3.92x<br><sub>180 x 1 (8)</sub> | **5.87x**<br><sub>180 x 1 (128)</sub> | 3.23x<br><sub>16 x 1 (2)</sub> | 2.29x<br><sub>16 x 1 (8)</sub> | 4.77x<br><sub>16 x 1 (128)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | **12.48x**<br><sub>180 x 1 (1)</sub> | **17.69x**<br><sub>180 x 1 (32)</sub> | **24.73x**<br><sub>180 x 1 (128)</sub> | **8.42x**<br><sub>16 x 1 (4)</sub> | **8.09x**<br><sub>16 x 1 (64)</sub> | **16.99x**<br><sub>16 x 1 (256)</sub> |
-
-**Comparison 2:** the nico::math (AVX) model without fused functions, auto-chunking on, over the naive Stan model
-without fused functions.
-
-| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
-|---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.25x<br><sub>180 x 1 (1)</sub> | 1.63x<br><sub>180 x 1 (8)</sub> | 3.04x<br><sub>180 x 1 (256)</sub> | 1.49x<br><sub>16 x 1 (1)</sub> | 1.43x<br><sub>16 x 1 (32)</sub> | 2.05x<br><sub>16 x 1 (128)</sub> |
-| Robust Student-t regression (500, 10,000, 100,000) | 1.38x<br><sub>180 x 1 (1)</sub> | 2.90x<br><sub>180 x 1 (32)</sub> | **6.86x**<br><sub>180 x 1 (128)</sub> | 1.72x<br><sub>16 x 1 (1)</sub> | 3.37x<br><sub>16 x 1 (32)</sub> | **5.18x**<br><sub>16 x 1 (256)</sub> |
-| Weibull survival (500, 10,000, 100,000) | 1.22x<br><sub>180 x 1 (2)</sub> | 3.26x<br><sub>180 x 1 (8)</sub> | **8.00x**<br><sub>180 x 1 (64)</sub> | 1.39x<br><sub>16 x 1 (4)</sub> | 2.66x<br><sub>16 x 1 (8)</sub> | **5.65x**<br><sub>16 x 1 (32)</sub> |
-| Hierarchical logistic regression (500, 10,000, 100,000) | 1.55x<br><sub>180 x 1 (1)</sub> | **7.13x**<br><sub>180 x 1 (4)</sub> | **10.13x**<br><sub>180 x 1 (256)</sub> | 1.73x<br><sub>16 x 1 (1)</sub> | 4.24x<br><sub>8 x 1 (8)</sub> | **7.26x**<br><sub>16 x 1 (128)</sub> |
-| Graded response IRT (500, 5000, 50,000) | 2.89x<br><sub>180 x 1 (2)</sub> | **6.09x**<br><sub>180 x 1 (32)</sub> | **10.28x**<br><sub>180 x 1 (256)</sub> | 2.88x<br><sub>16 x 1 (4)</sub> | 3.10x<br><sub>16 x 1 (32)</sub> | **6.84x**<br><sub>16 x 1 (64)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | 2.46x<br><sub>180 x 1 (8)</sub> | 3.98x<br><sub>180 x 1 (64)</sub> | 4.59x<br><sub>180 x 1 (1024)</sub> | 2.07x<br><sub>16 x 1 (16)</sub> | 1.77x<br><sub>8 x 1 (64)</sub> | 3.05x<br><sub>8 x 1 (1024)</sub> |
-
-**Comparison 3:** the nico::math (AVX) model with the fused nico_ functions and `nico_reduce_sum` (the Shared-frailty
-Cox survival model also with `nico_map_rect`), auto-chunking off, over the faster of the two naive Stan models.
-
-| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
-|---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.62x<br><sub>180 x 1 (1)</sub> | 0.67x<br><sub>180 x 1 (2)</sub> | 2.23x<br><sub>180 x 1 (128)</sub> | 1.38x<br><sub>16 x 1 (1)</sub> | 0.85x<br><sub>16 x 1 (8)</sub> | 1.42x<br><sub>16 x 1 (128)</sub> |
-| Robust Student-t regression (500, 10,000, 100,000) | **5.40x**<br><sub>180 x 1 (1)</sub> | **5.50x**<br><sub>180 x 1 (2)</sub> | **20.84x**<br><sub>180 x 1 (8)</sub> | **5.40x**<br><sub>16 x 1 (1)</sub> | 4.53x<br><sub>16 x 1 (2)</sub> | **11.91x**<br><sub>16 x 1 (8)</sub> |
-| Weibull survival (500, 10,000, 100,000) | 4.11x<br><sub>180 x 1 (1)</sub> | **5.24x**<br><sub>180 x 1 (2)</sub> | **19.27x**<br><sub>180 x 1 (8)</sub> | 3.87x<br><sub>16 x 1 (1)</sub> | 3.22x<br><sub>16 x 1 (2)</sub> | **12.23x**<br><sub>16 x 1 (8)</sub> |
-| Hierarchical logistic regression (500, 10,000, 100,000) | 2.16x<br><sub>180 x 1 (1)</sub> | 1.79x<br><sub>180 x 1 (2)</sub> | **10.78x**<br><sub>180 x 1 (8)</sub> | 2.63x<br><sub>16 x 1 (1)</sub> | 1.98x<br><sub>16 x 1 (2)</sub> | **6.84x**<br><sub>16 x 1 (8)</sub> |
-| Graded response IRT (500, 5000, 50,000) | **5.33x**<br><sub>180 x 1 (2)</sub> | **6.94x**<br><sub>180 x 1 (2)</sub> | **11.65x**<br><sub>180 x 1 (32)</sub> | 4.49x<br><sub>16 x 1 (2)</sub> | **5.16x**<br><sub>16 x 1 (4)</sub> | **7.35x**<br><sub>16 x 1 (32)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | **10.86x**<br><sub>180 x 1 (2)</sub> | **15.92x**<br><sub>180 x 1 (8)</sub> | **21.07x**<br><sub>180 x 1 (128)</sub> | **7.79x**<br><sub>16 x 1 (2)</sub> | **10.41x**<br><sub>16 x 1 (32)</sub> | **14.96x**<br><sub>16 x 1 (512)</sub> |
-
-**Comparison 4:** the nico::math (AVX) model without fused functions, with `nico_reduce_sum` (the Shared-frailty Cox
-survival model also with `nico_map_rect`), auto-chunking off, over the naive Stan model without fused functions.
-
-| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
-|---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.13x<br><sub>180 x 1 (1)</sub> | 1.17x<br><sub>180 x 1 (4)</sub> | 2.60x<br><sub>180 x 1 (128)</sub> | 1.76x<br><sub>16 x 1 (1)</sub> | 1.07x<br><sub>16 x 1 (8)</sub> | 1.86x<br><sub>16 x 1 (256)</sub> |
-| Robust Student-t regression (500, 10,000, 100,000) | 0.95x<br><sub>180 x 1 (1)</sub> | 1.57x<br><sub>180 x 1 (8)</sub> | **7.17x**<br><sub>180 x 1 (64)</sub> | 1.16x<br><sub>16 x 1 (1)</sub> | 1.88x<br><sub>16 x 1 (4)</sub> | 4.74x<br><sub>8 x 2 (64)</sub> |
-| Weibull survival (500, 10,000, 100,000) | 1.01x<br><sub>180 x 1 (1)</sub> | 2.17x<br><sub>180 x 1 (8)</sub> | **6.46x**<br><sub>90 x 2 (64)</sub> | 1.19x<br><sub>16 x 1 (1)</sub> | 1.87x<br><sub>16 x 1 (8)</sub> | 4.63x<br><sub>16 x 1 (64)</sub> |
-| Hierarchical logistic regression (500, 10,000, 100,000) | 1.27x<br><sub>180 x 1 (1)</sub> | **5.02x**<br><sub>180 x 1 (8)</sub> | **9.11x**<br><sub>180 x 1 (128)</sub> | 1.51x<br><sub>16 x 1 (1)</sub> | 3.38x<br><sub>16 x 1 (8)</sub> | **6.42x**<br><sub>16 x 1 (64)</sub> |
-| Graded response IRT (500, 5000, 50,000) | 2.23x<br><sub>180 x 1 (2)</sub> | 4.87x<br><sub>180 x 1 (32)</sub> | **7.38x**<br><sub>180 x 1 (256)</sub> | 2.12x<br><sub>16 x 1 (4)</sub> | 3.25x<br><sub>16 x 1 (64)</sub> | 4.51x<br><sub>16 x 1 (512)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | 2.99x<br><sub>180 x 1 (8)</sub> | 3.95x<br><sub>180 x 1 (64)</sub> | 4.97x<br><sub>90 x 2 (512)</sub> | 1.75x<br><sub>16 x 1 (8)</sub> | 2.25x<br><sub>16 x 1 (128)</sub> | 2.98x<br><sub>4 x 4 (1024)</sub> |
 
 
 Over the models timed at N = 10,000 and 50,000, the geometric mean of the speed-ups of nico::math (AVX) over Stan::math with Stan's reduce_sum is 2.02x and 2.01x with AVX-512 (8 models) and 1.92x and 1.91x with AVX2 (8 models), and, with the fused functions on both sides, 3.40x and 3.57x with AVX-512 and 2.94x and 3.55x with AVX2 (5 models).
@@ -3140,31 +3177,33 @@ The cache-aware chunking of BayesMVP's models is described in
 
 10. Cerullo, E., Pinkney, S., Sutton, A. J., Lucas, T., Cooper, N. J. and Jones, H. E. (2025). [Latent class multivariate probit and latent trait models for evaluating test accuracy without a gold standard: A simulation study](https://arxiv.org/abs/2509.18489). arXiv:2509.18489.
 
-11. Hoffman, M. D. and Gelman, A. (2014). [The No-U-Turn Sampler: Adaptively Setting Path Lengths in Hamiltonian Monte Carlo](https://www.jmlr.org/papers/v15/hoffman14a.html). Journal of Machine Learning Research, 15(47), 1593-1623.
+11. Cerullo, E., Linde, K., Jones, H. E., Derezea, E., Lucas, T., Cooper, N. J. and Sutton, A. J. (2025). [Ordinal regression for meta-analysis of test accuracy: a flexible approach for utilizing all threshold data](https://arxiv.org/abs/2505.23393). arXiv:2505.23393, version 3, 2 December 2025.
 
-12. Margossian, C. C., Hoffman, M. D., Sountsov, P., Riou-Durand, L., Vehtari, A. and Gelman, A. (2024). [Nested R-hat: Assessing the convergence of Markov chain Monte Carlo when running many short chains](https://arxiv.org/abs/2110.13017v6). Bayesian Analysis; arXiv:2110.13017, version 6.
+12. Hoffman, M. D. and Gelman, A. (2014). [The No-U-Turn Sampler: Adaptively Setting Path Lengths in Hamiltonian Monte Carlo](https://www.jmlr.org/papers/v15/hoffman14a.html). Journal of Machine Learning Research, 15(47), 1593-1623.
 
-13. Roualdes, E. A., Ward, B., Carpenter, B., Seyboldt, A. and Axen, S. D. (2023). [BridgeStan: Efficient in-memory access to the methods of a Stan model](https://doi.org/10.21105/joss.05236). Journal of Open Source Software, 8(87), 5236.
+13. Margossian, C. C., Hoffman, M. D., Sountsov, P., Riou-Durand, L., Vehtari, A. and Gelman, A. (2024). [Nested R-hat: Assessing the convergence of Markov chain Monte Carlo when running many short chains](https://arxiv.org/abs/2110.13017v6). Bayesian Analysis; arXiv:2110.13017, version 6.
 
-14. Qu, Y., Tan, M. and Kutner, M. H. (1996). [Random effects models in latent class analysis for evaluating accuracy of diagnostic tests](https://doi.org/10.2307/2533043). Biometrics, 52(3), 797-810.
+14. Roualdes, E. A., Ward, B., Carpenter, B., Seyboldt, A. and Axen, S. D. (2023). [BridgeStan: Efficient in-memory access to the methods of a Stan model](https://doi.org/10.21105/joss.05236). Journal of Open Source Software, 8(87), 5236.
 
-15. Xu, H. and Craig, B. A. (2009). [A probit latent class model with general correlation structures for evaluating accuracy of diagnostic tests](https://doi.org/10.1111/j.1541-0420.2008.01194.x). Biometrics, 65(4), 1145-1155.
+15. Qu, Y., Tan, M. and Kutner, M. H. (1996). [Random effects models in latent class analysis for evaluating accuracy of diagnostic tests](https://doi.org/10.2307/2533043). Biometrics, 52(3), 797-810.
 
-16. Xu, H., Black, M. A. and Craig, B. A. (2013). [Evaluating accuracy of diagnostic tests with intermediate results in the absence of a gold standard](https://doi.org/10.1002/sim.5695). Statistics in Medicine, 32(15), 2571-2584.
+16. Xu, H. and Craig, B. A. (2009). [A probit latent class model with general correlation structures for evaluating accuracy of diagnostic tests](https://doi.org/10.1111/j.1541-0420.2008.01194.x). Biometrics, 65(4), 1145-1155.
 
-17. Uebersax, J. S. (1999). [Probit latent class analysis with dichotomous or ordered category measures: Conditional independence/dependence models](https://doi.org/10.1177/01466219922031400). Applied Psychological Measurement, 23(4), 283-297.
+17. Xu, H., Black, M. A. and Craig, B. A. (2013). [Evaluating accuracy of diagnostic tests with intermediate results in the absence of a gold standard](https://doi.org/10.1002/sim.5695). Statistics in Medicine, 32(15), 2571-2584.
 
-18. Cotter, S. L., Roberts, G. O., Stuart, A. M. and White, D. (2013). [MCMC methods for functions: Modifying old algorithms to make them faster](https://doi.org/10.1214/13-STS421). Statistical Science, 28(3), 424-446; [arXiv:1202.0709](https://arxiv.org/abs/1202.0709).
+18. Uebersax, J. S. (1999). [Probit latent class analysis with dichotomous or ordered category measures: Conditional independence/dependence models](https://doi.org/10.1177/01466219922031400). Applied Psychological Measurement, 23(4), 283-297.
 
-19. Talhouk, A., Doucet, A. and Murphy, K. (2012). [Efficient Bayesian inference for multivariate probit models with sparse inverse correlation matrices](https://doi.org/10.1080/10618600.2012.679239). Journal of Computational and Graphical Statistics, 21(3), 739-757.
+19. Cotter, S. L., Roberts, G. O., Stuart, A. M. and White, D. (2013). [MCMC methods for functions: Modifying old algorithms to make them faster](https://doi.org/10.1214/13-STS421). Statistical Science, 28(3), 424-446; [arXiv:1202.0709](https://arxiv.org/abs/1202.0709).
 
-20. Johnston, C. K., Waterhouse, T., Wiens, M., Mondick, J., French, J. and Gillespie, W. R. (2024). [Bayesian estimation in NONMEM](https://doi.org/10.1002/psp4.13088). CPT: Pharmacometrics & Systems Pharmacology, 13, 192-207.
+20. Talhouk, A., Doucet, A. and Murphy, K. (2012). [Efficient Bayesian inference for multivariate probit models with sparse inverse correlation matrices](https://doi.org/10.1080/10618600.2012.679239). Journal of Computational and Graphical Statistics, 21(3), 739-757.
 
-21. Kingma, D. P. and Ba, J. (2015). [Adam: A Method for Stochastic Optimization](https://arxiv.org/abs/1412.6980). International Conference on Learning Representations (ICLR); arXiv:1412.6980.
+21. Johnston, C. K., Waterhouse, T., Wiens, M., Mondick, J., French, J. and Gillespie, W. R. (2024). [Bayesian estimation in NONMEM](https://doi.org/10.1002/psp4.13088). CPT: Pharmacometrics & Systems Pharmacology, 13, 192-207.
 
-22. Pinkney, S. (2024). [A Short Note on a Flexible Cholesky Parameterization of Correlation Matrices](https://arxiv.org/abs/2405.07286). arXiv:2405.07286.
+22. Kingma, D. P. and Ba, J. (2015). [Adam: A Method for Stochastic Optimization](https://arxiv.org/abs/1412.6980). International Conference on Learning Representations (ICLR); arXiv:1412.6980.
 
-23. Kastner, G. and Frühwirth-Schnatter, S. (2014). [Ancillarity-sufficiency interweaving strategy (ASIS) for boosting MCMC estimation of stochastic volatility models](https://doi.org/10.1016/j.csda.2013.01.002). Computational Statistics & Data Analysis, 76, 408-423.
+23. Pinkney, S. (2024). [A Short Note on a Flexible Cholesky Parameterization of Correlation Matrices](https://arxiv.org/abs/2405.07286). arXiv:2405.07286.
+
+24. Kastner, G. and Frühwirth-Schnatter, S. (2014). [Ancillarity-sufficiency interweaving strategy (ASIS) for boosting MCMC estimation of stochastic volatility models](https://doi.org/10.1016/j.csda.2013.01.002). Computational Statistics & Data Analysis, 76, 408-423.
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->

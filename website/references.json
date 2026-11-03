@@ -96,6 +96,16 @@
     "bibtex_authors": "Cerullo, Enzo and Pinkney, Sean and Sutton, Alex J. and Lucas, Tim and Cooper, Nicola J. and Jones, Hayley E."
   },
   {
+    "key": "Cerullo2025ordinal",
+    "authors": "Cerullo, E., Linde, K., Jones, H. E., Derezea, E., Lucas, T., Cooper, N. J. and Sutton, A. J.",
+    "year": "2025",
+    "title": "Ordinal regression for meta-analysis of test accuracy: a flexible approach for utilizing all threshold data",
+    "venue": "arXiv:2505.23393, version 3, 2 December 2025",
+    "url": "https://arxiv.org/abs/2505.23393",
+    "doi": "10.48550/arXiv.2505.23393",
+    "bibtex_authors": "Cerullo, Enzo and Linde, Klaus and Jones, Hayley E. and Derezea, Efthymia and Lucas, Tim and Cooper, Nicola J. and Sutton, Alex J."
+  },
+  {
     "key": "HoffmanGelman2014",
     "authors": "Hoffman, M. D. and Gelman, A.",
     "year": "2014",
