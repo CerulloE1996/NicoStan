@@ -1280,7 +1280,7 @@ With the [BayesMVP](https://github.com/CerulloE1996/BayesMVP) extension installe
 [Run_MVOP.R](inst/examples/Run_MVOP.R), [Run_2LC_MVOP.R](inst/examples/Run_2LC_MVOP.R) and
 [Run_latent_trait.R](inst/examples/Run_latent_trait.R).
 
-Furthermore, the four-class LC-MVOP (4LC-MVOP), which extends the LC-MVOP to two conditions at once
+Furthermore, the quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP), which extends the LC-MVOP to two conditions at once
 (i.e., its latent classes are the 2 x 2 combinations of the two conditions),
 is in [four_class/](https://github.com/CerulloE1996/NicoStan/tree/main/inst/examples/four_class), with synthetic data
 at N = 24, 48 and 96 ([Run_4LC_MVOP.R](inst/examples/Run_4LC_MVOP.R)).
@@ -1368,7 +1368,7 @@ For the latent class models (LC-MVP and LC-MVOP), BayesMVP chooses the order of 
 (i.e., the columns of `y`) automatically, before the main burn-in (`reorder_cols_MVP = TRUE` by default;
 `reorder_cols_MVP = FALSE` keeps the original order).
 The same is done, by default, for a Stan model whose data has a `latent_test_order` field
-(e.g. the four-class LC-MVOP).
+(e.g., the quad-latent-class comorbidity multivariate ordinal probit model, 4LC-MVOP).
 
 The model itself does not depend on the order of the tests;
 however, the unconstrained parameters which [HMC](https://arxiv.org/abs/1206.1901) samples do - and hence so does
@@ -1520,14 +1520,14 @@ sample (the burn-in, which is shorter for NicoStan, is left out).
 | Weibull survival | 500; 10,000; 100,000 | 6.3x | 9.1x | **36.0x** | 5.9x | 5.6x | **20.9x** |
 | Hierarchical logistic regression | 500; 10,000; 100,000 | 3.6x | **20.1x** | **120.8x** | 4.4x | **14.7x** | **50.8x** |
 | Graded response IRT | 500; 5000; 50,000 | **19.6x** | **17.6x** | **130.6x** | **19.9x** | **20.4x** | **54.6x** |
-| Four-class LC-MVOP | 500; 5000; 50,000 | **45.9x** | **44.9x** | **277.2x** | **37.3x** | **41.2x** | **126.2x** |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 500; 5000; 50,000 | **45.9x** | **44.9x** | **277.2x** | **37.3x** | **41.2x** | **126.2x** |
 
 **Bold**: 10x or more.
 
 NicoStan's minimum ESS per gradient over Stan's is:
 
 - for the models with a nuisance block (Shared-frailty Cox survival, Hierarchical logistic regression, Graded
-response IRT and Four-class LC-MVOP), which NicoStan samples with diffusion HMC: that of the binary latent class
+response IRT and 4LC-MVOP), which NicoStan samples with diffusion HMC: that of the binary latent class
 multivariate probit (LC-MVP) model of Paper 1's E3, with diffusion HMC, at the largest N measured up to the N of
 the column (local-HPC: 3.68x at N = 500, 2.54x at N = 2500, from 3 of its 24 configurations, and 11.21x at
 N = 10,000; laptop: 4.43x, 3.96x and 7.43x), except at N = 500 for the Shared-frailty Cox survival and
@@ -1550,14 +1550,14 @@ that of NUTS.
 | Weibull survival | 4.11x (nico_reduce_sum) x 1.53x | 5.94x (auto-chunking) x 1.53x | 23.61x (auto-chunking) x 1.53x | 3.87x (nico_reduce_sum) x 1.53x | 3.64x (auto-chunking) x 1.53x | 13.72x (auto-chunking) x 1.53x |
 | Hierarchical logistic regression | 2.16x (nico_reduce_sum) x 1.66x | 1.79x (nico_reduce_sum) x 11.21x | 10.78x (nico_reduce_sum) x 11.21x | 2.63x (nico_reduce_sum) x 1.66x | 1.98x (nico_reduce_sum) x 7.43x | 6.84x (nico_reduce_sum) x 7.43x |
 | Graded response IRT | 5.33x (nico_reduce_sum) x 3.68x | 6.94x (nico_reduce_sum) x 2.54x | 11.65x (nico_reduce_sum) x 11.21x | 4.49x (nico_reduce_sum) x 4.43x | 5.16x (nico_reduce_sum) x 3.96x | 7.35x (nico_reduce_sum) x 7.43x |
-| Four-class LC-MVOP | 12.48x (auto-chunking) x 3.68x | 17.69x (auto-chunking) x 2.54x | 24.73x (auto-chunking) x 11.21x | 8.42x (auto-chunking) x 4.43x | 10.41x (nico_reduce_sum) x 3.96x | 16.99x (auto-chunking) x 7.43x |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 12.48x (auto-chunking) x 3.68x | 17.69x (auto-chunking) x 2.54x | 24.73x (auto-chunking) x 11.21x | 8.42x (auto-chunking) x 4.43x | 10.41x (nico_reduce_sum) x 3.96x | 16.99x (auto-chunking) x 7.43x |
 
 The Stochastic volatility, Latent diffusion survival, Joint longitudinal and survival and Gaussian process
 regression models are not in Table 21, hence they have no estimate at these N.
 
 The second table gives NicoStan's minimum ESS per 1000 sampling gradient evaluations over Stan's, measured in the
 benchmark above (at the N of each model), at each warm-up / burn-in length.
-The Four-class LC-MVOP was not part of this benchmark: its rows are those of the latent class multivariate
+The quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) was not part of this benchmark: its rows are those of the latent class multivariate
 ordinal probit (LC-MVOP) model of Paper 1's E3 (N = 250, laptop; every NicoStan run of this model in E3 used
 diffusion HMC and 125 or 250 burn-in iterations).
 **Bold**: the higher of the two NicoStan columns of the row (and any within 1% of it).
@@ -1592,9 +1592,9 @@ The ratios are of the minimum ESS values rounded to three significant digits.
 | Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **1.5x** |
 | Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **2.0x** |
 | Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **2.0x** |
-| Four-class LC-MVOP | 250 | 125 | **2.2x** | (not run) |
-| Four-class LC-MVOP | 500 | 250 | **2.5x** | (not run) |
-| Four-class LC-MVOP | 1000 | 500 | (no NicoStan run with 500 burn-in iterations) | (not run) |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 250 | 125 | **2.2x** | (not run) |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 500 | 250 | **2.5x** | (not run) |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 1000 | 500 | (no NicoStan run with 500 burn-in iterations) | (not run) |
 
 
 In this benchmark, with the same Stan model and Stan::math on both sides, NicoStan reached a minimum ESS of 1000
@@ -1939,7 +1939,7 @@ Similarly, the nico_reduce_sum version of the NMA holds its study effects as fou
 | | $\boldsymbol{\sigma}_{\beta} \in \mathbb{R}^2$ (`beta_sigma`) | between-study SDs (Nyaga's $\sigma$) | 2 | main (fixed size) |
 | | $\boldsymbol{\tau}^{\text{raw}}$ (`beta_tau_raw`) | test-specific between-study SDs | $n_{\text{tests}} \times 2$ | main (fixed size) |
 | | $\rho_{\beta}$ (`beta_corr`) | between-study correlation of the two classes (possibly restricted) | 1 | main (fixed size) |
-| Four-class LC-MVOP | $\tilde{\mathbf{u}}_i \in \mathbb{R}^{n_{\text{tests}}}$ (`u_raw`) | GHK nuisance variables of each row (one row vector per row) | $n_{\text{rows}} \times n_{\text{tests}}$ | nuisance (GHK latent variables, grow with N) |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | $\tilde{\mathbf{u}}_i \in \mathbb{R}^{n_{\text{tests}}}$ (`u_raw`) | GHK nuisance variables of each row (one row vector per row) | $n_{\text{rows}} \times n_{\text{tests}}$ | nuisance (GHK latent variables, grow with N) |
 | | $\boldsymbol{\omega}$ (`Omega_unconstrained_vec`) | free entries of the correlation matrices (class, then row, then column) | $n_{\text{corrs}}$ | main (fixed size) |
 | | $\boldsymbol{\beta}^{\text{own}}_{\text{absent}}$ (`beta_own_absent_free`) | mean of each test when its own condition is absent | $n_{\text{tests}}$ | main (fixed size) |
 | | $\boldsymbol{\beta}^{\text{own}}_{\text{present}}$ (`beta_own_present_free`) | mean of each test when its own condition is present (above the absent one) | $n_{\text{tests}}$ | main (fixed size) |
@@ -2046,7 +2046,7 @@ Each version is timed at its own fastest layout; each side of a ratio is a media
 each NicoStan version, 2 or 3 for the naive model).
 Below each ratio is its layout: chains x threads per chain (number of chunks).
 **Bold**: more than 5x.
-The middle and larger N are 10,000 and 100,000 (Graded response IRT and Four-class LC-MVOP: 5000 and 50,000).
+The middle and larger N are 10,000 and 100,000 (Graded response IRT and 4LC-MVOP: 5000 and 50,000).
 The NicoStan versions are the same models, also written as normal Stan models, run with auto-chunking on.
 Comparisons 3 and 4 of Table 21, with `nico_reduce_sum`, are in
 [nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model-paper-1-table-21).
@@ -2054,7 +2054,7 @@ Comparisons 3 and 4 of Table 21, with `nico_reduce_sum`, are in
 **Comparison 1:** the nico::math (AVX) model with the fused nico_ functions, auto-chunking on, over the faster of the
 two naive Stan models, with Stan's own fused functions (`student_t` for the Robust Student-t regression,
 `poisson_log_glm` for the Weibull survival and `bernoulli_logit_glm` for the Hierarchical logistic regression) and
-without them (the Four-class LC-MVOP has only the one without).
+without them (the 4LC-MVOP has only the one without).
 
 | Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
 |---|---:|---:|---:|---:|---:|---:|
@@ -2063,7 +2063,7 @@ without them (the Four-class LC-MVOP has only the one without).
 | Weibull survival (500, 10,000, 100,000) | 3.41x<br><sub>180 x 1 (1)</sub> | **5.94x**<br><sub>180 x 1 (2)</sub> | **23.61x**<br><sub>180 x 1 (8)</sub> | 2.86x<br><sub>16 x 1 (1)</sub> | 3.64x<br><sub>16 x 1 (2)</sub> | **13.72x**<br><sub>16 x 1 (8)</sub> |
 | Hierarchical logistic regression (500, 10,000, 100,000) | 1.14x<br><sub>180 x 1 (2)</sub> | 1.39x<br><sub>180 x 1 (2)</sub> | **5.68x**<br><sub>180 x 1 (128)</sub> | 1.28x<br><sub>16 x 1 (1)</sub> | 1.53x<br><sub>16 x 1 (4)</sub> | 3.79x<br><sub>16 x 1 (128)</sub> |
 | Graded response IRT (500, 5000, 50,000) | 4.59x<br><sub>180 x 1 (1)</sub> | 3.92x<br><sub>180 x 1 (8)</sub> | **5.87x**<br><sub>180 x 1 (128)</sub> | 3.23x<br><sub>16 x 1 (2)</sub> | 2.29x<br><sub>16 x 1 (8)</sub> | 4.77x<br><sub>16 x 1 (128)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | **12.48x**<br><sub>180 x 1 (1)</sub> | **17.69x**<br><sub>180 x 1 (32)</sub> | **24.73x**<br><sub>180 x 1 (128)</sub> | **8.42x**<br><sub>16 x 1 (4)</sub> | **8.09x**<br><sub>16 x 1 (64)</sub> | **16.99x**<br><sub>16 x 1 (256)</sub> |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP; 500, 5000, 50,000) | **12.48x**<br><sub>180 x 1 (1)</sub> | **17.69x**<br><sub>180 x 1 (32)</sub> | **24.73x**<br><sub>180 x 1 (128)</sub> | **8.42x**<br><sub>16 x 1 (4)</sub> | **8.09x**<br><sub>16 x 1 (64)</sub> | **16.99x**<br><sub>16 x 1 (256)</sub> |
 
 **Comparison 2:** the nico::math (AVX) model without fused functions, auto-chunking on, over the naive Stan model
 without fused functions.
@@ -2075,7 +2075,7 @@ without fused functions.
 | Weibull survival (500, 10,000, 100,000) | 1.22x<br><sub>180 x 1 (2)</sub> | 3.26x<br><sub>180 x 1 (8)</sub> | **8.00x**<br><sub>180 x 1 (64)</sub> | 1.39x<br><sub>16 x 1 (4)</sub> | 2.66x<br><sub>16 x 1 (8)</sub> | **5.65x**<br><sub>16 x 1 (32)</sub> |
 | Hierarchical logistic regression (500, 10,000, 100,000) | 1.55x<br><sub>180 x 1 (1)</sub> | **7.13x**<br><sub>180 x 1 (4)</sub> | **10.13x**<br><sub>180 x 1 (256)</sub> | 1.73x<br><sub>16 x 1 (1)</sub> | 4.24x<br><sub>8 x 1 (8)</sub> | **7.26x**<br><sub>16 x 1 (128)</sub> |
 | Graded response IRT (500, 5000, 50,000) | 2.89x<br><sub>180 x 1 (2)</sub> | **6.09x**<br><sub>180 x 1 (32)</sub> | **10.28x**<br><sub>180 x 1 (256)</sub> | 2.88x<br><sub>16 x 1 (4)</sub> | 3.10x<br><sub>16 x 1 (32)</sub> | **6.84x**<br><sub>16 x 1 (64)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | 2.46x<br><sub>180 x 1 (8)</sub> | 3.98x<br><sub>180 x 1 (64)</sub> | 4.59x<br><sub>180 x 1 (1024)</sub> | 2.07x<br><sub>16 x 1 (16)</sub> | 1.77x<br><sub>8 x 1 (64)</sub> | 3.05x<br><sub>8 x 1 (1024)</sub> |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP; 500, 5000, 50,000) | 2.46x<br><sub>180 x 1 (8)</sub> | 3.98x<br><sub>180 x 1 (64)</sub> | 4.59x<br><sub>180 x 1 (1024)</sub> | 2.07x<br><sub>16 x 1 (16)</sub> | 1.77x<br><sub>8 x 1 (64)</sub> | 3.05x<br><sub>8 x 1 (1024)</sub> |
 
 
 <!-- ------------------------------------------------------------------------------------------------------------------------------- -->
@@ -2151,7 +2151,7 @@ Each version is timed at its own fastest layout; each side of a ratio is a media
 each NicoStan version, 2 or 3 for the naive model).
 Below each ratio is its layout: chains x threads per chain (number of chunks).
 **Bold**: more than 5x.
-The middle and larger N are 10,000 and 100,000 (Graded response IRT and Four-class LC-MVOP: 5000 and 50,000).
+The middle and larger N are 10,000 and 100,000 (Graded response IRT and 4LC-MVOP: 5000 and 50,000).
 Comparisons 1 and 2 of Table 21, with auto-chunking, are in
 [Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model-paper-1-table-21).
 
@@ -2165,7 +2165,7 @@ Cox survival model also with `nico_map_rect`), auto-chunking off, over the faste
 | Weibull survival (500, 10,000, 100,000) | 4.11x<br><sub>180 x 1 (1)</sub> | **5.24x**<br><sub>180 x 1 (2)</sub> | **19.27x**<br><sub>180 x 1 (8)</sub> | 3.87x<br><sub>16 x 1 (1)</sub> | 3.22x<br><sub>16 x 1 (2)</sub> | **12.23x**<br><sub>16 x 1 (8)</sub> |
 | Hierarchical logistic regression (500, 10,000, 100,000) | 2.16x<br><sub>180 x 1 (1)</sub> | 1.79x<br><sub>180 x 1 (2)</sub> | **10.78x**<br><sub>180 x 1 (8)</sub> | 2.63x<br><sub>16 x 1 (1)</sub> | 1.98x<br><sub>16 x 1 (2)</sub> | **6.84x**<br><sub>16 x 1 (8)</sub> |
 | Graded response IRT (500, 5000, 50,000) | **5.33x**<br><sub>180 x 1 (2)</sub> | **6.94x**<br><sub>180 x 1 (2)</sub> | **11.65x**<br><sub>180 x 1 (32)</sub> | 4.49x<br><sub>16 x 1 (2)</sub> | **5.16x**<br><sub>16 x 1 (4)</sub> | **7.35x**<br><sub>16 x 1 (32)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | **10.86x**<br><sub>180 x 1 (2)</sub> | **15.92x**<br><sub>180 x 1 (8)</sub> | **21.07x**<br><sub>180 x 1 (128)</sub> | **7.79x**<br><sub>16 x 1 (2)</sub> | **10.41x**<br><sub>16 x 1 (32)</sub> | **14.96x**<br><sub>16 x 1 (512)</sub> |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP; 500, 5000, 50,000) | **10.86x**<br><sub>180 x 1 (2)</sub> | **15.92x**<br><sub>180 x 1 (8)</sub> | **21.07x**<br><sub>180 x 1 (128)</sub> | **7.79x**<br><sub>16 x 1 (2)</sub> | **10.41x**<br><sub>16 x 1 (32)</sub> | **14.96x**<br><sub>16 x 1 (512)</sub> |
 
 **Comparison 4:** the nico::math (AVX) model without fused functions, with `nico_reduce_sum` (the Shared-frailty Cox
 survival model also with `nico_map_rect`), auto-chunking off, over the naive Stan model without fused functions.
@@ -2177,7 +2177,7 @@ survival model also with `nico_map_rect`), auto-chunking off, over the naive Sta
 | Weibull survival (500, 10,000, 100,000) | 1.01x<br><sub>180 x 1 (1)</sub> | 2.17x<br><sub>180 x 1 (8)</sub> | **6.46x**<br><sub>90 x 2 (64)</sub> | 1.19x<br><sub>16 x 1 (1)</sub> | 1.87x<br><sub>16 x 1 (8)</sub> | 4.63x<br><sub>16 x 1 (64)</sub> |
 | Hierarchical logistic regression (500, 10,000, 100,000) | 1.27x<br><sub>180 x 1 (1)</sub> | **5.02x**<br><sub>180 x 1 (8)</sub> | **9.11x**<br><sub>180 x 1 (128)</sub> | 1.51x<br><sub>16 x 1 (1)</sub> | 3.38x<br><sub>16 x 1 (8)</sub> | **6.42x**<br><sub>16 x 1 (64)</sub> |
 | Graded response IRT (500, 5000, 50,000) | 2.23x<br><sub>180 x 1 (2)</sub> | 4.87x<br><sub>180 x 1 (32)</sub> | **7.38x**<br><sub>180 x 1 (256)</sub> | 2.12x<br><sub>16 x 1 (4)</sub> | 3.25x<br><sub>16 x 1 (64)</sub> | 4.51x<br><sub>16 x 1 (512)</sub> |
-| Four-class LC-MVOP (500, 5000, 50,000) | 2.99x<br><sub>180 x 1 (8)</sub> | 3.95x<br><sub>180 x 1 (64)</sub> | 4.97x<br><sub>90 x 2 (512)</sub> | 1.75x<br><sub>16 x 1 (8)</sub> | 2.25x<br><sub>16 x 1 (128)</sub> | 2.98x<br><sub>4 x 4 (1024)</sub> |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP; 500, 5000, 50,000) | 2.99x<br><sub>180 x 1 (8)</sub> | 3.95x<br><sub>180 x 1 (64)</sub> | 4.97x<br><sub>90 x 2 (512)</sub> | 1.75x<br><sub>16 x 1 (8)</sub> | 2.25x<br><sub>16 x 1 (128)</sub> | 2.98x<br><sub>4 x 4 (1024)</sub> |
 
 
 ### Map jobs in a shared-frailty Cox model
@@ -2397,12 +2397,12 @@ Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan
 
 | Model | N | Versions compared | AVX-512, local-HPC | timing | AVX2, laptop | timing |
 |---|---:|---|---:|---|---:|---|
-| Four-class LC-MVOP | 500 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.17x | median of 3 | 1.16x | median of 3 |
-| Four-class LC-MVOP | 500 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.17x | median of 3 | 1.16x | median of 3 |
-| Four-class LC-MVOP | 5000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.25x | median of 3 | 1.17x | median of 3 |
-| Four-class LC-MVOP | 5000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.21x | median of 3 | 1.23x | median of 3 |
-| Four-class LC-MVOP | 25,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.24x | median of 3 | 1.19x | median of 3 |
-| Four-class LC-MVOP | 25,000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.23x | median of 3 | 1.24x | median of 3 |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 500 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.17x | median of 3 | 1.16x | median of 3 |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 500 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.17x | median of 3 | 1.16x | median of 3 |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 5000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.25x | median of 3 | 1.17x | median of 3 |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 5000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.21x | median of 3 | 1.23x | median of 3 |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 25,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.24x | median of 3 | 1.19x | median of 3 |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP) | 25,000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.23x | median of 3 | 1.24x | median of 3 |
 | Gaussian process classification | 50 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.75x | single | 1.63x | single / median of 3 |
 | Gaussian process classification | 50 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.72x | single | 1.62x | single |
 | Gaussian process classification | 250 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 3.41x | single | 3.92x | median of 3 |
