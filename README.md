@@ -1386,7 +1386,7 @@ the order also sets the order of the correlation parameterisation
 `test_order_rule_for_reorder_cols_MVP = "greedy_correlation_order"`.
 - On our binary LC-MVP model (N = 10,000), the slower order of the old greedy-only rule needed 1.60x the
 gradient evaluations to reach the target min ESS (0.59x the min ESS per 1000 gradient evaluations);
-on our ordinal LC-MVOP model (N = 5,000), placing the binary test last needed 0.67-0.75x the gradient evaluations
+on our ordinal LC-MVOP model (N = 5000), placing the binary test last needed 0.67-0.75x the gradient evaluations
 of the input order.
 - The summaries and traces are returned in the original test order.
 
@@ -1411,7 +1411,7 @@ without a perfect gold standard.
 For our ordinal example dataset (using the LC-MVOP model),
 which is based on a real dataset on three tests to screen for and/or diagnose depression
 (more specifically, the MINI as the imperfect gold standard, and the PHQ-9 and CES-D-10 as the two ordinal tests),
-for N = 5,000 (hence 15,000 observations in total, since there are 3 tests), we found that NicoStan with BayesMVP
+for N = 5000 (hence 15,000 observations in total, since there are 3 tests), we found that NicoStan with BayesMVP
 (using the LC-MVOP model) was **over 50x more efficient than Stan** and **over 1000x more efficient than Mplus**.
 The latter is because, despite being very efficient for the binary LC-MVP,
 the Gibbs-based algorithm of Mplus struggles greatly with ordinal outcomes,
@@ -1443,7 +1443,7 @@ fitted using the default NUTS-HMC algorithm ([Hoffman and Gelman, 2014](https://
 All of these comparisons use the same data, priors and initial values.
 The results will report sampling efficiency in terms of effective sample size (ESS); more specifically:
 (i) sampling ESS/sec;
-(ii) the time taken to reach a minimum ESS of 100, 1,000 and 10,000; and
+(ii) the time taken to reach a minimum ESS of 100, 1000 and 10,000; and
 (iii) sampling ESS per gradient evaluation (ESS/grad).
 Additionally, we will report the warm-up (Stan) and burn-in (NicoStan) costs,
 as well as convergence diagnostics (e.g., R-hat and nested R-hat [nR-hat]; [Margossian et al., 2024](https://arxiv.org/abs/2110.13017v6)),
@@ -1458,7 +1458,7 @@ using the same Stan model files, data and initial values
 (from the NicoStan paper, *NicoStan: between-chain adaptive hybrid diffusion-pathspace HMC for general Stan models*, in preparation).
 Five of these models have a nuisance block:
 
-- a stochastic volatility model (`stochastic_volatility`, T = 1,000; SV;
+- a stochastic volatility model (`stochastic_volatility`, T = 1000; SV;
 example model file [EASY_Stochastic_volatility.stan](inst/examples/models/EASY_Stochastic_volatility.stan));
 - a shared-frailty Cox model (`shared_frailty_Cox_survival`, N = 250; COX;
 example model file [Frailty_surv_shared_frailty_Cox.stan](inst/examples/models/Frailty_surv_shared_frailty_Cox.stan));
@@ -1466,7 +1466,7 @@ example model file [Frailty_surv_shared_frailty_Cox.stan](inst/examples/models/F
 example model file [Latent_diffusion_survival.stan](inst/examples/models/Latent_diffusion_survival.stan));
 - a joint longitudinal and survival model (`joint_longitudinal_survival`, N = 75; JLS;
 example model file [Joint_longitudinal_surv.stan](inst/examples/models/Joint_longitudinal_surv.stan));
-- a hierarchical logistic regression (`hierarchical_logistic_regression`, N = 1,200; HLR;
+- a hierarchical logistic regression (`hierarchical_logistic_regression`, N = 1200; HLR;
 example model file [hierarchical_logistic_regression.stan](inst/examples/models/hierarchical_logistic_regression.stan)).
 
 The other three do not:
@@ -1475,7 +1475,7 @@ The other three do not:
 example model file [Gaussian_process.stan](inst/examples/models/Gaussian_process.stan));
 - a Weibull survival model (`Weibull_survival`, N = 250; WEI;
 example model file [standard_surv_Weibull.stan](inst/examples/models/standard_surv_Weibull.stan));
-- a robust regression with t₄ errors (`robust_Student_t_regression`, N = 1,000; RT4;
+- a robust regression with t₄ errors (`robust_Student_t_regression`, N = 1000; RT4;
 example model file [robust_regression_t4.stan](inst/examples/models/robust_regression_t4.stan)).
 
 
@@ -1492,7 +1492,7 @@ Both samplers used 4 chains for the warm-up (Stan) or burn-in (NicoStan), follow
 one fit at a time on a 96-core (192-thread) machine, with 5 seeds per configuration.
 Stan ran in two stages: the warm-up with 4 chains, then the sampling with 180 chains, each using the step size,
 metric and final state of its warm-up chain (adaptation off); adapt_delta = 0.8, maximum tree depth 10,
-and 250, 500 or 1,000 warm-up iterations (vs. NicoStan's 125, 250 or 500 burn-in iterations,
+and 250, 500 or 1000 warm-up iterations (vs. NicoStan's 125, 250 or 500 burn-in iterations,
 since we found Stan's warm-up to be unreliable with only 125 iterations).
 
 
@@ -1502,82 +1502,66 @@ as given by NicoStan's cache-based chunking rule (`fn_compute_initial_N_chunks()
 for the other seven models, the rule gave 1 chunk.
 
 
-The two tables below give NicoStan's gains over Stan (NUTS).
-The first is an estimate made without new runs: for each model, the measured speed-up in the (projected) time
-needed to reach a minimum ESS of 1000 (the measured warm-up or burn-in time, plus 1000 times the measured
-sampling time divided by the minimum ESS), with both samplers on the same Stan model and Stan::math, times the
-speed-up per gradient of NicoStan's fastest version of the model over Stan (its last column).
-NicoStan's burn-in and sampling both run its gradient, so a gradient that is k times faster makes its time about
-k times shorter, while Stan's time is unchanged.
-The second table gives the measured minimum ESS per 1000 sampling gradient evaluations of NicoStan over Stan,
-which does not depend on the speed per gradient
-(geometric means over 5 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
-i.e., of the SD, of the main parameters).
-
-
-Stan's times are those of its CmdStan processes (from the first chain's start to the last chain's end;
-for the sampling, this includes the staggered launch of its 180 processes),
-and NicoStan's those of its burn-in and sampling;
-every timed phase starts its clock at its first iteration (0 untimed iterations),
-and, for both samplers, the times exclude the compilation and loading of the model.
-**Bold**: the higher of the two NicoStan columns of the row (and any within 1% of it).
-
-The speed-ups per gradient are those of Table 21 of Paper 1 at N = 500 on the local-HPC (see
+The first table below is an estimate of NicoStan's speed-up over Stan (NUTS) at the N of Table 21 of Paper 1,
+made without new runs: each value is NicoStan's speed-up per gradient over the fastest naive Stan model (the
+faster of Comparison 1, auto-chunking, and Comparison 3, `nico_reduce_sum`, of Table 21; see
 [Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model-paper-1-table-21) and
-[nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model-paper-1-table-21)):
-the faster of the nico::math (AVX) model with the fused nico_ functions with auto-chunking (Shared-frailty Cox
-survival, Four-class LC-MVOP) or with `nico_reduce_sum` (Hierarchical logistic regression, Weibull survival,
-Robust Student-t regression), over the faster of the two naive Stan models.
-The Stochastic volatility, Latent diffusion survival and Joint longitudinal and survival models are not in
-Table 21, so theirs are those of the nico::math tables of this README at N = 500 on the local-HPC: the nico::math
-(AVX) version with `nico_reduce_sum` over its Stan::math version (Stochastic volatility, see
-[What nico_reduce_sum gives](#what-nico_reduce_sum-gives)); nico::math (AVX) over Stan::math, both with Stan's
-`reduce_sum` (Latent diffusion survival); and nico::math (AVX) with the fused nico_ functions over Stan::math with
-Stan's fused functions, both with Stan's `reduce_sum` (Joint longitudinal and survival).
-NicoStan's version of the Gaussian process regression has not been timed yet, so its measured value is kept.
+[nico_reduce_sum over the naive Stan model](#nico_reduce_sum-over-the-naive-stan-model-paper-1-table-21)),
+times NicoStan's minimum ESS per gradient over Stan's (i.e., the best NicoStan configuration over the best Stan
+configuration, over every warm-up / burn-in length), i.e., the speed-up in the sampling time per effective
+sample (the burn-in, which is shorter for NicoStan, is left out).
 
-The Four-class LC-MVOP was not part of this benchmark: its time column is NicoStan's minimum ESS per gradient
-over Stan's, times its speed-up per gradient (its burn-in time is left out), and its minimum ESS per gradient is
-that of the latent class multivariate ordinal probit (LC-MVOP) model of Paper 1's E3 (N = 250, laptop: the best
-NicoStan configuration over the best Stan configuration at each burn-in length; every NicoStan run of this model
-in E3 used diffusion HMC and 125 or 250 burn-in iterations).
+**Estimated speed-up over Stan (NUTS) in the sampling time per effective sample, at the N of Table 21 (higher is better):**
 
-The measured ratios are of the times and minimum ESS values rounded to three significant digits, so they can
-differ by up to 0.1x from the measured speed-ups given in the text after the tables, which come from the
-unrounded values.
+| Model | N (the three N of Table 21) | local-HPC, 180 x 1, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, 16 x 1, N = 500 | laptop, middle N | laptop, larger N |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival | 500; 10,000; 100,000 | 3.2x | **15.4x** | **25.4x** | 2.3x | 6.3x | **11.5x** |
+| Robust Student-t regression | 500; 10,000; 100,000 | **11.0x** | **15.8x** | **60.2x** | **11.0x** | **10.7x** | **36.8x** |
+| Weibull survival | 500; 10,000; 100,000 | 6.3x | 9.1x | **36.0x** | 5.9x | 5.6x | **20.9x** |
+| Hierarchical logistic regression | 500; 10,000; 100,000 | 3.6x | **20.1x** | **120.8x** | 4.4x | **14.7x** | **50.8x** |
+| Graded response IRT | 500; 5000; 50,000 | **19.6x** | **17.6x** | **130.6x** | **19.9x** | **20.4x** | **54.6x** |
+| Four-class LC-MVOP | 500; 5000; 50,000 | **45.9x** | **44.9x** | **277.2x** | **37.3x** | **41.2x** | **126.2x** |
 
+**Bold**: 10x or more.
 
-**Estimated speed-up over Stan (NUTS) in the time to reach a minimum ESS of 1000, with NicoStan's current speed per gradient (higher is better):**
+NicoStan's minimum ESS per gradient over Stan's is:
 
-| Model | Stan warm-up iterations | NicoStan burn-in iterations | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC | NicoStan's speed-up per gradient used |
-|---|---:|---:|---:|---:|---:|
-| Stochastic volatility | 250 | 125 | **12.1x** | 11.4x | 3.02x |
-| Stochastic volatility | 500 | 250 | **12.2x** | 11.5x | 3.02x |
-| Stochastic volatility | 1000 | 500 | **9.7x** | 9.3x | 3.02x |
-| Shared-frailty Cox survival | 250 | 125 | **12.5x** | 10.4x | 1.88x |
-| Shared-frailty Cox survival | 500 | 250 | **9.8x** | **9.8x** | 1.88x |
-| Shared-frailty Cox survival | 1000 | 500 | **9.9x** | 8.3x | 1.88x |
-| Latent diffusion survival | 250 | 125 | **12.1x** | **12.1x** | 3.09x |
-| Latent diffusion survival | 500 | 250 | **9.1x** | 8.9x | 3.09x |
-| Latent diffusion survival | 1000 | 500 | **6.6x** | **6.6x** | 3.09x |
-| Joint longitudinal and survival | 250 | 125 | **33.7x** | 32.5x | 2.75x |
-| Joint longitudinal and survival | 500 | 250 | **25.5x** | 25.2x | 2.75x |
-| Joint longitudinal and survival | 1000 | 500 | **20.1x** | **20.0x** | 2.75x |
-| Hierarchical logistic regression | 250 | 125 | **10.0x** | 9.6x | 2.16x |
-| Hierarchical logistic regression | 500 | 250 | **6.9x** | 6.8x | 2.16x |
-| Hierarchical logistic regression | 1000 | 500 | **5.8x** | 5.7x | 2.16x |
-| Gaussian process regression | 250 | 125 | (no nuisance block) | **2.3x** | not timed (measured value kept) |
-| Gaussian process regression | 500 | 250 | (no nuisance block) | **2.0x** | not timed (measured value kept) |
-| Gaussian process regression | 1000 | 500 | (no nuisance block) | **1.7x** | not timed (measured value kept) |
-| Weibull survival | 250 | 125 | (no nuisance block) | **9.5x** | 4.11x |
-| Weibull survival | 500 | 250 | (no nuisance block) | **7.0x** | 4.11x |
-| Weibull survival | 1000 | 500 | (no nuisance block) | **4.6x** | 4.11x |
-| Robust Student-t regression (t4 errors) | 250 | 125 | (no nuisance block) | **16.6x** | 5.40x |
-| Robust Student-t regression (t4 errors) | 500 | 250 | (no nuisance block) | **14.1x** | 5.40x |
-| Robust Student-t regression (t4 errors) | 1000 | 500 | (no nuisance block) | **12.0x** | 5.40x |
-| Four-class LC-MVOP | 250 | 125 | **27.7x** | (not run) | 12.48x |
-| Four-class LC-MVOP | 500 | 250 | **31.6x** | (not run) | 12.48x |
-| Four-class LC-MVOP | 1000 | 500 | (no NicoStan run with 500 burn-in iterations) | (not run) | 12.48x |
+- for the models with a nuisance block (Shared-frailty Cox survival, Hierarchical logistic regression, Graded
+response IRT and Four-class LC-MVOP), which NicoStan samples with diffusion HMC: that of the binary latent class
+multivariate probit (LC-MVP) model of Paper 1's E3, with diffusion HMC, at the largest N measured up to the N of
+the column (local-HPC: 3.68x at N = 500, 2.54x at N = 2500, from 3 of its 24 configurations, and 11.21x at
+N = 10,000; laptop: 4.43x, 3.96x and 7.43x), except at N = 500 for the Shared-frailty Cox survival and
+Hierarchical logistic regression models, which use their own (1.68x and 1.66x, measured in the benchmark above);
+with diffusion HMC the gain over Stan grows with N, hence the values at the larger N (which use those of
+N = 10,000) are likely to be underestimates;
+- for the models without one (Robust Student-t regression and Weibull survival), which NicoStan samples with
+standard HMC: their own (2.04x and 1.53x, measured in the benchmark above), at every N; note that NicoStan's
+minimum ESS per gradient is higher than Stan's even with standard HMC, since its burn-in algorithms (ESJD-rate,
+ChEES-R and SNAPER; see
+[Efficient burnin algorithms](#efficient-burnin-algorithms-snaper-hmc-and-chees-r-hmc)) are more efficient than
+that of NUTS.
+
+**The two factors of each value above (NicoStan's speed-up per gradient, from the version named, times its minimum ESS per gradient over Stan's):**
+
+| Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
+|---|---|---|---|---|---|---|
+| Shared-frailty Cox survival | 1.88x (auto-chunking) x 1.68x | 1.37x (auto-chunking) x 11.21x | 2.27x (auto-chunking) x 11.21x | 1.38x (nico_reduce_sum) x 1.68x | 0.85x (nico_reduce_sum) x 7.43x | 1.55x (auto-chunking) x 7.43x |
+| Robust Student-t regression | 5.40x (nico_reduce_sum) x 2.04x | 7.78x (auto-chunking) x 2.04x | 29.59x (auto-chunking) x 2.04x | 5.40x (nico_reduce_sum) x 2.04x | 5.25x (auto-chunking) x 2.04x | 18.08x (auto-chunking) x 2.04x |
+| Weibull survival | 4.11x (nico_reduce_sum) x 1.53x | 5.94x (auto-chunking) x 1.53x | 23.61x (auto-chunking) x 1.53x | 3.87x (nico_reduce_sum) x 1.53x | 3.64x (auto-chunking) x 1.53x | 13.72x (auto-chunking) x 1.53x |
+| Hierarchical logistic regression | 2.16x (nico_reduce_sum) x 1.66x | 1.79x (nico_reduce_sum) x 11.21x | 10.78x (nico_reduce_sum) x 11.21x | 2.63x (nico_reduce_sum) x 1.66x | 1.98x (nico_reduce_sum) x 7.43x | 6.84x (nico_reduce_sum) x 7.43x |
+| Graded response IRT | 5.33x (nico_reduce_sum) x 3.68x | 6.94x (nico_reduce_sum) x 2.54x | 11.65x (nico_reduce_sum) x 11.21x | 4.49x (nico_reduce_sum) x 4.43x | 5.16x (nico_reduce_sum) x 3.96x | 7.35x (nico_reduce_sum) x 7.43x |
+| Four-class LC-MVOP | 12.48x (auto-chunking) x 3.68x | 17.69x (auto-chunking) x 2.54x | 24.73x (auto-chunking) x 11.21x | 8.42x (auto-chunking) x 4.43x | 10.41x (nico_reduce_sum) x 3.96x | 16.99x (auto-chunking) x 7.43x |
+
+The Stochastic volatility, Latent diffusion survival, Joint longitudinal and survival and Gaussian process
+regression models are not in Table 21, hence they have no estimate at these N.
+
+The second table gives NicoStan's minimum ESS per 1000 sampling gradient evaluations over Stan's, measured in the
+benchmark above (at the N of each model), at each warm-up / burn-in length.
+The Four-class LC-MVOP was not part of this benchmark: its rows are those of the latent class multivariate
+ordinal probit (LC-MVOP) model of Paper 1's E3 (N = 250, laptop; every NicoStan run of this model in E3 used
+diffusion HMC and 125 or 250 burn-in iterations).
+**Bold**: the higher of the two NicoStan columns of the row (and any within 1% of it).
+The ratios are of the minimum ESS values rounded to three significant digits.
 
 
 **Minimum ESS per 1000 sampling gradient evaluations, NicoStan over Stan (NUTS) (measured; higher is better):**
@@ -1613,8 +1597,8 @@ unrounded values.
 | Four-class LC-MVOP | 1000 | 500 | (no NicoStan run with 500 burn-in iterations) | (not run) |
 
 
-With the same Stan model and Stan::math on both sides (the measured times, before the estimate above), NicoStan
-reached the target faster than Stan for every model and warm-up / burn-in length.
+In this benchmark, with the same Stan model and Stan::math on both sides, NicoStan reached a minimum ESS of 1000
+faster than Stan for every model and warm-up / burn-in length.
 
 
 For the fastest configuration of each sampler (for every model, Stan's 250 warm-up iterations and NicoStan's
@@ -1685,7 +1669,7 @@ its seed-matched ratio within plus or minus 25%.
 
 **Preliminary results, first N of each model (14 cells):**
 
-| Criterion | Time to min ESS 1,000: mean loss | worst loss | cells OK | Time to min ESS 10,000: mean loss | Gradients to min ESS 1,000: mean loss | Min ESS per 1,000 gradients: mean loss | worst loss | cells OK |
+| Criterion | Time to min ESS 1000: mean loss | worst loss | cells OK | Time to min ESS 10,000: mean loss | Gradients to min ESS 1000: mean loss | Min ESS per 1000 gradients: mean loss | worst loss | cells OK |
 |---|---|---|---|---|---|---|---|---|
 | ESJD | 1.073 | 1.30 | **11** | 1.186 | 1.178 | 1.214 | 1.87 | 6 |
 | ChEES | 1.107 | 1.76 | 5 | 1.206 | 1.379 | 1.483 | 2.43 | 3 |
@@ -1698,7 +1682,7 @@ its seed-matched ratio within plus or minus 25%.
 
 **Preliminary results, 10 x N (14 cells):**
 
-| Criterion | Time to min ESS 1,000: mean loss | worst loss | cells OK | Time to min ESS 10,000: mean loss | Gradients to min ESS 1,000: mean loss | Min ESS per 1,000 gradients: mean loss | worst loss | cells OK |
+| Criterion | Time to min ESS 1000: mean loss | worst loss | cells OK | Time to min ESS 10,000: mean loss | Gradients to min ESS 1000: mean loss | Min ESS per 1000 gradients: mean loss | worst loss | cells OK |
 |---|---|---|---|---|---|---|---|---|
 | ESJD | 1.119 | 2.32 | 9 | 1.161 | 1.135 | 1.167 | 2.69 | 8 |
 | ChEES | 1.233 | 1.74 | 3 | 1.379 | 1.361 | 1.489 | 2.72 | 2 |
@@ -1710,17 +1694,17 @@ its seed-matched ratio within plus or minus 25%.
 | ESJD x ChEES-R x SNAPER (0.50 / 0.25 / 0.25) | 1.084 | **1.16** | 7 | **1.072** | **1.045** | **1.062** | **1.25** | **12** |
 
 
-At the first N of each model, SNAPER had the smallest mean loss for the time to a minimum ESS of 1,000 (1.045)
-and of 10,000 (1.105), and for the gradient evaluations to a minimum ESS of 1,000 (1.104, with ESJD x SNAPER within 1%: 1.106);
+At the first N of each model, SNAPER had the smallest mean loss for the time to a minimum ESS of 1000 (1.045)
+and of 10,000 (1.105), and for the gradient evaluations to a minimum ESS of 1000 (1.104, with ESJD x SNAPER within 1%: 1.106);
 ESJD x SNAPER had the smallest mean loss for the minimum ESS per gradient (1.128, with SNAPER within 1%: 1.136).
-The two three-way blends had the largest mean losses for the time to a minimum ESS of 1,000 (1.242 for both)
+The two three-way blends had the largest mean losses for the time to a minimum ESS of 1000 (1.242 for both)
 and of 10,000 (1.230 and 1.235).
 
 
-At 10 x N, ESJD x ChEES-R had the smallest mean loss for the time to a minimum ESS of 1,000
+At 10 x N, ESJD x ChEES-R had the smallest mean loss for the time to a minimum ESS of 1000
 (1.069, with ChEES-R within 1%: 1.076); the weighted three-way blend (0.50 / 0.25 / 0.25) had the smallest mean loss for
-the time to a minimum ESS of 10,000 (1.072), for the gradient evaluations to a minimum ESS of 1,000 (1.045)
-and for the minimum ESS per gradient (1.062), the smallest worst losses for the time to a minimum ESS of 1,000 (1.16)
+the time to a minimum ESS of 10,000 (1.072), for the gradient evaluations to a minimum ESS of 1000 (1.045)
+and for the minimum ESS per gradient (1.062), the smallest worst losses for the time to a minimum ESS of 1000 (1.16)
 and for the minimum ESS per gradient (1.25, tied with the equally weighted blend),
 and the most cells OK for the minimum ESS per gradient (12 of 14).
 
@@ -2415,8 +2399,8 @@ Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan
 |---|---:|---|---:|---|---:|---|
 | Four-class LC-MVOP | 500 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.17x | median of 3 | 1.16x | median of 3 |
 | Four-class LC-MVOP | 500 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.17x | median of 3 | 1.16x | median of 3 |
-| Four-class LC-MVOP | 5,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.25x | median of 3 | 1.17x | median of 3 |
-| Four-class LC-MVOP | 5,000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.21x | median of 3 | 1.23x | median of 3 |
+| Four-class LC-MVOP | 5000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.25x | median of 3 | 1.17x | median of 3 |
+| Four-class LC-MVOP | 5000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.21x | median of 3 | 1.23x | median of 3 |
 | Four-class LC-MVOP | 25,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.24x | median of 3 | 1.19x | median of 3 |
 | Four-class LC-MVOP | 25,000 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 1.23x | median of 3 | 1.24x | median of 3 |
 | Gaussian process classification | 50 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.75x | single | 1.63x | single / median of 3 |
@@ -2457,7 +2441,7 @@ Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan
 | Shared-frailty Cox survival | 10,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.17x | median of 3 / single | 1.08x | median of 3 / single |
 | Shared-frailty Cox survival | 50,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.06x | median of 3 / single | 0.93x | median of 3 / single |
 | Two-class LC-MVOP | 500 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.33x | single / median of 2 | 1.20x | single |
-| Two-class LC-MVOP | 5,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.31x | single / median of 2 | 1.22x | single |
+| Two-class LC-MVOP | 5000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.31x | single / median of 2 | 1.22x | single |
 | Two-class LC-MVOP | 10,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.25x | single / median of 2 | 1.18x | single |
 | Two-class LC-MVOP | 25,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.27x | single / median of 2 | 1.23x | single |
 | Two-class LC-MVOP | 50,000 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 1.25x | single / median of 2 | 1.30x | single |
@@ -2477,7 +2461,7 @@ Geometric means over the models at each N (number of models in brackets):
 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 50 | 1.75x (1) | 1.63x (1) |
 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 250 | 3.41x (1) | 3.92x (1) |
 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 500 | 1.98x (9) | 1.80x (10) |
-| nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 5,000 | 1.28x (2) | 1.19x (2) |
+| nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 5000 | 1.28x (2) | 1.19x (2) |
 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 10,000 | 2.02x (8) | 1.92x (8) |
 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 25,000 | 1.25x (2) | 1.21x (2) |
 | nico::math (AVX), reduce_sum over Stan::math, reduce_sum | 50,000 | 2.01x (8) | 1.91x (8) |
@@ -2487,7 +2471,7 @@ Geometric means over the models at each N (number of models in brackets):
 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 50 | 1.72x (1) | 1.62x (1) |
 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 250 | 3.45x (1) | 3.63x (1) |
 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 500 | 2.45x (5) | 2.53x (4) |
-| nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 5,000 | 1.21x (1) | 1.23x (1) |
+| nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 5000 | 1.21x (1) | 1.23x (1) |
 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 10,000 | 3.29x (3) | 4.78x (2) |
 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 25,000 | 1.23x (1) | 1.24x (1) |
 | nico::math (AVX), nico_reduce_sum over Stan::math, nico_reduce_sum | 50,000 | 3.38x (3) | 4.69x (2) |
@@ -2841,13 +2825,13 @@ hierarchical logistic regression, Gaussian process regression, Weibull survival,
 each at its first $N$ and at $10 \times N$, with burnin lengths of 250 and 125 iterations
 (i.e., 14 cells per $N$; 10 seeds per cell; diffusion HMC for the nuisance blocks).
 The loss is the criterion's geometric mean over the seeds relative to the best criterion of the cell
-(1.00 = the best; for the minimum ESS per 1,000 gradients, the best criterion's value divided by the criterion's);
+(1.00 = the best; for the minimum ESS per 1000 gradients, the best criterion's value divided by the criterion's);
 "average loss" is the geometric mean of the loss over the 14 cells, "worst loss" the largest,
 and "cells OK" the number of cells where the criterion was the best, or within noise of it with the 95% interval within ±25%.
 The three-way blends are `"ESJD_CHESSR_SNAPER"` (equal weights) and `"ESJD_w50_CHESSR_w25_SNAPER_w25"` (0.50 / 0.25 / 0.25).
 
 
-| $N$ | Criterion | Time to min ESS of 1,000: average loss | worst loss | cells OK (of 14) | Min ESS per 1,000 gradients: average loss | worst loss | cells OK (of 14) |
+| $N$ | Criterion | Time to min ESS of 1000: average loss | worst loss | cells OK (of 14) | Min ESS per 1000 gradients: average loss | worst loss | cells OK (of 14) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | First $N$ | ChEES | 1.107 | 1.76 | 5 | 1.483 | 2.43 | 3 |
 | First $N$ | ChEES-R (default) | 1.086 | 1.36 | 7 | 1.211 | 1.77 | 5 |
@@ -2870,16 +2854,16 @@ The three-way blends are `"ESJD_CHESSR_SNAPER"` (equal weights) and `"ESJD_w50_C
 
 
 In other words (preliminary): no criterion was uniformly best;
-at the first $N$, SNAPER had the smallest average loss for the time to a minimum ESS of 1,000 (1.045)
+at the first $N$, SNAPER had the smallest average loss for the time to a minimum ESS of 1000 (1.045)
 and the smallest worst losses for both endpoints,
-whilst ESJD × SNAPER had the smallest average loss for the minimum ESS per 1,000 gradients (1.128, with SNAPER within 1%: 1.136);
-at $10 \times N$, ESJD × ChEES-R had the smallest average loss for the time to a minimum ESS of 1,000
+whilst ESJD × SNAPER had the smallest average loss for the minimum ESS per 1000 gradients (1.128, with SNAPER within 1%: 1.136);
+at $10 \times N$, ESJD × ChEES-R had the smallest average loss for the time to a minimum ESS of 1000
 (1.069, with ChEES-R within 1%: 1.076),
-whilst the weighted three-way blend (0.50 / 0.25 / 0.25) had the smallest average loss for the minimum ESS per 1,000 gradients
+whilst the weighted three-way blend (0.50 / 0.25 / 0.25) had the smallest average loss for the minimum ESS per 1000 gradients
 (1.062), the smallest worst losses for both endpoints (1.16 and 1.25) and the most cells OK for that endpoint (12 of 14).
-ChEES (without the division by the trajectory length) had the largest average loss for the minimum ESS per 1,000 gradients
-at both $N$, and for the time to a minimum ESS of 1,000 at $10 \times N$;
-at the first $N$, the two three-way blends had the largest average loss for the time to a minimum ESS of 1,000 (1.242).
+ChEES (without the division by the trajectory length) had the largest average loss for the minimum ESS per 1000 gradients
+at both $N$, and for the time to a minimum ESS of 1000 at $10 \times N$;
+at the first $N$, the two three-way blends had the largest average loss for the time to a minimum ESS of 1000 (1.242).
 
 
 **Preliminary results: latent class models (BayesMVP).**
@@ -2887,7 +2871,7 @@ In a preliminary pilot study on the binary LC-MVP ($N = 10{,}000$) and the ordin
 with burnin lengths of 125 and 250 iterations (4 cells; 20 seeds per criterion and cell; 400 runs in all),
 the average ratios to the best criterion of each cell (above 1 = a loss) were:
 
-| Criterion | Gradient evaluations to the target min ESS: average ratio | worst ratio | cells OK (of 4) | Min ESS per 1,000 gradients: average ratio | worst ratio | cells OK (of 4) |
+| Criterion | Gradient evaluations to the target min ESS: average ratio | worst ratio | cells OK (of 4) | Min ESS per 1000 gradients: average ratio | worst ratio | cells OK (of 4) |
 | --- | --- | --- | --- | --- | --- | --- |
 | ESJD | **1.072** | **1.171** | **3** | **1.091** | **1.204** | **3** |
 | ESJD × SNAPER | 1.139 | 1.265 | 2 | 1.156 | 1.265 | 1 |
