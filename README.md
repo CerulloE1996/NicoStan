@@ -1495,15 +1495,15 @@ and 250, 500 or 1,000 warm-up iterations (vs. NicoStan's 125, 250 or 500 burn-in
 since we found Stan's warm-up to be unreliable with only 125 iterations).
 
 
-For COX, both samplers evaluated the log-likelihood in 3 chunks
+For the shared-frailty Cox survival model, both samplers evaluated the log-likelihood in 3 chunks
 (using [reduce_sum_static](https://mc-stan.org/docs/stan-users-guide/parallelization.html)),
 as given by NicoStan's cache-based chunking rule (`fn_compute_initial_N_chunks()`) for 180 chains;
 for the other seven models, the rule gave 1 chunk.
 
 
-The table below shows the (projected) time needed to reach a minimum ESS of 1,000
-(the measured warm-up or burn-in time, plus 1,000 times the measured sampling time divided by the minimum ESS;
-in seconds) / the minimum ESS per 1,000 sampling gradient evaluations
+The two tables below show the (projected) time needed to reach a minimum ESS of 1000
+(the measured warm-up or burn-in time, plus 1000 times the measured sampling time divided by the minimum ESS;
+in seconds) and the minimum ESS per 1000 sampling gradient evaluations
 (geometric means over 5 seeds; the minimum is over the bulk ESS, the tail ESS and the ESS of the squared deviations,
 i.e., of the SD, of the main parameters).
 
@@ -1516,45 +1516,80 @@ and, for both samplers, the times exclude the compilation and loading of the mod
 **Bold**: the best of the row for each endpoint (and any within 1% of it).
 
 
-| Model | Stan warm-up / NicoStan burn-in | Stan (NUTS) | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
-|---|---|---|---|---|
-| SV | 250 / 125 | 2.08 / 7.0 | **0.52** / **11.4** | 0.55 / 7.8 |
-|  | 500 / 250 | 2.90 / 6.0 | **0.72** / **11.3** | 0.76 / 8.7 |
-|  | 1000 / 500 | 3.93 / 7.9 | **1.22** / **14.3** | 1.27 / 8.5 |
-| COX | 250 / 125 | 10.5 / 23.7 | **1.58** / **28.8** | 1.89 / 17.9 |
-|  | 500 / 250 | 14.4 / 23.3 | **2.77** / 29.9 | **2.76** / **32.1** |
-|  | 1000 / 500 | 22.3 / 23.6 | **4.23** / **39.9** | 5.06 / 26.8 |
-| LDS | 250 / 125 | 1.17 / 2.8 | 0.30 / 7.2 | **0.30** / **7.6** |
-|  | 500 / 250 | 1.47 / 2.8 | **0.50** / **7.3** | 0.51 / 6.4 |
-|  | 1000 / 500 | 1.91 / 2.8 | **0.89** / **8.7** | **0.89** / 7.3 |
-| JLS | 250 / 125 | 13.1 / 6.7 | **1.07** / 8.6 | 1.11 / **9.0** |
-|  | 500 / 250 | 15.3 / 6.2 | **1.65** / **10.1** | 1.67 / 8.0 |
-|  | 1000 / 500 | 19.7 / 6.1 | **2.69** / **7.2** | **2.71** / 5.9 |
-| HLR | 250 / 125 | 1.29 / 8.8 | **0.28** / **15.0** | 0.29 / 12.4 |
-|  | 500 / 250 | 1.60 / 8.7 | **0.50** / **15.8** | **0.51** / 11.8 |
-|  | 1000 / 500 | 2.45 / 9.5 | **0.92** / **15.0** | 0.93 / 11.9 |
-| GP | 250 / 125 | 0.89 / 86.5 | (no nuisance block) | **0.38** / **101.9** |
-|  | 500 / 250 | 1.39 / 86.3 | (no nuisance block) | **0.70** / **116.4** |
-|  | 1000 / 500 | 2.29 / 78.9 | (no nuisance block) | **1.32** / **107.5** |
-| WEI | 250 / 125 | 0.37 / 78.9 | (no nuisance block) | **0.16** / **108.9** |
-|  | 500 / 250 | 0.48 / 79.7 | (no nuisance block) | **0.28** / **132.2** |
-|  | 1000 / 500 | 0.58 / 86.6 | (no nuisance block) | **0.52** / **116.2** |
-| RT4 | 250 / 125 | 0.46 / 114.3 | (no nuisance block) | **0.15** / **171.2** |
-|  | 500 / 250 | 0.68 / 110.3 | (no nuisance block) | **0.26** / **224.1** |
-|  | 1000 / 500 | 1.07 / 114.0 | (no nuisance block) | **0.48** / **232.7** |
+**Time to reach a minimum ESS of 1000 (seconds; lower is better):**
+
+| Model | Stan warm-up iterations | NicoStan burn-in iterations | Stan (NUTS) | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
+|---|---:|---:|---:|---:|---:|
+| Stochastic volatility | 250 | 125 | 2.08 | **0.52** | 0.55 |
+| Stochastic volatility | 500 | 250 | 2.90 | **0.72** | 0.76 |
+| Stochastic volatility | 1000 | 500 | 3.93 | **1.22** | 1.27 |
+| Shared-frailty Cox survival | 250 | 125 | 10.5 | **1.58** | 1.89 |
+| Shared-frailty Cox survival | 500 | 250 | 14.4 | **2.77** | **2.76** |
+| Shared-frailty Cox survival | 1000 | 500 | 22.3 | **4.23** | 5.06 |
+| Latent diffusion survival | 250 | 125 | 1.17 | 0.30 | **0.30** |
+| Latent diffusion survival | 500 | 250 | 1.47 | **0.50** | 0.51 |
+| Latent diffusion survival | 1000 | 500 | 1.91 | **0.89** | **0.89** |
+| Joint longitudinal and survival | 250 | 125 | 13.1 | **1.07** | 1.11 |
+| Joint longitudinal and survival | 500 | 250 | 15.3 | **1.65** | 1.67 |
+| Joint longitudinal and survival | 1000 | 500 | 19.7 | **2.69** | **2.71** |
+| Hierarchical logistic regression | 250 | 125 | 1.29 | **0.28** | 0.29 |
+| Hierarchical logistic regression | 500 | 250 | 1.60 | **0.50** | **0.51** |
+| Hierarchical logistic regression | 1000 | 500 | 2.45 | **0.92** | 0.93 |
+| Gaussian process regression | 250 | 125 | 0.89 | (no nuisance block) | **0.38** |
+| Gaussian process regression | 500 | 250 | 1.39 | (no nuisance block) | **0.70** |
+| Gaussian process regression | 1000 | 500 | 2.29 | (no nuisance block) | **1.32** |
+| Weibull survival | 250 | 125 | 0.37 | (no nuisance block) | **0.16** |
+| Weibull survival | 500 | 250 | 0.48 | (no nuisance block) | **0.28** |
+| Weibull survival | 1000 | 500 | 0.58 | (no nuisance block) | **0.52** |
+| Robust Student-t regression (t4 errors) | 250 | 125 | 0.46 | (no nuisance block) | **0.15** |
+| Robust Student-t regression (t4 errors) | 500 | 250 | 0.68 | (no nuisance block) | **0.26** |
+| Robust Student-t regression (t4 errors) | 1000 | 500 | 1.07 | (no nuisance block) | **0.48** |
+
+
+**Minimum ESS per 1000 sampling gradient evaluations (higher is better):**
+
+| Model | Stan warm-up iterations | NicoStan burn-in iterations | Stan (NUTS) | NicoStan, ChEES-R, diffusion HMC | NicoStan, ChEES-R, standard HMC |
+|---|---:|---:|---:|---:|---:|
+| Stochastic volatility | 250 | 125 | 7.0 | **11.4** | 7.8 |
+| Stochastic volatility | 500 | 250 | 6.0 | **11.3** | 8.7 |
+| Stochastic volatility | 1000 | 500 | 7.9 | **14.3** | 8.5 |
+| Shared-frailty Cox survival | 250 | 125 | 23.7 | **28.8** | 17.9 |
+| Shared-frailty Cox survival | 500 | 250 | 23.3 | 29.9 | **32.1** |
+| Shared-frailty Cox survival | 1000 | 500 | 23.6 | **39.9** | 26.8 |
+| Latent diffusion survival | 250 | 125 | 2.8 | 7.2 | **7.6** |
+| Latent diffusion survival | 500 | 250 | 2.8 | **7.3** | 6.4 |
+| Latent diffusion survival | 1000 | 500 | 2.8 | **8.7** | 7.3 |
+| Joint longitudinal and survival | 250 | 125 | 6.7 | 8.6 | **9.0** |
+| Joint longitudinal and survival | 500 | 250 | 6.2 | **10.1** | 8.0 |
+| Joint longitudinal and survival | 1000 | 500 | 6.1 | **7.2** | 5.9 |
+| Hierarchical logistic regression | 250 | 125 | 8.8 | **15.0** | 12.4 |
+| Hierarchical logistic regression | 500 | 250 | 8.7 | **15.8** | 11.8 |
+| Hierarchical logistic regression | 1000 | 500 | 9.5 | **15.0** | 11.9 |
+| Gaussian process regression | 250 | 125 | 86.5 | (no nuisance block) | **101.9** |
+| Gaussian process regression | 500 | 250 | 86.3 | (no nuisance block) | **116.4** |
+| Gaussian process regression | 1000 | 500 | 78.9 | (no nuisance block) | **107.5** |
+| Weibull survival | 250 | 125 | 78.9 | (no nuisance block) | **108.9** |
+| Weibull survival | 500 | 250 | 79.7 | (no nuisance block) | **132.2** |
+| Weibull survival | 1000 | 500 | 86.6 | (no nuisance block) | **116.2** |
+| Robust Student-t regression (t4 errors) | 250 | 125 | 114.3 | (no nuisance block) | **171.2** |
+| Robust Student-t regression (t4 errors) | 500 | 250 | 110.3 | (no nuisance block) | **224.1** |
+| Robust Student-t regression (t4 errors) | 1000 | 500 | 114.0 | (no nuisance block) | **232.7** |
 
 
 NicoStan reached the target faster than Stan for every model and warm-up / burn-in length.
 
 
 For the fastest configuration of each sampler (for every model, Stan's 250 warm-up iterations and NicoStan's
-125 burn-in iterations), NicoStan was between 2.3x (GP and WEI) and 12.3x (JLS) faster
-(3.0x for RT4, 3.9x for LDS, 4.0x for SV, 4.6x for HLR and 6.6x for COX).
-Its highest minimum ESS per gradient was between 1.3x (GP) and 3.1x (LDS) that of Stan.
+125 burn-in iterations), NicoStan was between 2.3x (Gaussian process regression and Weibull survival) and
+12.3x (joint longitudinal and survival) faster (3.0x for the robust Student-t regression, 3.9x for the latent
+diffusion survival, 4.0x for the stochastic volatility, 4.6x for the hierarchical logistic regression and 6.6x
+for the shared-frailty Cox survival model).
+Its highest minimum ESS per gradient was between 1.3x (Gaussian process regression) and 3.1x (latent diffusion
+survival) that of Stan.
 
 
 Within NicoStan, diffusion HMC reached the target faster than standard HMC in 12 of the 15 cells with a nuisance
-block (i.e., combinations of model and burn-in length; for LDS with 500 burn-in iterations, the two are level at 0.89 s),
+block (i.e., combinations of model and burn-in length; for the latent diffusion survival model with 500 burn-in iterations, the two are level at 0.89 s),
 and it had a higher minimum ESS per gradient in 12 of them.
 
 
@@ -2008,7 +2043,7 @@ job inside that job, on the job's own nested tape, instead (see
 
 For the stochastic volatility model (non-centred, with one latent innovation per time point as its nuisance block),
 `nico_reduce_sum` is faster than Stan's `reduce_sum` at every N, and its gain grows with N.
-The table gives the sampling throughput (`TP_iter`, i.e., iterations per second over all chains) of the
+The table gives the sampling speed (`TP_iter`, i.e., iterations per second over all chains) of the
 nico::math (AVX) version with `nico_reduce_sum` over that of the same version with Stan's `reduce_sum`, each at its
 own fastest layout of chains, threads per chain and chunks (from the saved layout timings):
 
@@ -2075,7 +2110,7 @@ Layouts are given as chains x within-chain threads (WCP) / requested chunks.
 | laptop | nico::math (AVX2) | 200,000 | 16 x 1 / 256 | 8 x 2 / 256 | 1.496x |
 
 
-At N = 10,000 the gain is small; on the laptop with Stan::math, `nico_map_rect` has 4.0% lower throughput.
+At N = 10,000 the gain is small; on the laptop with Stan::math, `nico_map_rect` has 4.0% lower speed.
 The gains are larger at N = 50,000 and 200,000, for both math backends and both machines.
 
 
@@ -2236,7 +2271,7 @@ A speed-up is TP_iter(AVX) / TP_iter(Stan::math), where TP_iter is the number of
 
 Every timed call starts its clock at its first iteration. A timed call with a divergent transition is not used. Where the fastest layouts were timed again 3 times, the speed-up uses the median of the 3 repeats ("median of 3"); otherwise it uses the single timing of the ground-truth search ("single"). Where the two sides differ, the column gives the first version named in "Versions compared" first; a few cases have only 2 repeats ("median of 2").
 
-Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan::math with Stan's reduce_sum, and nico_reduce_sum against nico_reduce_sum. The second table compares nico::math (AVX) with the fused nico_ functions (e.g. the fused GHK) against Stan::math with Stan's fused functions (e.g. bernoulli_logit_glm), for the models where Stan has such a function. The third table gives the gain of nico_reduce_sum over Stan's reduce_sum on the same math library. Where a model has more than one Stan file for the same version, the fastest one is used.
+Like is compared with like: nico::math (AVX) with Stan's reduce_sum against Stan::math with Stan's reduce_sum, and nico_reduce_sum against nico_reduce_sum. The second table compares nico::math (AVX) with the fused nico_ functions (e.g. the fused GHK) against Stan::math with Stan's fused functions (e.g. bernoulli_logit_glm), for the models where Stan has such a function. The third set of tables (Table 21 of Paper 1) gives the speed-ups of NicoStan over the naive Stan model, with auto-chunking or with nico_reduce_sum. Where a model has more than one Stan file for the same version, the fastest one is used.
 
 ### nico::math (AVX) over Stan::math
 
@@ -2370,139 +2405,68 @@ Geometric means over the models at each N (number of models in brackets):
 | nico::math (AVX) fused, nico_reduce_sum over Stan::math fused, nico_reduce_sum | 50,000 | 3.90x (4) | 3.64x (4) |
 
 
-### nico_reduce_sum over Stan's reduce_sum
+### NicoStan over the naive Stan model (Paper 1, Table 21)
 
-Here both sides use the same math library (Stan::math or nico::math (AVX)); the two columns are the two machines, each with its own math library.
+Each ratio is the sampling speed (`TP_iter`, i.e., iterations per second over all chains, per 10 leapfrog steps) of a
+NicoStan version over that of the naive Stan model: the same model written as a normal Stan model and run with
+Stan::math only, with no chunking of any kind (no `reduce_sum`, no `map_rect`, no auto-chunking).
+Each version is timed at its own fastest layout; each side of a ratio is a median of repeated timings (3 for
+each NicoStan version, 2 or 3 for the naive model).
+Below each ratio is its layout: chains x threads per chain (number of chunks).
+**Bold**: more than 5x.
+The middle and larger N are 10,000 and 100,000 (Graded response IRT and Four-class LC-MVOP: 5000 and 50,000).
+Comparisons 1 and 2 use auto-chunking, which is in the development version of NicoStan and not yet in the released
+package.
 
+**Comparison 1:** the nico::math (AVX) model with the fused nico_ functions, auto-chunking on, over the faster of the
+two naive Stan models, with Stan's own fused functions (`student_t` for the Robust Student-t regression,
+`poisson_log_glm` for the Weibull survival and `bernoulli_logit_glm` for the Hierarchical logistic regression) and
+without them (the Four-class LC-MVOP has only the one without).
 
-| Model | N | Versions compared | local-HPC | timing | laptop | timing |
-|---|---:|---|---:|---|---:|---|
-| Four-class LC-MVOP | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.03x | median of 3 | 1.04x | median of 3 |
-| Four-class LC-MVOP | 500 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.03x | median of 3 | 1.04x | median of 3 |
-| Four-class LC-MVOP | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.88x | single | 0.81x | single / median of 3 |
-| Four-class LC-MVOP | 5,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.04x | median of 3 | 1.03x | median of 3 |
-| Four-class LC-MVOP | 5,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.01x | median of 3 | 1.08x | median of 3 |
-| Four-class LC-MVOP | 5,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.88x | single | 0.75x | single / median of 3 |
-| Four-class LC-MVOP | 25,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.03x | median of 3 | 1.05x | median of 3 |
-| Four-class LC-MVOP | 25,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.03x | median of 3 | 1.09x | median of 3 |
-| Four-class LC-MVOP | 25,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.89x | single | 0.80x | single / median of 3 |
-| Gaussian process classification | 50 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.98x | single | 0.97x | single / median of 3 |
-| Gaussian process classification | 50 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.96x | single | 0.97x | single |
-| Gaussian process classification | 50 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | no numerator row |  | 0.99x | single |
-| Gaussian process classification | 250 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.98x | single | 0.99x | single / median of 3 |
-| Gaussian process classification | 250 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.00x | single | 0.92x | single / median of 3 |
-| Gaussian process classification | 250 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | no numerator row |  | 1.00x | single |
-| Gaussian process classification | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.97x | single / median of 3 | 0.99x | single / median of 3 |
-| Gaussian process classification | 500 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.87x | single / median of 3 | 0.86x | single / median of 3 |
-| Gaussian process classification | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | no numerator row |  | 1.00x | single |
-| Graded response IRT | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.00x | median of 2 / median of 3 | 1.03x | median of 3 |
-| Graded response IRT | 500 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.04x | median of 3 | 1.04x | median of 3 |
-| Graded response IRT | 500 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.99x | median of 3 | 1.01x | median of 3 |
-| Graded response IRT | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.03x | median of 3 | 0.95x | median of 3 |
-| Graded response IRT | 10,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.04x | median of 2 / median of 3 | 1.04x | median of 3 |
-| Graded response IRT | 10,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.02x | median of 3 | 1.04x | median of 3 |
-| Graded response IRT | 10,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.00x | median of 3 | 1.03x | median of 3 |
-| Graded response IRT | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.04x | median of 3 | 1.00x | median of 3 |
-| Graded response IRT | 50,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.03x | median of 3 | 1.04x | median of 3 |
-| Graded response IRT | 50,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.03x | median of 3 | 1.04x | median of 3 |
-| Graded response IRT | 50,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.98x | median of 3 | 1.01x | median of 3 |
-| Graded response IRT | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.05x | median of 3 | 1.00x | median of 3 |
-| Hierarchical logistic regression | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.01x | median of 3 | 0.91x | median of 3 |
-| Hierarchical logistic regression | 500 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.19x | median of 3 | 1.09x | median of 3 |
-| Hierarchical logistic regression | 500 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.98x | single / median of 3 | no numerator row |  |
-| Hierarchical logistic regression | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.02x | median of 3 | 0.93x | median of 3 |
-| Hierarchical logistic regression | 10,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.14x | median of 3 | 1.12x | median of 3 |
-| Hierarchical logistic regression | 10,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.24x | median of 3 | 1.15x | median of 3 |
-| Hierarchical logistic regression | 10,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.00x | single / median of 3 | no numerator row |  |
-| Hierarchical logistic regression | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.34x | median of 3 | 1.47x | median of 3 |
-| Hierarchical logistic regression | 50,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.16x | median of 3 | 1.12x | median of 3 |
-| Hierarchical logistic regression | 50,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.21x | median of 3 | 1.15x | median of 3 |
-| Hierarchical logistic regression | 50,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.00x | single / median of 3 | no numerator row |  |
-| Hierarchical logistic regression | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.28x | median of 3 | 1.43x | median of 3 |
-| Joint longitudinal and survival | 500 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.02x | median of 3 / single | 1.02x | median of 3 / single |
-| Joint longitudinal and survival | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.02x | median of 3 / single | 1.05x | median of 3 / single |
-| Joint longitudinal and survival | 10,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.03x | median of 3 / single | 1.00x | median of 3 / single |
-| Joint longitudinal and survival | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.08x | median of 3 / single | 1.16x | median of 3 / single |
-| Joint longitudinal and survival | 50,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 1.07x | median of 3 / single | 1.04x | median of 3 / single |
-| Joint longitudinal and survival | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.27x | median of 3 / single | 1.28x | median of 3 / single |
-| Latent diffusion survival | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.96x | single | 0.95x | single |
-| Latent diffusion survival | 500 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.95x | single / median of 3 | 0.93x | single |
-| Latent diffusion survival | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.96x | single | 0.93x | single |
-| Latent diffusion survival | 10,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.01x | single | 0.97x | single |
-| Latent diffusion survival | 10,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.99x | single / median of 3 | 0.99x | single |
-| Latent diffusion survival | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.02x | single | 1.00x | single |
-| Latent diffusion survival | 50,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.00x | single | 0.95x | single |
-| Latent diffusion survival | 50,000 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.01x | single / median of 3 | 0.94x | single |
-| Latent diffusion survival | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.02x | single | 0.98x | single |
-| Network meta-analysis (Xu, fixed cutpoints) | 10 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.78x | single | no numerator row |  |
-| Network meta-analysis (Xu, fixed cutpoints) | 10 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 0.99x | single | no numerator row |  |
-| Network meta-analysis (Xu, fixed cutpoints) | 25 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.75x | single | no numerator row |  |
-| Network meta-analysis (Xu, fixed cutpoints) | 25 | nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 1.47x | single | no numerator row |  |
-| One-class MVOP | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.03x | single | 0.84x | single |
-| One-class MVOP | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.22x | single | 0.94x | single |
-| One-class MVOP | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.46x | single | 1.03x | single |
-| Shared-frailty Cox survival | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | not timed |  | 0.89x | median of 3 |
-| Shared-frailty Cox survival | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | not timed |  | 0.28x | median of 3 / single |
-| Shared-frailty Cox survival | 10,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.74x | median of 3 / single | 0.62x | median of 3 / single |
-| Shared-frailty Cox survival | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.14x | median of 3 / single | 0.11x | median of 3 / single |
-| Shared-frailty Cox survival | 50,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 0.60x | median of 3 / single | 0.60x | median of 3 / single |
-| Shared-frailty Cox survival | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.14x | median of 3 / single | 0.19x | median of 3 / single |
-| Spatial logistic regression (HSGP) | 500 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 0.35x | single | 0.92x | single |
-| Spatial logistic regression (HSGP) | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.91x | single / median of 3 | 0.90x | single / median of 3 |
-| Spatial logistic regression (HSGP) | 10,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 0.34x | single | 0.98x | single |
-| Spatial logistic regression (HSGP) | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.00x | single / median of 3 | 0.98x | single / median of 3 |
-| Spatial logistic regression (HSGP) | 50,000 | Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 0.49x | single | 1.00x | single / median of 3 |
-| Spatial logistic regression (HSGP) | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.00x | single / median of 3 | 1.00x | single / median of 3 |
-| Stochastic volatility | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.02x | median of 3 / single | 1.05x | median of 3 / single |
-| Stochastic volatility | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.13x | single | 1.17x | single |
-| Stochastic volatility | 10,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.04x | median of 3 / single | 1.12x | median of 3 / single |
-| Stochastic volatility | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.30x | single | 1.36x | single |
-| Stochastic volatility | 50,000 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 1.21x | median of 3 / single | 1.23x | median of 3 / single |
-| Stochastic volatility | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 2.11x | single | 2.45x | single |
-| Two-class LC-MVOP | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.81x | single / median of 2 | 0.79x | single |
-| Two-class LC-MVOP | 5,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.81x | single / median of 2 | 0.84x | single |
-| Two-class LC-MVOP | 10,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.87x | single / median of 2 | 0.84x | single |
-| Two-class LC-MVOP | 25,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 0.95x | single / median of 2 | 0.86x | single |
-| Two-class LC-MVOP | 50,000 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 1.01x | single / median of 2 | 0.85x | single |
-| Two-compartment population PK | 50 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | no numerator row |  | 1.28x | single |
-| Two-compartment population PK | 50 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | not timed |  | 0.66x | single |
-| Two-compartment population PK | 500 | Stan::math, nico_reduce_sum over Stan::math, reduce_sum | no numerator row |  | 1.40x | single |
-| Two-compartment population PK | 500 | nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | no numerator row |  | 0.54x | single |
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.88x<br><sub>180 x 1 (1)</sub> | 1.37x<br><sub>180 x 1 (8)</sub> | 2.27x<br><sub>180 x 1 (128)</sub> | 0.82x<br><sub>16 x 1 (1)</sub> | 0.73x<br><sub>16 x 1 (8)</sub> | 1.55x<br><sub>16 x 1 (256)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | 4.34x<br><sub>180 x 1 (1)</sub> | **7.78x**<br><sub>180 x 1 (2)</sub> | **29.59x**<br><sub>180 x 1 (8)</sub> | 3.54x<br><sub>16 x 1 (1)</sub> | **5.25x**<br><sub>16 x 1 (2)</sub> | **18.08x**<br><sub>16 x 1 (8)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 3.41x<br><sub>180 x 1 (1)</sub> | **5.94x**<br><sub>180 x 1 (2)</sub> | **23.61x**<br><sub>180 x 1 (8)</sub> | 2.86x<br><sub>16 x 1 (1)</sub> | 3.64x<br><sub>16 x 1 (2)</sub> | **13.72x**<br><sub>16 x 1 (8)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 1.14x<br><sub>180 x 1 (2)</sub> | 1.39x<br><sub>180 x 1 (2)</sub> | **5.68x**<br><sub>180 x 1 (128)</sub> | 1.28x<br><sub>16 x 1 (1)</sub> | 1.53x<br><sub>16 x 1 (4)</sub> | 3.79x<br><sub>16 x 1 (128)</sub> |
+| Graded response IRT (500, 5000, 50,000) | 4.59x<br><sub>180 x 1 (1)</sub> | 3.92x<br><sub>180 x 1 (8)</sub> | **5.87x**<br><sub>180 x 1 (128)</sub> | 3.23x<br><sub>16 x 1 (2)</sub> | 2.29x<br><sub>16 x 1 (8)</sub> | 4.77x<br><sub>16 x 1 (128)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | **12.48x**<br><sub>180 x 1 (1)</sub> | **17.69x**<br><sub>180 x 1 (32)</sub> | **24.73x**<br><sub>180 x 1 (128)</sub> | **8.42x**<br><sub>16 x 1 (4)</sub> | **8.09x**<br><sub>16 x 1 (64)</sub> | **16.99x**<br><sub>16 x 1 (256)</sub> |
 
+**Comparison 2:** the nico::math (AVX) model without fused functions, auto-chunking on, over the naive Stan model
+without fused functions.
 
-Geometric means over the models at each N (number of models in brackets):
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.25x<br><sub>180 x 1 (1)</sub> | 1.63x<br><sub>180 x 1 (8)</sub> | 3.04x<br><sub>180 x 1 (256)</sub> | 1.49x<br><sub>16 x 1 (1)</sub> | 1.43x<br><sub>16 x 1 (32)</sub> | 2.05x<br><sub>16 x 1 (128)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | 1.38x<br><sub>180 x 1 (1)</sub> | 2.90x<br><sub>180 x 1 (32)</sub> | **6.86x**<br><sub>180 x 1 (128)</sub> | 1.72x<br><sub>16 x 1 (1)</sub> | 3.37x<br><sub>16 x 1 (32)</sub> | **5.18x**<br><sub>16 x 1 (256)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 1.22x<br><sub>180 x 1 (2)</sub> | 3.26x<br><sub>180 x 1 (8)</sub> | **8.00x**<br><sub>180 x 1 (64)</sub> | 1.39x<br><sub>16 x 1 (4)</sub> | 2.66x<br><sub>16 x 1 (8)</sub> | **5.65x**<br><sub>16 x 1 (32)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 1.55x<br><sub>180 x 1 (1)</sub> | **7.13x**<br><sub>180 x 1 (4)</sub> | **10.13x**<br><sub>180 x 1 (256)</sub> | 1.73x<br><sub>16 x 1 (1)</sub> | 4.24x<br><sub>8 x 1 (8)</sub> | **7.26x**<br><sub>16 x 1 (128)</sub> |
+| Graded response IRT (500, 5000, 50,000) | 2.89x<br><sub>180 x 1 (2)</sub> | **6.09x**<br><sub>180 x 1 (32)</sub> | **10.28x**<br><sub>180 x 1 (256)</sub> | 2.88x<br><sub>16 x 1 (4)</sub> | 3.10x<br><sub>16 x 1 (32)</sub> | **6.84x**<br><sub>16 x 1 (64)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | 2.46x<br><sub>180 x 1 (8)</sub> | 3.98x<br><sub>180 x 1 (64)</sub> | 4.59x<br><sub>180 x 1 (1024)</sub> | 2.07x<br><sub>16 x 1 (16)</sub> | 1.77x<br><sub>8 x 1 (64)</sub> | 3.05x<br><sub>8 x 1 (1024)</sub> |
 
+**Comparison 3:** the nico::math (AVX) model with the fused nico_ functions and `nico_reduce_sum` (the Shared-frailty
+Cox survival model also with `nico_map_rect`), auto-chunking off, over the faster of the two naive Stan models.
 
-| Versions compared | N | local-HPC (models) | laptop (models) |
-|---|---:|---:|---:|
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 10 | 0.78x (1) |  |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 25 | 0.75x (1) |  |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 50 | 0.98x (1) | 1.12x (2) |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 250 | 0.98x (1) | 0.99x (1) |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 500 | 1.00x (6) | 1.02x (8) |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 5,000 | 1.04x (1) | 1.03x (1) |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 10,000 | 0.98x (5) | 0.95x (5) |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 25,000 | 1.03x (1) | 1.05x (1) |
-| Stan::math, nico_reduce_sum over Stan::math, reduce_sum | 50,000 | 0.97x (5) | 0.96x (5) |
-| Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 500 | 0.81x (4) | 1.02x (4) |
-| Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 10,000 | 0.82x (4) | 1.04x (4) |
-| Stan::math fused, nico_reduce_sum over Stan::math fused, reduce_sum | 50,000 | 0.90x (4) | 1.06x (4) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 10 | 0.99x (1) |  |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 25 | 1.47x (1) |  |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 50 | 0.96x (1) | 0.97x (1) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 250 | 1.00x (1) | 0.92x (1) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 500 | 0.96x (5) | 0.96x (4) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 5,000 | 1.01x (1) | 1.08x (1) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 10,000 | 1.00x (3) | 1.01x (2) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 25,000 | 1.03x (1) | 1.09x (1) |
-| nico::math (AVX), nico_reduce_sum over nico::math (AVX), reduce_sum | 50,000 | 1.00x (3) | 0.98x (2) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 50 |  | 0.81x (2) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 250 |  | 1.00x (1) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 500 | 0.97x (9) | 0.80x (12) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 5,000 | 0.84x (2) | 0.80x (2) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 10,000 | 0.87x (9) | 0.83x (9) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 25,000 | 0.92x (2) | 0.83x (2) |
-| nico::math (AVX) fused, nico_reduce_sum over nico::math (AVX) fused, reduce_sum | 50,000 | 0.97x (9) | 0.96x (9) |
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.62x<br><sub>180 x 1 (1)</sub> | 0.67x<br><sub>180 x 1 (2)</sub> | 2.23x<br><sub>180 x 1 (128)</sub> | 1.38x<br><sub>16 x 1 (1)</sub> | 0.85x<br><sub>16 x 1 (8)</sub> | 1.42x<br><sub>16 x 1 (128)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | **5.40x**<br><sub>180 x 1 (1)</sub> | **5.50x**<br><sub>180 x 1 (2)</sub> | **20.84x**<br><sub>180 x 1 (8)</sub> | **5.40x**<br><sub>16 x 1 (1)</sub> | 4.53x<br><sub>16 x 1 (2)</sub> | **11.91x**<br><sub>16 x 1 (8)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 4.11x<br><sub>180 x 1 (1)</sub> | **5.24x**<br><sub>180 x 1 (2)</sub> | **19.27x**<br><sub>180 x 1 (8)</sub> | 3.87x<br><sub>16 x 1 (1)</sub> | 3.22x<br><sub>16 x 1 (2)</sub> | **12.23x**<br><sub>16 x 1 (8)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 2.16x<br><sub>180 x 1 (1)</sub> | 1.79x<br><sub>180 x 1 (2)</sub> | **10.78x**<br><sub>180 x 1 (8)</sub> | 2.63x<br><sub>16 x 1 (1)</sub> | 1.98x<br><sub>16 x 1 (2)</sub> | **6.84x**<br><sub>16 x 1 (8)</sub> |
+| Graded response IRT (500, 5000, 50,000) | **5.33x**<br><sub>180 x 1 (2)</sub> | **6.94x**<br><sub>180 x 1 (2)</sub> | **11.65x**<br><sub>180 x 1 (32)</sub> | 4.49x<br><sub>16 x 1 (2)</sub> | **5.16x**<br><sub>16 x 1 (4)</sub> | **7.35x**<br><sub>16 x 1 (32)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | **10.86x**<br><sub>180 x 1 (2)</sub> | **15.92x**<br><sub>180 x 1 (8)</sub> | **21.07x**<br><sub>180 x 1 (128)</sub> | **7.79x**<br><sub>16 x 1 (2)</sub> | **10.41x**<br><sub>16 x 1 (32)</sub> | **14.96x**<br><sub>16 x 1 (512)</sub> |
+
+**Comparison 4:** the nico::math (AVX) model without fused functions, with `nico_reduce_sum` (the Shared-frailty Cox
+survival model also with `nico_map_rect`), auto-chunking off, over the naive Stan model without fused functions.
+
+| Model (N) | local-HPC, N = 500 | middle N | larger N | laptop, N = 500 | middle N | larger N |
+|---|---:|---:|---:|---:|---:|---:|
+| Shared-frailty Cox survival (500, 10,000, 100,000) | 1.13x<br><sub>180 x 1 (1)</sub> | 1.17x<br><sub>180 x 1 (4)</sub> | 2.60x<br><sub>180 x 1 (128)</sub> | 1.76x<br><sub>16 x 1 (1)</sub> | 1.07x<br><sub>16 x 1 (8)</sub> | 1.86x<br><sub>16 x 1 (256)</sub> |
+| Robust Student-t regression (500, 10,000, 100,000) | 0.95x<br><sub>180 x 1 (1)</sub> | 1.57x<br><sub>180 x 1 (8)</sub> | **7.17x**<br><sub>180 x 1 (64)</sub> | 1.16x<br><sub>16 x 1 (1)</sub> | 1.88x<br><sub>16 x 1 (4)</sub> | 4.74x<br><sub>8 x 2 (64)</sub> |
+| Weibull survival (500, 10,000, 100,000) | 1.01x<br><sub>180 x 1 (1)</sub> | 2.17x<br><sub>180 x 1 (8)</sub> | **6.46x**<br><sub>90 x 2 (64)</sub> | 1.19x<br><sub>16 x 1 (1)</sub> | 1.87x<br><sub>16 x 1 (8)</sub> | 4.63x<br><sub>16 x 1 (64)</sub> |
+| Hierarchical logistic regression (500, 10,000, 100,000) | 1.27x<br><sub>180 x 1 (1)</sub> | **5.02x**<br><sub>180 x 1 (8)</sub> | **9.11x**<br><sub>180 x 1 (128)</sub> | 1.51x<br><sub>16 x 1 (1)</sub> | 3.38x<br><sub>16 x 1 (8)</sub> | **6.42x**<br><sub>16 x 1 (64)</sub> |
+| Graded response IRT (500, 5000, 50,000) | 2.23x<br><sub>180 x 1 (2)</sub> | 4.87x<br><sub>180 x 1 (32)</sub> | **7.38x**<br><sub>180 x 1 (256)</sub> | 2.12x<br><sub>16 x 1 (4)</sub> | 3.25x<br><sub>16 x 1 (64)</sub> | 4.51x<br><sub>16 x 1 (512)</sub> |
+| Four-class LC-MVOP (500, 5000, 50,000) | 2.99x<br><sub>180 x 1 (8)</sub> | 3.95x<br><sub>180 x 1 (64)</sub> | 4.97x<br><sub>90 x 2 (512)</sub> | 1.75x<br><sub>16 x 1 (8)</sub> | 2.25x<br><sub>16 x 1 (128)</sub> | 2.98x<br><sub>4 x 4 (1024)</sub> |
 
 
 Over the models timed at N = 10,000 and 50,000, the geometric mean of the speed-ups of nico::math (AVX) over Stan::math with Stan's reduce_sum is 2.02x and 2.01x with AVX-512 (8 models) and 1.92x and 1.91x with AVX2 (8 models), and, with the fused functions on both sides, 3.40x and 3.57x with AVX-512 and 2.94x and 3.55x with AVX2 (5 models).
