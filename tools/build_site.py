@@ -67,12 +67,17 @@ def url(text):
 def inline(text):
     result = []
     position = 0
-    pattern = r"`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*"
+    pattern = r"`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|<br>|<sub>.*?</sub>"
     for match in re.finditer(pattern, text):
         result.append(escape(text[position:match.start()]))
         token = match.group()
         if token.startswith("`"):
             result.append("<code>" + escape(token[1:-1]) + "</code>")
+        elif token == "<br>":
+            ## (the line break and the small print of the table cells, as GitHub shows them)
+            result.append("<br>")
+        elif token.startswith("<sub>"):
+            result.append("<sub>" + inline(token[5:-6]) + "</sub>")
         elif token.startswith("**"):
             ## Bold text is rendered recursively, so code and links inside it work ("**Specialised [BayesMVP](...) models:**"
             ## showed the raw link and its long URL pushed the page wider than a phone screen).
