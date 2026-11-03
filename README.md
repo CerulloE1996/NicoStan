@@ -1507,7 +1507,7 @@ the sampling time per effective sample (the burn-in, which is shorter for NicoSt
 model, on each machine.
 Each value is NicoStan's speed-up per gradient over the naive Stan model, times NicoStan's minimum ESS per gradient
 over Stan's (i.e., the best NicoStan configuration over the best Stan configuration, over every warm-up / burn-in
-length); under each value: the speed-up per gradient × the minimum ESS per gradient gain.
+length).
 The speed-up per gradient is that of the faster of NicoStan's two chunking methods, auto-chunking and
 `nico_reduce_sum` (see
 [Auto-chunking over the naive Stan model](#auto-chunking-over-the-naive-stan-model) and
@@ -1540,44 +1540,44 @@ than that of NUTS.
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 3.2x<br><sub>1.88 × 1.68</sub> | **15.4x**<br><sub>1.37 × 11.21</sub> | **25.4x**<br><sub>2.27 × 11.21</sub> | 2.3x<br><sub>1.38 × 1.68</sub> | 6.3x<br><sub>0.85 × 7.43</sub> | **11.5x**<br><sub>1.55 × 7.43</sub> |
-| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | **11.0x**<br><sub>5.40 × 2.04</sub> | **15.8x**<br><sub>7.78 × 2.04</sub> | **60.3x**<br><sub>29.59 × 2.04</sub> | **11.0x**<br><sub>5.40 × 2.04</sub> | **10.7x**<br><sub>5.25 × 2.04</sub> | **36.8x**<br><sub>18.08 × 2.04</sub> |
-| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 6.3x<br><sub>4.11 × 1.53</sub> | 9.1x<br><sub>5.94 × 1.53</sub> | **36.0x**<br><sub>23.61 × 1.53</sub> | 5.9x<br><sub>3.87 × 1.53</sub> | 5.6x<br><sub>3.64 × 1.53</sub> | **21.0x**<br><sub>13.72 × 1.53</sub> |
-| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 3.6x<br><sub>2.16 × 1.66</sub> | **20.1x**<br><sub>1.79 × 11.21</sub> | **120.8x**<br><sub>10.78 × 11.21</sub> | 4.4x<br><sub>2.63 × 1.66</sub> | **14.7x**<br><sub>1.98 × 7.43</sub> | **50.8x**<br><sub>6.84 × 7.43</sub> |
-| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | **19.6x**<br><sub>5.33 × 3.68</sub> | **17.6x**<br><sub>6.94 × 2.54</sub> | **130.6x**<br><sub>11.65 × 11.21</sub> | **19.9x**<br><sub>4.49 × 4.43</sub> | **20.5x**<br><sub>5.16 × 3.96</sub> | **54.6x**<br><sub>7.35 × 7.43</sub> |
-| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | **45.9x**<br><sub>12.48 × 3.68</sub> | **44.9x**<br><sub>17.69 × 2.54</sub> | **277.2x**<br><sub>24.73 × 11.21</sub> | **37.3x**<br><sub>8.42 × 4.43</sub> | **41.2x**<br><sub>10.41 × 3.96</sub> | **126.2x**<br><sub>16.99 × 7.43</sub> |
+| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 3.2x | **15.4x** | **25.4x** | 2.3x | 6.3x | **11.5x** |
+| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | **11.0x** | **15.8x** | **60.3x** | **11.0x** | **10.7x** | **36.8x** |
+| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 6.3x | 9.1x | **36.0x** | 5.9x | 5.6x | **21.0x** |
+| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 3.6x | **20.1x** | **120.8x** | 4.4x | **14.7x** | **50.8x** |
+| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | **19.6x** | **17.6x** | **130.6x** | **19.9x** | **20.5x** | **54.6x** |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | **45.9x** | **44.9x** | **277.2x** | **37.3x** | **41.2x** | **126.2x** |
 
 **(2) nico::math without fused functions, over the naive Stan model without fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.1x<br><sub>1.25 × 1.68</sub> | **18.3x**<br><sub>1.63 × 11.21</sub> | **34.0x**<br><sub>3.04 × 11.21</sub> | 3.0x<br><sub>1.76 × 1.68</sub> | **10.6x**<br><sub>1.43 × 7.43</sub> | **15.2x**<br><sub>2.05 × 7.43</sub> |
-| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.8x<br><sub>1.38 × 2.04</sub> | 5.9x<br><sub>2.90 × 2.04</sub> | **14.6x**<br><sub>7.17 × 2.04</sub> | 3.5x<br><sub>1.72 × 2.04</sub> | 6.9x<br><sub>3.37 × 2.04</sub> | **10.5x**<br><sub>5.18 × 2.04</sub> |
-| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.9x<br><sub>1.22 × 1.53</sub> | 5.0x<br><sub>3.26 × 1.53</sub> | **12.2x**<br><sub>8.00 × 1.53</sub> | 2.1x<br><sub>1.39 × 1.53</sub> | 4.1x<br><sub>2.66 × 1.53</sub> | 8.6x<br><sub>5.65 × 1.53</sub> |
-| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.6x<br><sub>1.55 × 1.66</sub> | **80.0x**<br><sub>7.13 × 11.21</sub> | **113.6x**<br><sub>10.13 × 11.21</sub> | 2.9x<br><sub>1.73 × 1.66</sub> | **31.5x**<br><sub>4.24 × 7.43</sub> | **54.0x**<br><sub>7.26 × 7.43</sub> |
-| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | **10.6x**<br><sub>2.89 × 3.68</sub> | **15.5x**<br><sub>6.09 × 2.54</sub> | **115.2x**<br><sub>10.28 × 11.21</sub> | **12.7x**<br><sub>2.88 × 4.43</sub> | **12.9x**<br><sub>3.25 × 3.96</sub> | **50.8x**<br><sub>6.84 × 7.43</sub> |
-| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | **11.0x**<br><sub>2.99 × 3.68</sub> | **10.1x**<br><sub>3.98 × 2.54</sub> | **55.7x**<br><sub>4.97 × 11.21</sub> | 9.2x<br><sub>2.07 × 4.43</sub> | 8.9x<br><sub>2.25 × 3.96</sub> | **22.7x**<br><sub>3.05 × 7.43</sub> |
+| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.1x | **18.3x** | **34.0x** | 3.0x | **10.6x** | **15.2x** |
+| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.8x | 5.9x | **14.6x** | 3.5x | 6.9x | **10.5x** |
+| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.9x | 5.0x | **12.2x** | 2.1x | 4.1x | 8.6x |
+| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.6x | **80.0x** | **113.6x** | 2.9x | **31.5x** | **54.0x** |
+| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | **10.6x** | **15.5x** | **115.2x** | **12.7x** | **12.9x** | **50.8x** |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | **11.0x** | **10.1x** | **55.7x** | 9.2x | 8.9x | **22.7x** |
 
 **(3) Stan::math with Stan's fused functions, over the naive Stan model with Stan's fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.3x<br><sub>0.78 × 1.68</sub> | 5.2x<br><sub>0.46 × 11.21</sub> | **20.1x**<br><sub>1.79 × 11.21</sub> | 1.2x<br><sub>0.69 × 1.68</sub> | 4.6x<br><sub>0.62 × 7.43</sub> | 9.1x<br><sub>1.22 × 7.43</sub> |
-| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.5x<br><sub>1.23 × 2.04</sub> | 2.6x<br><sub>1.26 × 2.04</sub> | 9.3x<br><sub>4.58 × 2.04</sub> | 2.6x<br><sub>1.28 × 2.04</sub> | 2.6x<br><sub>1.27 × 2.04</sub> | 8.1x<br><sub>4.00 × 2.04</sub> |
-| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.6x<br><sub>1.02 × 1.53</sub> | 1.6x<br><sub>1.08 × 1.53</sub> | 6.2x<br><sub>4.08 × 1.53</sub> | 1.8x<br><sub>1.20 × 1.53</sub> | 1.6x<br><sub>1.02 × 1.53</sub> | 5.5x<br><sub>3.62 × 1.53</sub> |
-| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.6x<br><sub>0.94 × 1.66</sub> | **10.6x**<br><sub>0.94 × 11.21</sub> | **44.6x**<br><sub>3.98 × 11.21</sub> | 1.9x<br><sub>1.15 × 1.66</sub> | 7.2x<br><sub>0.97 × 7.43</sub> | **21.5x**<br><sub>2.89 × 7.43</sub> |
-| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | 3.5x<br><sub>0.96 × 3.68</sub> | 2.6x<br><sub>1.04 × 2.54</sub> | **20.8x**<br><sub>1.85 × 11.21</sub> | 4.4x<br><sub>0.98 × 4.43</sub> | 4.1x<br><sub>1.03 × 3.96</sub> | **11.1x**<br><sub>1.49 × 7.43</sub> |
+| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.3x | 5.2x | **20.1x** | 1.2x | 4.6x | 9.1x |
+| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.5x | 2.6x | 9.3x | 2.6x | 2.6x | 8.1x |
+| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.6x | 1.6x | 6.2x | 1.8x | 1.6x | 5.5x |
+| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.6x | **10.6x** | **44.6x** | 1.9x | 7.2x | **21.5x** |
+| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | 3.5x | 2.6x | **20.8x** | 4.4x | 4.1x | **11.1x** |
 
 **(4) Stan::math without fused functions, over the naive Stan model without fused functions:**
 
 | Model | local-HPC, N = 500 | local-HPC, middle N | local-HPC, larger N | laptop, N = 500 | laptop, middle N | laptop, larger N |
 |---|---:|---:|---:|---:|---:|---:|
-| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.8x<br><sub>1.04 × 1.68</sub> | **16.7x**<br><sub>1.49 × 11.21</sub> | **32.6x**<br><sub>2.91 × 11.21</sub> | 2.4x<br><sub>1.43 × 1.68</sub> | **10.2x**<br><sub>1.38 × 7.43</sub> | **15.1x**<br><sub>2.03 × 7.43</sub> |
-| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.5x<br><sub>1.20 × 2.04</sub> | 5.2x<br><sub>2.54 × 2.04</sub> | **11.9x**<br><sub>5.85 × 2.04</sub> | 3.3x<br><sub>1.63 × 2.04</sub> | 6.0x<br><sub>2.96 × 2.04</sub> | 9.1x<br><sub>4.49 × 2.04</sub> |
-| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.7x<br><sub>1.11 × 1.53</sub> | 4.8x<br><sub>3.14 × 1.53</sub> | **11.4x**<br><sub>7.47 × 1.53</sub> | 2.0x<br><sub>1.33 × 1.53</sub> | 4.0x<br><sub>2.61 × 1.53</sub> | 8.1x<br><sub>5.33 × 1.53</sub> |
-| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.3x<br><sub>1.38 × 1.66</sub> | **72.0x**<br><sub>6.42 × 11.21</sub> | **104.7x**<br><sub>9.34 × 11.21</sub> | 2.7x<br><sub>1.61 × 1.66</sub> | **31.9x**<br><sub>4.29 × 7.43</sub> | **50.3x**<br><sub>6.77 × 7.43</sub> |
-| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | 9.4x<br><sub>2.56 × 3.68</sub> | **14.4x**<br><sub>5.69 × 2.54</sub> | **98.1x**<br><sub>8.75 × 11.21</sub> | **11.6x**<br><sub>2.61 × 4.43</sub> | **10.7x**<br><sub>2.70 × 3.96</sub> | **45.9x**<br><sub>6.18 × 7.43</sub> |
-| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | 9.8x<br><sub>2.67 × 3.68</sub> | 9.4x<br><sub>3.69 × 2.54</sub> | **46.5x**<br><sub>4.15 × 11.21</sub> | 8.5x<br><sub>1.92 × 4.43</sub> | 8.2x<br><sub>2.06 × 3.96</sub> | **21.1x**<br><sub>2.83 × 7.43</sub> |
+| Shared-frailty Cox<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.8x | **16.7x** | **32.6x** | 2.4x | **10.2x** | **15.1x** |
+| Robust Student-t<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.5x | 5.2x | **11.9x** | 3.3x | 6.0x | 9.1x |
+| Weibull survival<br><sub>N = 500 / 10,000 / 100,000</sub> | 1.7x | 4.8x | **11.4x** | 2.0x | 4.0x | 8.1x |
+| Hierarchical logistic<br><sub>N = 500 / 10,000 / 100,000</sub> | 2.3x | **72.0x** | **104.7x** | 2.7x | **31.9x** | **50.3x** |
+| Graded response IRT<br><sub>N = 500 / 5000 / 50,000</sub> | 9.4x | **14.4x** | **98.1x** | **11.6x** | **10.7x** | **45.9x** |
+| Quad-latent-class comorbidity multivariate ordinal probit model (4LC-MVOP)<br><sub>N = 500 / 5000 / 50,000</sub> | 9.8x | 9.4x | **46.5x** | 8.5x | 8.2x | **21.1x** |
 
 The 4LC-MVOP has only the naive Stan model without fused functions, hence in table (1) it is compared with that
 model; it is not in table (3), since none of its versions uses Stan's fused functions.
@@ -1592,7 +1592,6 @@ its rows are those of the latent class multivariate ordinal probit (LC-MVOP) mod
 (in preparation; N = 250, laptop; every NicoStan run of this model in it used diffusion HMC and 125 or 250
 burn-in iterations).
 **Bold**: the higher of the two NicoStan columns of the row (and any within 1% of it).
-The ratios are of the minimum ESS values rounded to three significant digits.
 
 
 **Minimum ESS per 1000 sampling gradient evaluations, NicoStan over Stan (NUTS) (measured; higher is better):**
