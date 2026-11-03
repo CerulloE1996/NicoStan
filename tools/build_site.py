@@ -2,6 +2,7 @@
 """Build the README and dependency-free GitHub Pages site from the same editorial source."""
 from pathlib import Path
 from html import escape
+import hashlib
 import json
 import re
 import shutil
@@ -10,6 +11,9 @@ import unicodedata
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "website"
 DOCS = ROOT / "docs"
+## (the stylesheet and the script are asked for by their content, so that no browser keeps an old copy)
+ASSET_VERSION = hashlib.sha256((SOURCE / "site.css").read_bytes()
+                               + (SOURCE / "site.js").read_bytes()).hexdigest()[:10]
 REPO = "https://github.com/CerulloE1996/NicoStan"
 ## Absolute site address: Facebook/Twitter link previews need full https URLs for og:url and og:image (relative paths fail).
 SITE_URL = "https://cerulloe1996.github.io/NicoStan/"
@@ -207,7 +211,7 @@ banner_intro_html = "<br>".join(escape(line) for line in banner_lines[banner_spl
 page = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NicoStan | Adaptive HMC for Stan models</title><meta name="description" content="''' + escape(banner_description, quote=True) + '''">
 <meta property="og:type" content="website"><meta property="og:site_name" content="NicoStan"><meta property="og:url" content="''' + SITE_URL + '''"><meta property="og:title" content="NicoStan | Adaptive HMC for Stan models"><meta property="og:description" content="''' + escape(banner_description, quote=True) + '''"><meta property="og:image" content="''' + SITE_URL + '''assets/NicoStan_social_card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="NicoStan logo"><meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['script','noscript','style','textarea','pre','code'],throwOnError:false})"></script><script src="assets/site.js" defer></script><script data-goatcounter="https://cerulloe1996.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script></head><body>
+<meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css?v=''' + ASSET_VERSION + '''"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['script','noscript','style','textarea','pre','code'],throwOnError:false})"></script><script src="assets/site.js?v=''' + ASSET_VERSION + '''" defer></script><script data-goatcounter="https://cerulloe1996.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script></head><body>
 <a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="#top"><img class="brand-logo" src="assets/NicoStan_logo_128.png" alt="" width="34" height="34">NicoStan</a><nav aria-label="Primary"><a href="#references">References</a><a href="#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
 <div class="hero" id="top"><div class="hero-copy"><p class="eyebrow">R package · Development version 0.1.9000</p><h1>''' + banner_title_html + '''</h1><p class="hero-intro">''' + banner_intro_html + '''</p><div class="hero-actions"><a class="button" href="#installation">Get started <span aria-hidden="true">↗</span></a></div><p class="byline">Developed by Enzo Cerullo</p></div><div class="hero-diagram"><img class="hero-logo" src="assets/NicoStan_logo_720.png" alt="NicoStan logo"></div></div>
 <div class="layout"><aside><details open><summary>On this page</summary><nav aria-label="On this page">''' + navigation + '''</nav></details></aside><main id="content">''' + body + '''</main></div>
@@ -370,9 +374,9 @@ example_body = ('<h2 id="benchmark-models">Benchmark models</h2><p>The models of
                 + "summaries.</p>" + "".join(panel_of_example_file(f, "r") for f in R_files))
 example_page = ('''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NicoStan | Example models: full code</title><meta name="description" content="The full Stan code and R scripts of every NicoStan example model.">
-<meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css">
+<meta name="theme-color" content="#282A36"><link rel="icon" href="assets/NicoStan_logo_64.png" type="image/png"><link rel="stylesheet" href="assets/site.css?v=''' + ASSET_VERSION + '''">
 <style>.example-file{border:1px solid var(--line);border-radius:7px;margin:0 0 12px;padding:12px 18px}.example-file summary{cursor:pointer;font-weight:550}.example-file[open] summary{margin-bottom:6px}</style>
-<script src="assets/site.js" defer></script></head><body>
+<script src="assets/site.js?v=''' + ASSET_VERSION + '''" defer></script></head><body>
 <a class="skip-link" href="#content">Skip to content</a><header class="masthead"><a class="brand" href="index.html"><img class="brand-logo" src="assets/NicoStan_logo_128.png" alt="" width="34" height="34">NicoStan</a><nav aria-label="Primary"><a href="index.html#examples">Examples</a><a href="index.html#installation">Install</a><a href="https://github.com/CerulloE1996/NicoStan">GitHub ↗</a></nav></header>
 <div class="layout"><aside><details open><summary>On this page</summary><nav aria-label="On this page"><a href="#benchmark-models">Benchmark models</a><a href="#stan-models">Other example models</a><a href="#R-scripts">R scripts</a></nav></details></aside><main id="content"><h1>Example models: full code</h1>'''
                 + example_body + '''</main></div>
