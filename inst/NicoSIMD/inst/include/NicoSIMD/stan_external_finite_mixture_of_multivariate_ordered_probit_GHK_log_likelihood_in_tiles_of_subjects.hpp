@@ -904,24 +904,987 @@ nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_o
 using nico::math::nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects;
 
 
+//
+// -| --------- The same GHK log likelihood of a finite mixture of multivariate (ordered) probit models, in ----
+// -| --------- tiles of subjects, of the observed results only (Stan external function) ---------------------
+//
+//     nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects(
+//           u_raw_of_each_observed_result, first_subject, nuisance_transformation, intercept, coefficients,
+//           coefficient_set_of_class_and_test, covariates, n_covariates, cutpoints,
+//           cutpoint_set_of_class_and_test, position_of_first_cutpoint_of_test, L_of_each_class_and_pattern,
+//           pattern_of_subject, log_class_probability, category, upper_category, test_is_binary,
+//           n_categories_of_test, test_at_GHK_position, Phi_type, overflow_threshold, underflow_threshold)
+//
+// The GHK recursion of each subject runs over the results it has only (category >= 0): a result it does not have
+// gets no nuisance value, no Jacobian, no Z and no partial derivative. The multivariate probit of a subset of the
+// tests is the one of their correlation block, so each subject's recursion uses the Cholesky factor of the
+// correlations of its own tests (its pattern: its set of tests):
+//   u_raw_of_each_observed_result   vector of the slice's observed results, subject by subject and, in each
+//                                   subject, in GHK order (one value per result with category >= 0); or a
+//                                   T x M matrix (column m: subject m, in GHK order) whose values of the
+//                                   missing results are not read and get partial 0
+//   L_of_each_class_and_pattern     C x n_patterns T x T matrices, [(c - 1) * n_patterns + p]: the Cholesky
+//                                   factor of the correlations of pattern p's tests in class c, at the tests'
+//                                   own GHK positions (L_Omega[c] itself when the pattern has every test); the
+//                                   rows and columns of the tests the pattern does not have must be finite and
+//                                   enter nothing (they meet Z = 0 or a derivative 0), and get partial 0
+//   pattern_of_subject              the pattern (1, ..., n_patterns) of every subject of the data (read at the
+//                                   rows first_subject, ..., first_subject + M - 1)
+// Every other argument is that of the function above; C is the number of rows of intercept and M the number of
+// rows of log_class_probability.
+//
+// Declared in the Stan functions block (no body; stanc --allow-undefined):
+//
+//     real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects(
+//           vector u_raw_of_each_observed_result, data int first_subject, data int nuisance_transformation,
+//           (or matrix u_raw_of_each_observed_result, the T x M form)
+//           matrix intercept, array[] matrix coefficients, data array[,] int coefficient_set_of_class_and_test,
+//           data array[,] matrix covariates, data array[,] int n_covariates, array[] vector cutpoints,
+//           data array[,] int cutpoint_set_of_class_and_test,
+//           data array[] int position_of_first_cutpoint_of_test, array[] matrix L_of_each_class_and_pattern,
+//           data array[] int pattern_of_subject, matrix log_class_probability, data array[,] int category,
+//           data array[,] int upper_category, data array[] int test_is_binary,
+//           data array[] int n_categories_of_test, data array[] int test_at_GHK_position, data int Phi_type,
+//           data real overflow_threshold, data real underflow_threshold);
+//
+// -----------------------------------------------------------------------------------------------------------
 
+namespace nico::math {
 
+//// ---- the thread-local buffers of one tile of the observed results (each grows to the largest tile seen, then
+////      is reused)
+struct buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles_t {
+    std::vector<double> values_of_each_cell;
+    std::vector<double> values_of_each_class_subject_and_position;
+    std::vector<double> values_of_each_subject_and_class;
+    std::vector<double> values_of_each_subject;
+    std::vector<double> values_of_each_set_test_and_subject;
+    std::vector<int>    codes_of_each_subject_and_test;
+    std::vector<int>    rows_of_each_branch;
+    std::vector<const double*> L_of_each_subject;
+    std::vector<double*> gradient_of_L_of_each_subject;
+};
 
+inline buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles_t&
+buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles() {
 
+    static thread_local buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles_t
+          buffers;
+    return buffers;
 
+}
 
+inline void stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+        const std::string& message) {
 
+    throw std::domain_error(std::string("nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_")
+                            + "of_the_observed_results_in_tiles_of_subjects: " + message);
 
+}
 
+//// ---- the value of one tile of n subjects (the slice's subjects first_column, ..., first_column + n - 1, the
+////      data's rows first_data_row, ..., first_data_row + n - 1, whose observed results are the cells
+////      first_cell, first_cell + 1, ... of the slice's nuisance values), and, with the gradient: the partial
+////      derivatives of its nuisance values (into gradient_of_u_raw_of_tile, the partials of all of u_raw) and of
+////      its log class probabilities, each written only when its pointer is not nullptr, and the gradients of the
+////      intercepts,
+////      coefficients, cutpoints and Cholesky factors added to the sums of the tiles before it. The steps are
+////      those of the function above, each on the results the subjects have only.
+template <bool gradient_is_needed, typename T_u_raw_ref, typename T_log_class_probability_ref>
+inline double GHK_mixture_log_likelihood_of_the_observed_results_of_one_tile_of_subjects(
+        const int n,
+        const int first_column,
+        const int first_data_row,
+        const int M,
+        const int first_cell,
+        const int n_cells,
+        const bool u_raw_has_one_value_per_observed_result,
+        const T_u_raw_ref& u_raw_ref,
+        const int nuisance_transformation,
+        const Eigen::Matrix<double, -1, -1>& intercept_values,
+        const std::vector<Eigen::Matrix<double, -1, -1>>& coefficient_values,
+        const std::vector<std::vector<int>>& coefficient_set_of_class_and_test,
+        const std::vector<std::vector<Eigen::Matrix<double, -1, -1>>>& covariates,
+        const std::vector<std::vector<int>>& n_covariates,
+        const bool there_are_covariates,
+        const std::vector<Eigen::Matrix<double, -1, 1>>& cutpoint_values,
+        const std::vector<std::vector<int>>& cutpoint_set_of_class_and_test,
+        const std::vector<int>& position_of_first_cutpoint_of_test,
+        const std::vector<Eigen::Matrix<double, -1, -1>>& L_values,
+        const int n_patterns,
+        const std::vector<int>& pattern_of_subject,
+        const T_log_class_probability_ref& log_class_probability_ref,
+        const std::vector<std::vector<int>>& category,
+        const std::vector<std::vector<int>>& upper_category,
+        const std::vector<int>& test_is_binary,
+        const std::vector<int>& n_categories_of_test,
+        const std::vector<int>& test_at_GHK_position,
+        const int Phi_type,
+        const double overflow_threshold,
+        const double underflow_threshold,
+        double* gradient_of_u_raw_of_tile,
+        double* partials_of_log_class_probability,
+        Eigen::Matrix<double, -1, -1>& gradient_of_intercept,
+        std::vector<Eigen::Matrix<double, -1, -1>>& gradient_of_coefficients,
+        std::vector<Eigen::Matrix<double, -1, 1>>& gradient_of_cutpoints,
+        std::vector<Eigen::Matrix<double, -1, -1>>& gradient_of_L) {
 
+    using stan::math::value_of;
+    const double infinity = std::numeric_limits<double>::infinity();
+    const int C = static_cast<int>(intercept_values.rows());
+    const int T = static_cast<int>(intercept_values.cols());
+    const int n_coefficient_sets = static_cast<int>(coefficient_values.size());
+    const int n_covariate_sets = static_cast<int>(covariates.size());
 
+    //// ---- the buffers of the tile:
+    buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles_t& buffers =
+          buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles();
+    const std::size_t nT = static_cast<std::size_t>(n) * T;
+    const std::size_t nC = static_cast<std::size_t>(n) * C;
+    const std::size_t n_cells_of_tile = static_cast<std::size_t>(n_cells);
+    //// (the values of the tile's cells, [k] for its k-th observed result)
+    double* u_values = buffer_of_at_least(buffers.values_of_each_cell, 7 * n_cells_of_tile + 1);
+    double* one_minus_u_values = u_values + n_cells_of_tile;
+    double* log_u_values = one_minus_u_values + n_cells_of_tile;
+    double* log_1m_u_values = log_u_values + n_cells_of_tile;
+    double* log_derivative_of_u = log_1m_u_values + n_cells_of_tile;
+    double* derivative_of_log_Jacobian = log_derivative_of_u + n_cells_of_tile;
+    double* gradient_of_u_raw = derivative_of_log_Jacobian + n_cells_of_tile;
+    double* values_of_each_class_subject_and_position = buffer_of_at_least(
+          buffers.values_of_each_class_subject_and_position, 8 * C * nT);
+    double* log_mass_sum_of_each_class = buffer_of_at_least(buffers.values_of_each_subject_and_class, 2 * nC);
+    double* weight_of_each_class = log_mass_sum_of_each_class + nC;   // [c * n + i]
+    double* eta = buffer_of_at_least(buffers.values_of_each_subject,
+                                     static_cast<std::size_t>(42 + T) * static_cast<std::size_t>(n));
+    double* a = eta + n;
+    double* b = a + n;
+    double* log_mass = b + n;
+    double* gathered = log_mass + n;            // 8 n: the inputs and outputs of the rows of one branch
+    double* work = gathered + 8 * n;            // 12 n
+    double* exponent = work + 12 * n;           // 5 n: the arguments of the partials' exponentials
+    double* log_density = exponent + 5 * n;     // 3 n
+    double* derivative_wrt_a = log_density + 3 * n;
+    double* derivative_wrt_b = derivative_wrt_a + n;
+    double* derivative_wrt_eta = derivative_wrt_b + n;
+    double* increment = derivative_wrt_eta + n;
+    double* s_of_subject = increment + n;       // 1 / L[j, j] of each subject's pattern, 0 for a missing result
+    double* u_of_position = s_of_subject + n;   // the cells of the subjects at one GHK position, 0 for a missing
+    double* one_minus_u_of_position = u_of_position + n;
+    double* log_u_of_position = one_minus_u_of_position + n;
+    double* log_1m_u_of_position = log_u_of_position + n;
+    double* log_derivative_of_u_of_position = log_1m_u_of_position + n;
+    double* adjoint_of_Z = log_derivative_of_u_of_position + n;       // T n (one class at a time)
+    const std::size_t n_linear_predictors = there_are_covariates
+                                             ? static_cast<std::size_t>(n_coefficient_sets) * T * n : 0;
+    double* linear_predictor_of_each_set = buffer_of_at_least(buffers.values_of_each_set_test_and_subject,
+                                                              2 * n_linear_predictors + 1);
+    double* gradient_of_linear_predictor = linear_predictor_of_each_set + n_linear_predictors;
+    int* code_of_lower_bound = buffer_of_at_least(buffers.codes_of_each_subject_and_test, 4 * nT);
+    int* code_of_upper_bound = code_of_lower_bound + nT;                // [t * n + i], tests in data order
+    int* cell_of_position = code_of_upper_bound + nT;                   // [j * n + i], -1 for a missing result
+    int* value_of_cell = cell_of_position + nT;                         // [k]: its element of u_raw
+    int* rows_of_each_branch = buffer_of_at_least(buffers.rows_of_each_branch, 4 * static_cast<std::size_t>(n));
+    if (buffers.L_of_each_subject.size() < static_cast<std::size_t>(n)) {
+        buffers.L_of_each_subject.resize(n);
+        buffers.gradient_of_L_of_each_subject.resize(n);
+    }
+    const double** L_of_subject = buffers.L_of_each_subject.data();
+    double** gradient_of_L_of_subject = buffers.gradient_of_L_of_each_subject.data();
 
+    //// ---- the pattern of each subject of the tile, and the cell of each subject and GHK position (its observed
+    ////      results, subject by subject, in GHK order)
+    for (int i = 0; i < n; ++i) {
+        const int p = pattern_of_subject[first_data_row + i] - 1;
+        if (p < 0 || p >= n_patterns) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "a pattern of a subject is out of range");
+        }
+    }
+    {
+        int k = 0;
+        for (int i = 0; i < n; ++i) {
+            const std::vector<int>& category_of_row = category[first_data_row + i];
+            for (int j = 0; j < T; ++j) {
+                const int t = test_at_GHK_position[j] - 1;
+                if (category_of_row[t] >= 0) {
+                    value_of_cell[k] = u_raw_has_one_value_per_observed_result ? first_cell + k
+                                                                               : (first_column + i) * T + j;
+                    cell_of_position[static_cast<std::size_t>(j) * n + i] = k++;
+                } else {
+                    cell_of_position[static_cast<std::size_t>(j) * n + i] = -1;
+                }
+            }
+        }
+        if (k != n_cells) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "the observed results of a tile do not match its cells");
+        }
+    }
 
+    //// ---- the nuisance values of the tile's cells (contiguous): u, 1 - u, log(u), log(1 - u), log |du/du_raw|
+    ////      and the derivative of the log Jacobian (Phi: -u_raw; tanh, u = inv_logit(2 u_raw): 2 (1 - 2 u))
+    if (nuisance_transformation == 1) {
+        for (std::size_t k = 0; k < n_cells_of_tile; ++k) {
+            const double u_raw = value_of(u_raw_ref.coeff(value_of_cell[k]));
+            u_values[k] = u_raw;
+            one_minus_u_values[k] = -u_raw;
+            log_u_values[k] = u_raw;
+            log_1m_u_values[k] = -u_raw;
+            log_derivative_of_u[k] = -0.5 * u_raw * u_raw + NEG_HALF_LOG_2PI;
+            derivative_of_log_Jacobian[k] = -u_raw;
+        }
+        k_Phi(u_values, n_cells);
+        k_Phi(one_minus_u_values, n_cells);
+        k_log_Phi_in_double_precision(log_u_values, n_cells);
+        k_log_Phi_in_double_precision(log_1m_u_values, n_cells);
+    } else {
+        for (std::size_t k = 0; k < n_cells_of_tile; ++k) {
+            const double u_raw = value_of(u_raw_ref.coeff(value_of_cell[k]));
+            u_values[k] = 2.0 * u_raw;
+            one_minus_u_values[k] = -2.0 * u_raw;
+            log_u_values[k] = 2.0 * u_raw;
+            log_1m_u_values[k] = -2.0 * u_raw;
+        }
+        k_inv_logit(u_values, n_cells);
+        k_inv_logit(one_minus_u_values, n_cells);
+        k_log_inv_logit_in_double_precision(log_u_values, n_cells);
+        k_log_inv_logit_in_double_precision(log_1m_u_values, n_cells);
+        for (std::size_t k = 0; k < n_cells_of_tile; ++k) {
+            log_derivative_of_u[k] = LN2 + log_u_values[k] + log_1m_u_values[k];
+            derivative_of_log_Jacobian[k] = 2.0 * (one_minus_u_values[k] - u_values[k]);
+        }
+    }
+    double log_Jacobian = 0.0;
+    for (std::size_t k = 0; k < n_cells_of_tile; ++k) log_Jacobian += log_derivative_of_u[k];
+    for (std::size_t k = 0; k < n_cells_of_tile; ++k) gradient_of_u_raw[k] = 0.0;
 
+    //// ---- the codes of the bounds of each subject and test of the tile, from the data's rows (and the checks
+    ////      of the categories); a missing result (category < 0) has both bounds infinite
+    for (int i = 0; i < n; ++i) {
+        const int row = first_data_row + i;
+        if (static_cast<int>(category[row].size()) != T || static_cast<int>(upper_category[row].size()) != T) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "every row of category and upper_category must have T values");
+        }
+    }
+    for (int t = 0; t < T; ++t) {
+        const int K = n_categories_of_test[t];
+        const int first = position_of_first_cutpoint_of_test[t] - 1;
+        for (int i = 0; i < n; ++i) {
+            const int k = category[first_data_row + i][t];
+            int lower_code = CODE_OF_AN_INFINITE_BOUND;
+            int upper_code = CODE_OF_AN_INFINITE_BOUND;
+            if (k >= 0) {
+                if (test_is_binary[t] == 1) {
+                    if (k > 1) {
+                        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                              "a binary result must be 0 or 1");
+                    }
+                    lower_code = (k == 1) ? CODE_OF_THE_CUTPOINT_ZERO_OF_A_BINARY_TEST
+                                          : CODE_OF_AN_INFINITE_BOUND;
+                    upper_code = (k == 1) ? CODE_OF_AN_INFINITE_BOUND
+                                          : CODE_OF_THE_CUTPOINT_ZERO_OF_A_BINARY_TEST;
+                } else {
+                    const int k_upper = upper_category[first_data_row + i][t];
+                    if (k < 1 || k_upper < k || k_upper > K) {
+                        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                              "an ordinal category is out of range");
+                    }
+                    lower_code = (k == 1) ? CODE_OF_AN_INFINITE_BOUND : first + k - 2;
+                    upper_code = (k_upper == K) ? CODE_OF_AN_INFINITE_BOUND : first + k_upper - 1;
+                }
+            }
+            code_of_lower_bound[static_cast<std::size_t>(t) * n + i] = lower_code;
+            code_of_upper_bound[static_cast<std::size_t>(t) * n + i] = upper_code;
+        }
+    }
 
+    //// ---- the linear predictors of the covariates of each coefficient set and test, on the tile's rows of the
+    ////      data (read in place, no copy)
+    if (there_are_covariates) {
+        for (int s = 0; s < n_coefficient_sets; ++s) {
+            const int s_X = (n_covariate_sets == 1) ? 0 : s;
+            for (int t = 0; t < T; ++t) {
+                Eigen::Map<Eigen::Matrix<double, -1, 1>> linear_predictor(linear_predictor_of_each_set
+                                                             + (static_cast<std::size_t>(s) * T + t) * n, n);
+                const int P = n_covariates[s_X][t];
+                if (P > 0) {
+                    linear_predictor.noalias() = covariates[s_X][t].block(first_data_row, 0, n, P)
+                                                 * coefficient_values[s].col(t).head(P);
+                } else {
+                    linear_predictor.setZero();
+                }
+            }
+        }
+        for (std::size_t k = 0; k < n_linear_predictors; ++k) gradient_of_linear_predictor[k] = 0.0;
+    }
 
+    //// ---- the forward pass of the GHK recursion of each class: Z, the log masses and the partial derivatives
+    ////      of each step, in the buffers of the class
+    for (int c = 0; c < C; ++c) {
+        double* Z_of_class = values_of_each_class_subject_and_position + 8 * c * nT;   // [j * n + i]
+        double* dZ_da_of_class = Z_of_class + nT;
+        double* dZ_db_of_class = dZ_da_of_class + nT;
+        double* dZ_du_raw_of_class = dZ_db_of_class + nT;
+        double* dlog_mass_da_of_class = dZ_du_raw_of_class + nT;
+        double* dlog_mass_db_of_class = dlog_mass_da_of_class + nT;
+        double* finite_a_of_class = dlog_mass_db_of_class + nT;     // a where finite, 0 where infinite
+        double* finite_b_of_class = finite_a_of_class + nT;
+        double* log_mass_sum = log_mass_sum_of_each_class + static_cast<std::size_t>(c) * n;
+        for (int i = 0; i < n; ++i) {
+            log_mass_sum[i] = value_of(log_class_probability_ref.coeff(first_column + i, c));
+            increment[i] = 0.0;
+            L_of_subject[i] = L_values[static_cast<std::size_t>(c) * n_patterns
+                                       + (pattern_of_subject[first_data_row + i] - 1)].data();
+        }
 
+        for (int j = 0; j < T; ++j) {
+            const int t = test_at_GHK_position[j] - 1;
+            const std::size_t offset = static_cast<std::size_t>(j) * n;
+            const int* cells = cell_of_position + offset;
+            const double* cutpoints_of_test = (test_is_binary[t] == 1) ? nullptr
+                                              : cutpoint_values[cutpoint_set_of_class_and_test[c][t] - 1].data();
+            const double* linear_predictor = there_are_covariates
+                  ? linear_predictor_of_each_set
+                    + (static_cast<std::size_t>(coefficient_set_of_class_and_test[c][t] - 1) * T + t) * n
+                  : nullptr;
+            const int* lower_codes = code_of_lower_bound + static_cast<std::size_t>(t) * n;
+            const int* upper_codes = code_of_upper_bound + static_cast<std::size_t>(t) * n;
+            double* Z_of_position = Z_of_class + offset;
 
+            //// (the cells of the subjects at this position, the scale of each subject's pattern, the linear
+            ////  predictor and the bounds of every subject of the tile)
+            for (int i = 0; i < n; ++i) {
+                const int k = cells[i];
+                const bool observed = (k >= 0);
+                u_of_position[i] = observed ? u_values[k] : 0.0;
+                one_minus_u_of_position[i] = observed ? one_minus_u_values[k] : 0.0;
+                log_u_of_position[i] = observed ? log_u_values[k] : 0.0;
+                log_1m_u_of_position[i] = observed ? log_1m_u_values[k] : 0.0;
+                log_derivative_of_u_of_position[i] = observed ? log_derivative_of_u[k] : 0.0;
+                s_of_subject[i] = observed ? 1.0 / L_of_subject[i][static_cast<std::size_t>(j) * T + j] : 0.0;
+            }
+            const double intercept_of_class_and_test = intercept_values(c, t);
+            for (int i = 0; i < n; ++i) {
+                eta[i] = intercept_of_class_and_test + increment[i]
+                         + (there_are_covariates ? linear_predictor[i] : 0.0);
+            }
+            for (int i = 0; i < n; ++i) {
+                const int lower_code = lower_codes[i];
+                const int upper_code = upper_codes[i];
+                const double lower_cutpoint = (lower_code >= 0) ? cutpoints_of_test[lower_code] : 0.0;
+                const double upper_cutpoint = (upper_code >= 0) ? cutpoints_of_test[upper_code] : 0.0;
+                a[i] = (lower_code == CODE_OF_AN_INFINITE_BOUND) ? -infinity
+                                                                 : (lower_cutpoint - eta[i]) * s_of_subject[i];
+                b[i] = (upper_code == CODE_OF_AN_INFINITE_BOUND) ? infinity
+                                                                 : (upper_cutpoint - eta[i]) * s_of_subject[i];
+            }
 
+            //// (the rows of each branch: narrow intervals first, then the lower and the upper tails, as the
+            ////  function above; a missing result has Z = 0 and log mass 0, and enters nothing)
+            int n_rows_of_branch[4] = { 0, 0, 0, 0 };
+            int* rows_of_branch[4] = { rows_of_each_branch, rows_of_each_branch + n, rows_of_each_branch + 2 * n,
+                                       rows_of_each_branch + 3 * n };
+            for (int i = 0; i < n; ++i) {
+                if (cells[i] < 0) {
+                    Z_of_position[i] = 0.0;
+                    log_mass[i] = 0.0;
+                    continue;
+                }
+                int branch = ROWS_DIRECTLY;
+                const bool both_bounds_are_finite = (a[i] != -infinity) && (b[i] != infinity);
+                if (both_bounds_are_finite && (b[i] - a[i]) * (1.0 + std::fabs(0.5 * (a[i] + b[i])))
+                                              < LARGEST_WIDTH_OF_A_NARROW_INTERVAL) {
 
+                    branch = ROWS_OF_A_NARROW_INTERVAL;
 
+                } else if (b[i] < underflow_threshold) {
+                    branch = ROWS_IN_THE_LOWER_TAIL;
+                } else if (a[i] > overflow_threshold) {
+                    branch = ROWS_IN_THE_UPPER_TAIL;
+                }
+                rows_of_branch[branch][n_rows_of_branch[branch]] = i;
+                n_rows_of_branch[branch] += 1;
+            }
+            for (int branch = 0; branch < 4; ++branch) {
+                const int n_rows = n_rows_of_branch[branch];
+                if (n_rows == 0) continue;
+                const int* rows = rows_of_branch[branch];
+                double* gathered_a = gathered;
+                double* gathered_b = gathered + n_rows;
+                double* gathered_u = gathered + 2 * n_rows;
+                double* gathered_one_minus_u = gathered + 3 * n_rows;
+                double* gathered_log_u = gathered + 4 * n_rows;
+                double* gathered_log_1m_u = gathered + 5 * n_rows;
+                double* gathered_Z = gathered + 6 * n_rows;
+                double* gathered_log_mass = gathered + 7 * n_rows;
+                for (int r = 0; r < n_rows; ++r) {
+                    const int i = rows[r];
+                    gathered_a[r] = a[i];
+                    gathered_b[r] = b[i];
+                    gathered_u[r] = u_of_position[i];
+                    gathered_one_minus_u[r] = one_minus_u_of_position[i];
+                    gathered_log_u[r] = log_u_of_position[i];
+                    gathered_log_1m_u[r] = log_1m_u_of_position[i];
+                }
+                if (branch == ROWS_DIRECTLY) {
+                    if (Phi_type == 1) {
+                        GHK_rows_directly_with_Phi(n_rows, gathered_a, gathered_b, gathered_u,
+                                                   gathered_one_minus_u, gathered_Z, gathered_log_mass, work);
+                    } else {
+                        GHK_rows_directly_with_Phi_approx(n_rows, gathered_a, gathered_b, gathered_log_u,
+                                                          gathered_log_1m_u, gathered_Z, gathered_log_mass, work);
+                    }
+                } else if (branch == ROWS_IN_THE_LOWER_TAIL) {
+                    GHK_rows_in_the_lower_tail(n_rows, Phi_type, gathered_a, gathered_b, gathered_log_u,
+                                               gathered_log_1m_u, gathered_Z, gathered_log_mass, work);
+                } else if (branch == ROWS_IN_THE_UPPER_TAIL) {
+                    GHK_rows_in_the_upper_tail(n_rows, Phi_type, gathered_a, gathered_b, gathered_log_u,
+                                               gathered_log_1m_u, gathered_Z, gathered_log_mass, work);
+                } else {
+                    GHK_rows_of_a_narrow_interval(n_rows, Phi_type, gathered_a, gathered_b, gathered_u,
+                                                  gathered_one_minus_u, gathered_Z, gathered_log_mass, work);
+                }
+                for (int r = 0; r < n_rows; ++r) {
+                    Z_of_position[rows[r]] = gathered_Z[r];
+                    log_mass[rows[r]] = gathered_log_mass[r];
+                }
+            }
+            for (int i = 0; i < n; ++i) log_mass_sum[i] += log_mass[i];
+
+            //// (the partial derivatives of the step: only the observed results and their finite bounds enter the
+            ////  exponential packet; a missing result and an infinite bound take partial 0)
+            if constexpr (gradient_is_needed) {
+                double* log_density_of_a = log_density;
+                double* log_density_of_b = log_density + n;
+                double* log_density_of_Z = log_density + 2 * n;
+                for (int i = 0; i < n; ++i) {
+                    log_density_of_a[i] = (a[i] == -infinity) ? 0.0 : a[i];
+                    log_density_of_b[i] = (b[i] == infinity) ? 0.0 : b[i];
+                    log_density_of_Z[i] = Z_of_position[i];
+                }
+                k_log_density_of_F(log_density_of_a, n, Phi_type, work);
+                k_log_density_of_F(log_density_of_b, n, Phi_type, work);
+                k_log_density_of_F(log_density_of_Z, n, Phi_type, work);
+                int n_exponents = 0;
+                for (int i = 0; i < n; ++i) {
+                    if (cells[i] < 0) continue;
+                    exponent[n_exponents++] = log_mass[i] + log_derivative_of_u_of_position[i]
+                                              - log_density_of_Z[i];
+                    if (a[i] != -infinity) {
+                        exponent[n_exponents++] = log_1m_u_of_position[i] + log_density_of_a[i]
+                                                  - log_density_of_Z[i];
+                        exponent[n_exponents++] = log_density_of_a[i] - log_mass[i];
+                    }
+                    if (b[i] != infinity) {
+                        exponent[n_exponents++] = log_u_of_position[i] + log_density_of_b[i]
+                                                  - log_density_of_Z[i];
+                        exponent[n_exponents++] = log_density_of_b[i] - log_mass[i];
+                    }
+                }
+                k_exp(exponent, n_exponents);
+                int next_exponent = 0;
+                for (int i = 0; i < n; ++i) {
+                    if (cells[i] < 0) {
+                        dZ_du_raw_of_class[offset + i] = 0.0;
+                        dZ_da_of_class[offset + i] = 0.0;
+                        dlog_mass_da_of_class[offset + i] = 0.0;
+                        dZ_db_of_class[offset + i] = 0.0;
+                        dlog_mass_db_of_class[offset + i] = 0.0;
+                        finite_a_of_class[offset + i] = 0.0;
+                        finite_b_of_class[offset + i] = 0.0;
+                        continue;
+                    }
+                    const bool a_is_finite = (a[i] != -infinity);
+                    const bool b_is_finite = (b[i] != infinity);
+                    dZ_du_raw_of_class[offset + i] = exponent[next_exponent++];
+                    dZ_da_of_class[offset + i] = a_is_finite ? exponent[next_exponent++] : 0.0;
+                    dlog_mass_da_of_class[offset + i] = a_is_finite ? -exponent[next_exponent++] : 0.0;
+                    dZ_db_of_class[offset + i] = b_is_finite ? exponent[next_exponent++] : 0.0;
+                    dlog_mass_db_of_class[offset + i] = b_is_finite ? exponent[next_exponent++] : 0.0;
+                    finite_a_of_class[offset + i] = a_is_finite ? a[i] : 0.0;
+                    finite_b_of_class[offset + i] = b_is_finite ? b[i] : 0.0;
+                }
+            }
+
+            //// (the increment of the next GHK position: sum_{k <= j} L[j + 1, k] Z[k], by each subject's
+            ////  pattern; a missing result has Z = 0)
+            if (j + 1 < T) {
+                for (int i = 0; i < n; ++i) increment[i] = 0.0;
+                for (int k = 0; k <= j; ++k) {
+                    const double* Z_of_k = Z_of_class + static_cast<std::size_t>(k) * n;
+                    const std::size_t entry = static_cast<std::size_t>(k) * T + (j + 1);
+                    for (int i = 0; i < n; ++i) increment[i] += L_of_subject[i][entry] * Z_of_k[i];
+                }
+            }
+        }
+    }
+
+    //// ---- the mixture over the classes: log sum_c exp(log_class_probability + the class's log masses) of each
+    ////      subject of the tile, and the weight of each class (the derivative of the value with respect to its
+    ////      terms)
+    double value = log_Jacobian;
+    {
+        double* largest_term = derivative_wrt_a;
+        double* sum_of_exponentials = derivative_wrt_b;
+        for (int i = 0; i < n; ++i) largest_term[i] = log_mass_sum_of_each_class[i];
+        for (int c = 1; c < C; ++c) {
+            const double* log_mass_sum = log_mass_sum_of_each_class + static_cast<std::size_t>(c) * n;
+            for (int i = 0; i < n; ++i) largest_term[i] = std::max(largest_term[i], log_mass_sum[i]);
+        }
+        for (int c = 0; c < C; ++c) {
+            const double* log_mass_sum = log_mass_sum_of_each_class + static_cast<std::size_t>(c) * n;
+            double* weight = weight_of_each_class + static_cast<std::size_t>(c) * n;
+            for (int i = 0; i < n; ++i) weight[i] = log_mass_sum[i] - largest_term[i];
+        }
+        k_exp(weight_of_each_class, static_cast<int>(nC));
+        for (int i = 0; i < n; ++i) sum_of_exponentials[i] = 0.0;
+        for (int c = 0; c < C; ++c) {
+            const double* weight = weight_of_each_class + static_cast<std::size_t>(c) * n;
+            for (int i = 0; i < n; ++i) sum_of_exponentials[i] += weight[i];
+        }
+        for (int c = 0; c < C; ++c) {
+            double* weight = weight_of_each_class + static_cast<std::size_t>(c) * n;
+            for (int i = 0; i < n; ++i) weight[i] /= sum_of_exponentials[i];
+        }
+        k_log(sum_of_exponentials, n);
+        for (int i = 0; i < n; ++i) value += largest_term[i] + sum_of_exponentials[i];
+    }
+
+    if constexpr (!gradient_is_needed) {
+        return value;
+    } else {
+
+        //// ---- the reverse sweep of the GHK recursion of each class, seeded by the class weights: the gradient
+        ////      with respect to the tile's nuisance values and linear predictors, and the tile's part of the
+        ////      gradients with respect to the intercepts, the cutpoints and the Cholesky factor of each pattern
+        for (int c = 0; c < C; ++c) {
+            const double* Z_of_class = values_of_each_class_subject_and_position + 8 * c * nT;
+            const double* dZ_da_of_class = Z_of_class + nT;
+            const double* dZ_db_of_class = dZ_da_of_class + nT;
+            const double* dZ_du_raw_of_class = dZ_db_of_class + nT;
+            const double* dlog_mass_da_of_class = dZ_du_raw_of_class + nT;
+            const double* dlog_mass_db_of_class = dlog_mass_da_of_class + nT;
+            const double* finite_a_of_class = dlog_mass_db_of_class + nT;
+            const double* finite_b_of_class = finite_a_of_class + nT;
+            const double* weight = weight_of_each_class + static_cast<std::size_t>(c) * n;
+            for (int i = 0; i < n; ++i) {
+                const std::size_t index = static_cast<std::size_t>(c) * n_patterns
+                                          + (pattern_of_subject[first_data_row + i] - 1);
+                L_of_subject[i] = L_values[index].data();
+                gradient_of_L_of_subject[i] = gradient_of_L[index].data();
+            }
+            for (std::size_t k = 0; k < nT; ++k) adjoint_of_Z[k] = 0.0;
+            for (int j = T - 1; j >= 0; --j) {
+                const int t = test_at_GHK_position[j] - 1;
+                const std::size_t offset = static_cast<std::size_t>(j) * n;
+                const std::size_t diagonal = static_cast<std::size_t>(j) * T + j;
+                const int* cells = cell_of_position + offset;
+                const double* adjoint_of_Z_of_position = adjoint_of_Z + offset;
+                double sum_of_derivatives_wrt_eta = 0.0;
+                for (int i = 0; i < n; ++i) {
+                    const double s = (cells[i] >= 0) ? 1.0 / L_of_subject[i][diagonal] : 0.0;
+                    derivative_wrt_a[i] = adjoint_of_Z_of_position[i] * dZ_da_of_class[offset + i]
+                                          + weight[i] * dlog_mass_da_of_class[offset + i];
+                    derivative_wrt_b[i] = adjoint_of_Z_of_position[i] * dZ_db_of_class[offset + i]
+                                          + weight[i] * dlog_mass_db_of_class[offset + i];
+                    if (cells[i] >= 0) {
+                        gradient_of_u_raw[cells[i]] += adjoint_of_Z_of_position[i]
+                                                       * dZ_du_raw_of_class[offset + i];
+                    }
+                    derivative_wrt_eta[i] = -s * (derivative_wrt_a[i] + derivative_wrt_b[i]);
+                    s_of_subject[i] = s;
+                    //// (a = (cutpoint - eta - inc) s: d/dL[j, j] = (a / s) (-s^2) = -s a)
+                    gradient_of_L_of_subject[i][diagonal] +=
+                          -s * (finite_a_of_class[offset + i] * derivative_wrt_a[i]
+                                + finite_b_of_class[offset + i] * derivative_wrt_b[i]);
+                    sum_of_derivatives_wrt_eta += derivative_wrt_eta[i];
+                }
+                //// (d/dcutpoint = s)
+                if (test_is_binary[t] != 1) {
+                    double* gradient_of_set =
+                          gradient_of_cutpoints[cutpoint_set_of_class_and_test[c][t] - 1].data();
+                    const int* lower_codes = code_of_lower_bound + static_cast<std::size_t>(t) * n;
+                    const int* upper_codes = code_of_upper_bound + static_cast<std::size_t>(t) * n;
+                    for (int i = 0; i < n; ++i) {
+                        if (lower_codes[i] >= 0) {
+                            gradient_of_set[lower_codes[i]] += s_of_subject[i] * derivative_wrt_a[i];
+                        }
+                        if (upper_codes[i] >= 0) {
+                            gradient_of_set[upper_codes[i]] += s_of_subject[i] * derivative_wrt_b[i];
+                        }
+                    }
+                }
+                gradient_of_intercept(c, t) += sum_of_derivatives_wrt_eta;
+                if (there_are_covariates) {
+                    double* gradient_of_linear_predictor_of_set = gradient_of_linear_predictor
+                          + (static_cast<std::size_t>(coefficient_set_of_class_and_test[c][t] - 1) * T + t) * n;
+                    for (int i = 0; i < n; ++i) gradient_of_linear_predictor_of_set[i] += derivative_wrt_eta[i];
+                }
+                //// (inc = sum_{k < j} L[j, k] Z[k], by each subject's pattern)
+                for (int k = 0; k < j; ++k) {
+                    const double* Z_of_k = Z_of_class + static_cast<std::size_t>(k) * n;
+                    double* adjoint_of_Z_of_k = adjoint_of_Z + static_cast<std::size_t>(k) * n;
+                    const std::size_t entry = static_cast<std::size_t>(k) * T + j;
+                    for (int i = 0; i < n; ++i) {
+                        adjoint_of_Z_of_k[i] += derivative_wrt_eta[i] * L_of_subject[i][entry];
+                        gradient_of_L_of_subject[i][entry] += derivative_wrt_eta[i] * Z_of_k[i];
+                    }
+                }
+            }
+        }
+
+        //// ---- the tile's partial derivatives of its nuisance values, written at their elements of the partials
+        ////      (those of the missing results stay 0)
+        if (gradient_of_u_raw_of_tile != nullptr) {
+            for (std::size_t k = 0; k < n_cells_of_tile; ++k) {
+                gradient_of_u_raw_of_tile[value_of_cell[k]] = gradient_of_u_raw[k]
+                                                              + derivative_of_log_Jacobian[k];
+            }
+        }
+        //// ---- the tile's part of the gradients of the coefficients (its rows of the covariates, read in place)
+        if (there_are_covariates) {
+            for (int s = 0; s < n_coefficient_sets; ++s) {
+                const int s_X = (n_covariate_sets == 1) ? 0 : s;
+                for (int t = 0; t < T; ++t) {
+                    const int P = n_covariates[s_X][t];
+                    if (P == 0) continue;
+                    const Eigen::Map<const Eigen::Matrix<double, -1, 1>> gradient_of_linear_predictor_of_set(
+                          gradient_of_linear_predictor + (static_cast<std::size_t>(s) * T + t) * n, n);
+                    gradient_of_coefficients[s].col(t).head(P).noalias() +=
+                          covariates[s_X][t].block(first_data_row, 0, n, P).transpose()
+                          * gradient_of_linear_predictor_of_set;
+                }
+            }
+        }
+        //// ---- the tile's partial derivatives of its log class probabilities (the weights of the classes)
+        if (partials_of_log_class_probability != nullptr) {
+            for (int c = 0; c < C; ++c) {
+                const double* weight = weight_of_each_class + static_cast<std::size_t>(c) * n;
+                double* partials_of_class = partials_of_log_class_probability
+                                            + static_cast<std::size_t>(c) * M + first_column;
+                for (int i = 0; i < n; ++i) partials_of_class[i] = weight[i];
+            }
+        }
+        return value;
+    }
+
+}
+
+template <typename T_u_raw, typename T_intercept, typename T_coefficients, typename T_cutpoints,
+          typename T_L, typename T_log_class_probability>
+inline stan::return_type_t<T_u_raw, T_intercept, T_coefficients, T_cutpoints, T_L, T_log_class_probability>
+nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects(
+        const T_u_raw& u_raw_of_each_observed_result,
+        const int first_subject,
+        const int nuisance_transformation,
+        const T_intercept& intercept,
+        const T_coefficients& coefficients,
+        const std::vector<std::vector<int>>& coefficient_set_of_class_and_test,
+        const std::vector<std::vector<Eigen::Matrix<double, -1, -1>>>& covariates,
+        const std::vector<std::vector<int>>& n_covariates,
+        const T_cutpoints& cutpoints,
+        const std::vector<std::vector<int>>& cutpoint_set_of_class_and_test,
+        const std::vector<int>& position_of_first_cutpoint_of_test,
+        const T_L& L_of_each_class_and_pattern,
+        const std::vector<int>& pattern_of_subject,
+        const T_log_class_probability& log_class_probability,
+        const std::vector<std::vector<int>>& category,
+        const std::vector<std::vector<int>>& upper_category,
+        const std::vector<int>& test_is_binary,
+        const std::vector<int>& n_categories_of_test,
+        const std::vector<int>& test_at_GHK_position,
+        const int Phi_type,
+        const double overflow_threshold,
+        const double underflow_threshold,
+        std::ostream* /*pstream__*/) {
+
+    using namespace nico::math;
+    using stan::math::value_of;
+    constexpr bool gradient_is_needed = !stan::is_constant_all<T_u_raw, T_intercept, T_coefficients, T_cutpoints,
+                                                               T_L, T_log_class_probability>::value;
+
+    const auto& u_raw_ref = stan::math::to_ref(u_raw_of_each_observed_result);
+    const auto& intercept_ref = stan::math::to_ref(intercept);
+    const auto& log_class_probability_ref = stan::math::to_ref(log_class_probability);
+
+    //// ---- the sizes, and the checks of the arguments (each O(1) per test, class, pattern or set, except the
+    ////      rows of the data, counted once for the cells and checked tile by tile where their codes are made):
+    const int M = static_cast<int>(log_class_probability_ref.rows());
+    const int C = static_cast<int>(intercept_ref.rows());
+    const int T = static_cast<int>(intercept_ref.cols());
+    const int first_data_row = first_subject - 1;
+    const int n_coefficient_sets = static_cast<int>(coefficients.size());
+    const int n_cutpoint_sets = static_cast<int>(cutpoints.size());
+    const int n_covariate_sets = static_cast<int>(covariates.size());
+    const int n_L = static_cast<int>(L_of_each_class_and_pattern.size());
+    if (C < 1) {
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "intercept must have one class");
+    }
+    if (n_L < C || n_L % C != 0) {
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "L_of_each_class_and_pattern must have C x n_patterns matrices");
+    }
+    const int n_patterns = n_L / C;
+    if (Phi_type != 1 && Phi_type != 2) {
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "Phi_type must be 1 or 2");
+    }
+    if (nuisance_transformation != 1 && nuisance_transformation != 2) {
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "nuisance_transformation must be 1 (Phi) or 2 (tanh)");
+    }
+    if (log_class_probability_ref.cols() != C) {
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "log_class_probability must be M x C");
+    }
+    if (first_subject < 1 || static_cast<int>(category.size()) < first_data_row + M
+        || static_cast<int>(upper_category.size()) < first_data_row + M
+        || static_cast<int>(pattern_of_subject.size()) < first_data_row + M) {
+
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "category, upper_category and pattern_of_subject must have the rows first_subject, ..., "
+              "first_subject + M - 1");
+
+    }
+    if (static_cast<int>(test_is_binary.size()) != T || static_cast<int>(n_categories_of_test.size()) != T
+        || static_cast<int>(test_at_GHK_position.size()) != T
+        || static_cast<int>(position_of_first_cutpoint_of_test.size()) != T) {
+
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "the arrays of the tests must have T elements");
+
+    }
+    if (static_cast<int>(coefficient_set_of_class_and_test.size()) != C
+        || static_cast<int>(cutpoint_set_of_class_and_test.size()) != C) {
+
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "the sets of each class and test must be C x T");
+
+    }
+    for (int l = 0; l < n_L; ++l) {
+        if (L_of_each_class_and_pattern[l].rows() != T || L_of_each_class_and_pattern[l].cols() != T) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "every matrix of L_of_each_class_and_pattern must be T x T");
+        }
+    }
+    for (int c = 0; c < C; ++c) {
+        if (static_cast<int>(coefficient_set_of_class_and_test[c].size()) != T
+            || static_cast<int>(cutpoint_set_of_class_and_test[c].size()) != T) {
+
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "the sets of each class and test must be C x T");
+
+        }
+    }
+    //// (covariates: none when there are no covariate sets or no covariates in any of them)
+    int largest_number_of_covariates = 0;
+    if (n_covariate_sets > 0) {
+        if (n_covariate_sets != 1 && n_covariate_sets != n_coefficient_sets) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "covariates must have 1 or S_B sets");
+        }
+        if (static_cast<int>(n_covariates.size()) != n_covariate_sets) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "n_covariates must have the sets of covariates");
+        }
+        for (int s = 0; s < n_covariate_sets; ++s) {
+            if (static_cast<int>(covariates[s].size()) != T || static_cast<int>(n_covariates[s].size()) != T) {
+                stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                      "every set of covariates must have T matrices");
+            }
+            for (int t = 0; t < T; ++t) {
+                const int P = n_covariates[s][t];
+                if (P < 0 || P > covariates[s][t].cols()
+                    || (P > 0 && covariates[s][t].rows() < first_data_row + M)) {
+
+                    stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                          "covariates must have the rows first_subject, ..., first_subject + M - 1 and at least "
+                          "n_covariates columns");
+
+                }
+                largest_number_of_covariates = std::max(largest_number_of_covariates, P);
+            }
+        }
+    }
+    const bool there_are_covariates = (largest_number_of_covariates > 0);
+    if (there_are_covariates) {
+        for (int s = 0; s < n_coefficient_sets; ++s) {
+            if (coefficients[s].cols() != T || coefficients[s].rows() < largest_number_of_covariates) {
+                stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                      "every coefficient set must be P_max x T");
+            }
+        }
+    }
+    for (int c = 0; c < C; ++c) {
+        for (int t = 0; t < T; ++t) {
+            if (there_are_covariates && (coefficient_set_of_class_and_test[c][t] < 1
+                                         || coefficient_set_of_class_and_test[c][t] > n_coefficient_sets)) {
+
+                stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                      "a coefficient set is out of range");
+
+            }
+            if (test_is_binary[t] != 1 && (cutpoint_set_of_class_and_test[c][t] < 1
+                                           || cutpoint_set_of_class_and_test[c][t] > n_cutpoint_sets)) {
+
+                stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                      "a cutpoint set is out of range");
+
+            }
+        }
+    }
+    std::vector<int> position_of_test_in_GHK_order(T, -1);
+    for (int j = 0; j < T; ++j) {
+        const int t = test_at_GHK_position[j] - 1;
+        if (t < 0 || t >= T || position_of_test_in_GHK_order[t] != -1) {
+            stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                  "test_at_GHK_position must be a permutation of 1:T");
+        }
+        position_of_test_in_GHK_order[t] = j;
+    }
+    for (int t = 0; t < T; ++t) {
+        if (test_is_binary[t] == 1) continue;
+        const int first = position_of_first_cutpoint_of_test[t] - 1;
+        for (int s = 0; s < n_cutpoint_sets; ++s) {
+            if (first < 0 || first + n_categories_of_test[t] - 1 > cutpoints[s].size()) {
+                stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                      "the cutpoints of an ordinal test are out of range");
+            }
+        }
+    }
+    //// (the observed results of each tile, and their number against the nuisance values of the slice)
+    const int n_tiles = (M + LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE - 1) / LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE;
+    std::vector<int> cells_of_tile(n_tiles, 0);
+    int n_cells_of_slice = 0;
+    for (int tile = 0; tile < n_tiles; ++tile) {
+        const int first_column = tile * LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE;
+        const int n = std::min(LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE, M - first_column);
+        int n_cells = 0;
+        for (int i = 0; i < n; ++i) {
+            const std::vector<int>& category_of_row = category[first_data_row + first_column + i];
+            if (static_cast<int>(category_of_row.size()) != T) {
+                stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+                      "every row of category and upper_category must have T values");
+            }
+            for (int t = 0; t < T; ++t) n_cells += (category_of_row[t] >= 0) ? 1 : 0;
+        }
+        cells_of_tile[tile] = n_cells;
+        n_cells_of_slice += n_cells;
+    }
+    constexpr bool u_raw_has_one_value_per_observed_result = stan::is_col_vector<T_u_raw>::value;
+    if (u_raw_has_one_value_per_observed_result && static_cast<int>(u_raw_ref.size()) != n_cells_of_slice) {
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "u_raw_of_each_observed_result must have one value per observed result of the slice");
+    }
+    if (!u_raw_has_one_value_per_observed_result
+        && (static_cast<int>(u_raw_ref.rows()) != T || static_cast<int>(u_raw_ref.cols()) != M)) {
+
+        stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
+              "u_raw_of_each_observed_result must be a vector of the observed results or a T x M matrix");
+
+    }
+
+    //// ---- the values of the parameters, once for every tile:
+    const Eigen::Matrix<double, -1, -1> intercept_values = value_of(intercept_ref);
+    std::vector<Eigen::Matrix<double, -1, -1>> L_values(n_L);
+    for (int l = 0; l < n_L; ++l) L_values[l] = value_of(L_of_each_class_and_pattern[l]);
+    std::vector<Eigen::Matrix<double, -1, 1>> cutpoint_values(n_cutpoint_sets);
+    for (int s = 0; s < n_cutpoint_sets; ++s) cutpoint_values[s] = value_of(cutpoints[s]);
+    std::vector<Eigen::Matrix<double, -1, -1>> coefficient_values(there_are_covariates ? n_coefficient_sets : 0);
+    for (int s = 0; s < static_cast<int>(coefficient_values.size()); ++s) {
+        coefficient_values[s] = value_of(coefficients[s]);
+    }
+
+    //// ---- the sums of the gradients over the tiles:
+    Eigen::Matrix<double, -1, -1> gradient_of_intercept = Eigen::Matrix<double, -1, -1>::Zero(C, T);
+    std::vector<Eigen::Matrix<double, -1, -1>> gradient_of_L(n_L, Eigen::Matrix<double, -1, -1>::Zero(T, T));
+    std::vector<Eigen::Matrix<double, -1, 1>> gradient_of_cutpoints(n_cutpoint_sets);
+    for (int s = 0; s < n_cutpoint_sets; ++s) {
+        gradient_of_cutpoints[s] = Eigen::Matrix<double, -1, 1>::Zero(cutpoints[s].size());
+    }
+    std::vector<Eigen::Matrix<double, -1, -1>> gradient_of_coefficients(n_coefficient_sets);
+    for (int s = 0; s < n_coefficient_sets; ++s) {
+        gradient_of_coefficients[s] = Eigen::Matrix<double, -1, -1>::Zero(coefficients[s].rows(),
+                                                                          coefficients[s].cols());
+    }
+
+    if constexpr (!gradient_is_needed) {
+        double value = 0.0;
+        int first_cell = 0;
+        for (int tile = 0; tile < n_tiles; ++tile) {
+            const int first_column = tile * LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE;
+            const int n = std::min(LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE, M - first_column);
+            value += GHK_mixture_log_likelihood_of_the_observed_results_of_one_tile_of_subjects<false>(
+                           n, first_column, first_data_row + first_column, M, first_cell, cells_of_tile[tile],
+                           u_raw_has_one_value_per_observed_result, u_raw_ref, nuisance_transformation,
+                           intercept_values, coefficient_values,
+                           coefficient_set_of_class_and_test, covariates, n_covariates, there_are_covariates,
+                           cutpoint_values, cutpoint_set_of_class_and_test, position_of_first_cutpoint_of_test,
+                           L_values, n_patterns, pattern_of_subject, log_class_probability_ref, category,
+                           upper_category, test_is_binary, n_categories_of_test, test_at_GHK_position, Phi_type,
+                           overflow_threshold, underflow_threshold, nullptr, nullptr, gradient_of_intercept,
+                           gradient_of_coefficients, gradient_of_cutpoints, gradient_of_L);
+            first_cell += cells_of_tile[tile];
+        }
+        return value;
+    } else {
+
+        //// ---- the node, and its partials of the nuisance values (one per observed result) and of the log class
+        ////      probabilities (M x C), written tile by tile
+        auto partials = stan::math::make_partials_propagator(u_raw_ref, intercept_ref, coefficients, cutpoints,
+                                                             L_of_each_class_and_pattern,
+                                                             log_class_probability_ref);
+        double* partials_of_u_raw = nullptr;
+        if constexpr (!stan::is_constant_all<T_u_raw>::value) {
+            partials_of_u_raw = stan::math::partials<0>(partials).data();
+        }
+        double* partials_of_log_class_probability = nullptr;
+        if constexpr (!stan::is_constant_all<T_log_class_probability>::value) {
+            partials_of_log_class_probability = stan::math::partials<5>(partials).data();
+        }
+        double value = 0.0;
+        int first_cell = 0;
+        for (int tile = 0; tile < n_tiles; ++tile) {
+            const int first_column = tile * LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE;
+            const int n = std::min(LARGEST_NUMBER_OF_SUBJECTS_IN_A_TILE, M - first_column);
+            //// (the elements of the partials are those of u_raw, so the tile writes into the whole partials)
+            double* partials_of_u_raw_of_tile = partials_of_u_raw;
+            value += GHK_mixture_log_likelihood_of_the_observed_results_of_one_tile_of_subjects<true>(
+                           n, first_column, first_data_row + first_column, M, first_cell, cells_of_tile[tile],
+                           u_raw_has_one_value_per_observed_result, u_raw_ref, nuisance_transformation,
+                           intercept_values, coefficient_values,
+                           coefficient_set_of_class_and_test, covariates, n_covariates, there_are_covariates,
+                           cutpoint_values, cutpoint_set_of_class_and_test, position_of_first_cutpoint_of_test,
+                           L_values, n_patterns, pattern_of_subject, log_class_probability_ref, category,
+                           upper_category, test_is_binary, n_categories_of_test, test_at_GHK_position, Phi_type,
+                           overflow_threshold, underflow_threshold, partials_of_u_raw_of_tile,
+                           partials_of_log_class_probability, gradient_of_intercept, gradient_of_coefficients,
+                           gradient_of_cutpoints, gradient_of_L);
+            first_cell += cells_of_tile[tile];
+        }
+        if constexpr (!stan::is_constant_all<T_intercept>::value) {
+            stan::math::partials<1>(partials) = gradient_of_intercept;
+        }
+        if constexpr (!stan::is_constant_all<T_coefficients>::value) {
+            for (int s = 0; s < n_coefficient_sets; ++s) {
+                stan::math::partials_vec<2>(partials)[s] = gradient_of_coefficients[s];
+            }
+        }
+        if constexpr (!stan::is_constant_all<T_cutpoints>::value) {
+            for (int s = 0; s < n_cutpoint_sets; ++s) {
+                stan::math::partials_vec<3>(partials)[s] = gradient_of_cutpoints[s];
+            }
+        }
+        if constexpr (!stan::is_constant_all<T_L>::value) {
+            for (int l = 0; l < n_L; ++l) stan::math::partials_vec<4>(partials)[l] = gradient_of_L[l];
+        }
+        return partials.build(value);
+    }
+
+}
+
+}  // namespace nico::math
+
+using nico::math::nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects;
