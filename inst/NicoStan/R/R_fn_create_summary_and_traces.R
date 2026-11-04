@@ -1488,6 +1488,8 @@ create_summary_and_traces <- function(    model_results,
             Min_ESS_sd_parameters_of_interest <-  NULL
             Min_ESS_tail_parameters_of_interest <-  NULL
             parameters_of_interest <-  NULL
+            families_of_interest_not_in_the_main_block <-  character(0)
+            families_of_main_parameters_for_ESS <-  character(0)
             parameter_families_of_interest_for_min_ESS <-  NULL
             Min_ESS_joint <-  NULL
             Min_ESS_sd_joint <-  NULL
@@ -1633,13 +1635,12 @@ create_summary_and_traces <- function(    model_results,
                                   x = names_of_main_parameters_for_ESS)
                         is_parameter_of_interest <-  families_of_main_parameters_for_ESS %in%
                                                      parameter_families_of_interest_for_min_ESS
-                        if (!any(is_parameter_of_interest)) {
-                              stop(paste0("parameter_families_of_interest_for_min_ESS: ",
-                                          paste(parameter_families_of_interest_for_min_ESS, collapse = ", "),
-                                          " match(es) no main parameter; the main parameter families are: ",
-                                          paste(unique(families_of_main_parameters_for_ESS),
-                                                collapse = ", "), "."))
-                        }
+                        ## (families of interest that are not main parameters, e.g. the generated quantities
+                        ##  Se_baseline and Sp_baseline, are searched in the transformed parameters and the generated
+                        ##  quantities below)
+                        families_of_interest_not_in_the_main_block <-
+                              setdiff(parameter_families_of_interest_for_min_ESS,
+                                      families_of_main_parameters_for_ESS)
                         rows_of_parameters_of_interest <-  rows_of_main_parameters_for_ESS[
                               is_parameter_of_interest]
                   }
@@ -1772,6 +1773,50 @@ create_summary_and_traces <- function(    model_results,
             }
             
             # tictoc::toc(log = TRUE)
+        }
+        ##
+        ## ---- the min ESS over the parameters of interest whose families are not main parameters (e.g. the generated
+        ##      quantities Se_baseline and Sp_baseline): searched over the transformed parameters and the generated
+        ##      quantities, together with the main parameters of interest found above; quantities with an undefined
+        ##      ESS (draws that never change) are left out:
+        ##
+        if (length(x = families_of_interest_not_in_the_main_block) > 0) {
+
+              summary_tibble_of_other_quantities <-  rbind(summary_tibble_transformed_parameters,
+                                                           summary_tibble_generated_quantities)
+              families_of_other_quantities <-  if (is.null(summary_tibble_of_other_quantities)) character(0) else
+                    sub(pattern = "[.\\[].*$", replacement = "", x = summary_tibble_of_other_quantities$parameter)
+              families_found_nowhere <-  setdiff(families_of_interest_not_in_the_main_block,
+                                                 families_of_other_quantities)
+              if (length(families_found_nowhere) > 0) {
+                    stop(paste0("parameter_families_of_interest_for_min_ESS: ",
+                                paste(families_found_nowhere, collapse = ", "),
+                                " match(es) no main parameter, transformed parameter or generated quantity (with ",
+                                "compute_transformed_parameters / compute_generated_quantities = TRUE); the families ",
+                                "are: ", paste(unique(c(families_of_main_parameters_for_ESS,
+                                                        families_of_other_quantities)), collapse = ", "), "."))
+              }
+              rows_of_other_quantities_of_interest <-  which(families_of_other_quantities %in%
+                                                             families_of_interest_not_in_the_main_block)
+              fn_smallest_finite_value_or_NA <-  function(values) {
+
+                    values <-  values[is.finite(x = values)]
+                    if (length(x = values) > 0) min(values) else NA_real_
+
+              }
+              Min_ESS_parameters_of_interest <-  fn_smallest_finite_value_or_NA(c(
+                    summary_tibble_main_params$n_eff[rows_of_parameters_of_interest],
+                    summary_tibble_of_other_quantities$n_eff[rows_of_other_quantities_of_interest]))
+              Min_ESS_sd_parameters_of_interest <-  fn_smallest_finite_value_or_NA(c(
+                    summary_tibble_main_params$n_eff_sd[rows_of_parameters_of_interest],
+                    summary_tibble_of_other_quantities$n_eff_sd[rows_of_other_quantities_of_interest]))
+              Min_ESS_tail_parameters_of_interest <-  fn_smallest_finite_value_or_NA(c(
+                    summary_tibble_main_params$n_eff_tail[rows_of_parameters_of_interest],
+                    summary_tibble_of_other_quantities$n_eff_tail[rows_of_other_quantities_of_interest]))
+              parameters_of_interest <-  c(summary_tibble_main_params$parameter[rows_of_parameters_of_interest],
+                                           summary_tibble_of_other_quantities$parameter[
+                                                 rows_of_other_quantities_of_interest])
+
         }
          
          #### -----------------------------  DF / tibble creation (for "posterior" and "bayesplot" R packages)  --------------------------------------------
