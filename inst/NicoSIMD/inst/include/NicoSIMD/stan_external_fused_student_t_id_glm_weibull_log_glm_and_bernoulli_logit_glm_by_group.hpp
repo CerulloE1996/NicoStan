@@ -9,6 +9,9 @@
 //                       = weibull_lpdf(y | shape, exp(alpha + x * beta))
 //     nico_weibull_log_glm_lccdf(y | x, alpha, beta, shape)
 //                       = weibull_lccdf(y | shape, exp(alpha + x * beta))
+//     nico_weibull_log_glm_lpdf(y | x, alpha, beta, shape, log_y)  and  _lccdf(y | x, alpha, beta, shape, log_y)
+//                       = the same, with log_y = log(y) given as data (made once, e.g. in transformed data), so
+//                         the pass reads L_i in place of taking the log of y_i at every call
 //     nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(y | x, group, alpha, B)
 //                       = bernoulli_logit_lpmf(y | f),   f_i = alpha(group_i) + sum_k x(i, k) B(group_i, k)
 //     nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(y | x, group, B)     (the same without alpha)
@@ -66,6 +69,8 @@
 //     real nico_student_t_id_glm_lpdf(array[] real y, matrix x, real alpha, vector beta, real nu, real sigma);
 //     real nico_weibull_log_glm_lpdf(array[] real y, matrix x, real alpha, vector beta, real shape);
 //     real nico_weibull_log_glm_lccdf(vector y, matrix x, real alpha, vector beta, real shape);
+//     real nico_weibull_log_glm_lpdf(array[] real y, matrix x, real alpha, vector beta, real shape, vector log_y);
+//     real nico_weibull_log_glm_lccdf(vector y, matrix x, real alpha, vector beta, real shape, vector log_y);
 //     real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, array[] int group,
 //                                                                   vector alpha, matrix B);
 //     real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, array[] int group,
@@ -148,6 +153,19 @@ ALWAYS_INLINE simd_t y_of_block(const double* y_of_block_start, const int count)
     alignas(64) double y_buffer[BMVP_LANES];
     for (int lane = 0; lane < BMVP_LANES; ++lane) y_buffer[lane] = (lane < count) ? y_of_block_start[lane] : 1.0;
     return simd_load(y_buffer);
+
+}
+
+// ---- log(y) of one block of rows, given as data: BMVP_LANES values, or the first count values and 0.0 = log(1.0)
+//      in the spare lanes (as y_of_block's 1.0)
+ALWAYS_INLINE simd_t log_y_of_block(const double* log_y_of_block_start, const int count) {
+
+    if (count == BMVP_LANES) return simd_loadu(log_y_of_block_start);
+    alignas(64) double log_y_buffer[BMVP_LANES];
+    for (int lane = 0; lane < BMVP_LANES; ++lane) {
+        log_y_buffer[lane] = (lane < count) ? log_y_of_block_start[lane] : 0.0;
+    }
+    return simd_load(log_y_buffer);
 
 }
 
@@ -309,7 +327,8 @@ inline sums_of_student_t_glm student_t_glm_pass(glm::glm_pass& pass, const doubl
 
 
 // ---- Weibull: the one pass, which returns sum_i L_i, sum_i f_i, sum_i w_i and sum_i u_i w_i, and fills the
-//      partials of beta and alpha (through d_i) asked for; is_lccdf: d_i of log S_i, else of log p_i
+//      partials of beta and alpha (through d_i) asked for; is_lccdf: d_i of log S_i, else of log p_i;
+//      log_y_given: L_i read from log_y, else the log of y_i
 struct sums_of_weibull_glm {
     double sum_of_log_y = 0.0;
     double sum_of_f = 0.0;
@@ -317,8 +336,11 @@ struct sums_of_weibull_glm {
     double sum_of_u_times_w = 0.0;
 };
 
-template <bool is_lccdf, bool compute_partials>
-inline sums_of_weibull_glm weibull_glm_pass(glm::glm_pass& pass, const double* y, const double shape) {
+template <bool is_lccdf, bool compute_partials, bool log_y_given>
+inline sums_of_weibull_glm weibull_glm_pass(glm::glm_pass& pass,
+                                            const double* y,
+                                            const double* log_y,
+                                            const double shape) {
 
     const simd_t one = fused_t::simd_set1(1.0);
     const simd_t shape_block = fused_t::simd_set1(shape);
@@ -339,17 +361,23 @@ inline sums_of_weibull_glm weibull_glm_pass(glm::glm_pass& pass, const double* y
         glm::compute_f_of_chunk_into_buffer(pass, chunk_first, chunk_rows, f_of_chunk);
         for (int row = 0; row < chunk_rows; row += BMVP_LANES) {
             const int count = std::min(BMVP_LANES, chunk_rows - row);
-            const simd_t y_block = y_of_block(y + chunk_first + row, count);
             simd_t f = simd_load(f_of_chunk + row);
-            simd_t log_y = fused_w::simd_log(y_block);
-            const simd_t u = fused_t::simd_sub(log_y, f);
+            // const simd_t y_block = y_of_block(y + chunk_first + row, count);
+            // simd_t log_y = fused_w::simd_log(y_block);
+            simd_t log_y_lanes;
+            if constexpr (log_y_given) {
+                log_y_lanes = log_y_of_block(log_y + chunk_first + row, count);
+            } else {
+                log_y_lanes = fused_w::simd_log(y_of_block(y + chunk_first + row, count));
+            }
+            const simd_t u = fused_t::simd_sub(log_y_lanes, f);
             simd_t w = fused_w::simd_exp(fused_t::simd_mul(shape_block, u));
             if (count < BMVP_LANES) {
                 f = glm::keep_first_lanes(f, count);
-                log_y = glm::keep_first_lanes(log_y, count);
+                log_y_lanes = glm::keep_first_lanes(log_y_lanes, count);
                 w = glm::keep_first_lanes(w, count);
             }
-            sum_of_log_y = fused_t::simd_add(sum_of_log_y, log_y);
+            sum_of_log_y = fused_t::simd_add(sum_of_log_y, log_y_lanes);
             sum_of_f = fused_t::simd_add(sum_of_f, f);
             sum_of_w = fused_t::simd_add(sum_of_w, w);
             sum_of_u_times_w = fused_t::simd_add(sum_of_u_times_w, fused_t::simd_mul(u, w));
@@ -669,12 +697,14 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_sigma> fused_normal_id_glm_lp
 
 
 // ---- Weibull log GLM (lpdf and lccdf): the checks, the values, the pass and the node
+//      (log_y_data: log(y) given as data, N values, or nullptr for the log of y in the pass)
 template <bool propto, bool is_lccdf, typename T_y, typename T_x, typename T_alpha, typename T_beta,
           typename T_shape>
 inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> fused_weibull_log_glm(const T_y& y, const T_x& x,
                                                                                 const T_alpha& alpha,
                                                                                 const T_beta& beta,
-                                                                                const T_shape& shape) {
+                                                                                const T_shape& shape,
+                                                                                const double* log_y_data) {
 
     static_assert(std::is_arithmetic<stan::value_type_t<T_y>>::value, "y must be data");
     static_assert(std::is_arithmetic<stan::value_type_t<T_x>>::value, "x must be data");
@@ -749,15 +779,28 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> fused_weibull_log_glm(
         }
 
     };
+    // ---- the one pass, with log(y) given or taken
+    auto fn_pass = [&](auto compute_partials_constant) {
+
+        constexpr bool compute_partials = decltype(compute_partials_constant)::value;
+        if (log_y_data != nullptr) {
+            return weibull_glm_pass<is_lccdf, compute_partials, true>(values.pass, y_data, log_y_data,
+                                                                      shape_value);
+        }
+        return weibull_glm_pass<is_lccdf, compute_partials, false>(values.pass, y_data, nullptr, shape_value);
+
+    };
     if constexpr (!some_parameter) {
-        const double value = fn_value(weibull_glm_pass<is_lccdf, false>(values.pass, y_data, shape_value));
+        // const double value = fn_value(weibull_glm_pass<is_lccdf, false>(values.pass, y_data, shape_value));
+        const double value = fn_value(fn_pass(std::false_type{}));
         fn_checks_after_the_pass(value);
         if (some_y_negative) return stan::math::NEGATIVE_INFTY;
         return value;
     } else {
         constexpr int n_real_parameters = static_cast<int>(shape_is_var);
         operands_of_glm_node<T_alpha, T_beta> node(values.pass, alpha, beta, n_real_parameters);
-        const sums_of_weibull_glm sums = weibull_glm_pass<is_lccdf, true>(values.pass, y_data, shape_value);
+        // const sums_of_weibull_glm sums = weibull_glm_pass<is_lccdf, true>(values.pass, y_data, shape_value);
+        const sums_of_weibull_glm sums = fn_pass(std::true_type{});
         const double value = fn_value(sums);
         fn_checks_after_the_pass(value);
         if (some_y_negative) return var(stan::math::NEGATIVE_INFTY);
@@ -1366,7 +1409,30 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> nico_weibull_log_glm_l
         std::ostream* /*pstream__*/) {
 
     namespace fused = nico::math::fused_glms_by_family;
-    return fused::fused_weibull_log_glm<propto, false>(y, x, alpha, beta, shape);
+    return fused::fused_weibull_log_glm<propto, false>(y, x, alpha, beta, shape, nullptr);
+
+}
+
+// ---- the same, with log(y) given as data (log_y: N values)
+template <bool propto, typename T_y, typename T_x, typename T_alpha, typename T_beta, typename T_shape,
+          typename T_log_y,
+          stan::require_any_t<stan::is_std_vector<T_y>, stan::is_eigen_col_vector<T_y>>* = nullptr,
+          stan::require_eigen_matrix_dynamic_t<T_x>* = nullptr,
+          stan::require_any_t<stan::is_stan_scalar<T_alpha>, stan::is_eigen_col_vector<T_alpha>>* = nullptr,
+          stan::require_eigen_col_vector_t<T_beta>* = nullptr,
+          stan::require_stan_scalar_t<T_shape>* = nullptr,
+          stan::require_any_t<stan::is_std_vector<T_log_y>, stan::is_eigen_col_vector<T_log_y>>* = nullptr>
+inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> nico_weibull_log_glm_lpdf(
+        const T_y& y, const T_x& x, const T_alpha& alpha, const T_beta& beta, const T_shape& shape,
+        const T_log_y& log_y, std::ostream* /*pstream__*/) {
+
+    namespace fused = nico::math::fused_glms_by_family;
+    static_assert(std::is_arithmetic<stan::value_type_t<T_log_y>>::value, "log_y must be data");
+    stan::math::check_consistent_size("nico_weibull_log_glm_lpdf", "Log of the random variable", log_y,
+                                      static_cast<int>(x.rows()));
+    std::vector<double> copy_of_log_y;
+    const double* log_y_data = fused::data_of_y(log_y, copy_of_log_y);
+    return fused::fused_weibull_log_glm<propto, false>(y, x, alpha, beta, shape, log_y_data);
 
 }
 
@@ -1387,7 +1453,29 @@ inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> nico_weibull_log_glm_l
         std::ostream* /*pstream__*/) {
 
     namespace fused = nico::math::fused_glms_by_family;
-    return fused::fused_weibull_log_glm<false, true>(y, x, alpha, beta, shape);
+    return fused::fused_weibull_log_glm<false, true>(y, x, alpha, beta, shape, nullptr);
+
+}
+
+// ---- the same, with log(y) given as data (log_y: N values)
+template <typename T_y, typename T_x, typename T_alpha, typename T_beta, typename T_shape, typename T_log_y,
+          stan::require_any_t<stan::is_std_vector<T_y>, stan::is_eigen_col_vector<T_y>>* = nullptr,
+          stan::require_eigen_matrix_dynamic_t<T_x>* = nullptr,
+          stan::require_any_t<stan::is_stan_scalar<T_alpha>, stan::is_eigen_col_vector<T_alpha>>* = nullptr,
+          stan::require_eigen_col_vector_t<T_beta>* = nullptr,
+          stan::require_stan_scalar_t<T_shape>* = nullptr,
+          stan::require_any_t<stan::is_std_vector<T_log_y>, stan::is_eigen_col_vector<T_log_y>>* = nullptr>
+inline stan::return_type_t<T_x, T_alpha, T_beta, T_shape> nico_weibull_log_glm_lccdf(
+        const T_y& y, const T_x& x, const T_alpha& alpha, const T_beta& beta, const T_shape& shape,
+        const T_log_y& log_y, std::ostream* /*pstream__*/) {
+
+    namespace fused = nico::math::fused_glms_by_family;
+    static_assert(std::is_arithmetic<stan::value_type_t<T_log_y>>::value, "log_y must be data");
+    stan::math::check_consistent_size("nico_weibull_log_glm_lccdf", "Log of the random variable", log_y,
+                                      static_cast<int>(x.rows()));
+    std::vector<double> copy_of_log_y;
+    const double* log_y_data = fused::data_of_y(log_y, copy_of_log_y);
+    return fused::fused_weibull_log_glm<false, true>(y, x, alpha, beta, shape, log_y_data);
 
 }
 
