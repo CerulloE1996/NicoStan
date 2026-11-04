@@ -1122,10 +1122,14 @@ inline double GHK_mixture_log_likelihood_of_the_observed_results_of_one_tile_of_
     }
 
     //// ---- the nuisance values of the tile's cells (contiguous): u, 1 - u, log(u), log(1 - u), log |du/du_raw|
+    ////      (u_raw read by its row and column: a block or other expression has no linear order of its own)
     ////      and the derivative of the log Jacobian (Phi: -u_raw; tanh, u = inv_logit(2 u_raw): 2 (1 - 2 u))
     if (nuisance_transformation == 1) {
         for (std::size_t k = 0; k < n_cells_of_tile; ++k) {
-            const double u_raw = value_of(u_raw_ref.coeff(value_of_cell[k]));
+            const int c = value_of_cell[k];
+            const double u_raw = u_raw_has_one_value_per_observed_result
+                                       ? value_of(u_raw_ref.coeff(c, 0))
+                                       : value_of(u_raw_ref.coeff(c % T, c / T));
             u_values[k] = u_raw;
             one_minus_u_values[k] = -u_raw;
             log_u_values[k] = u_raw;
@@ -1139,7 +1143,10 @@ inline double GHK_mixture_log_likelihood_of_the_observed_results_of_one_tile_of_
         k_log_Phi_in_double_precision(log_1m_u_values, n_cells);
     } else {
         for (std::size_t k = 0; k < n_cells_of_tile; ++k) {
-            const double u_raw = value_of(u_raw_ref.coeff(value_of_cell[k]));
+            const int c = value_of_cell[k];
+            const double u_raw = u_raw_has_one_value_per_observed_result
+                                       ? value_of(u_raw_ref.coeff(c, 0))
+                                       : value_of(u_raw_ref.coeff(c % T, c / T));
             u_values[k] = 2.0 * u_raw;
             one_minus_u_values[k] = -2.0 * u_raw;
             log_u_values[k] = 2.0 * u_raw;
