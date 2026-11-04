@@ -229,14 +229,6 @@ inline double GHK_mixture_log_likelihood_of_one_tile_of_subjects(
     }
     double log_Jacobian = 0.0;
     for (std::size_t k = 0; k < nT; ++k) log_Jacobian += log_derivative_of_u[k];
-    //// (the untruncated draws of the missing results, Z = F^{-1}(u): with u = Phi(u_raw) and Phi_type 1,
-    ////  Z = u_raw itself)
-    if (nuisance_transformation == 1 && Phi_type == 1) {
-        for (std::size_t k = 0; k < nT; ++k) Z_of_missing_results[k] = u_raw_values[k];
-    } else {
-        inverse_of_F_from_the_log_scale(log_u_values, log_1m_u_values, static_cast<int>(nT), Phi_type,
-                                        Z_of_missing_results);
-    }
     for (std::size_t k = 0; k < nT; ++k) gradient_of_u_raw[k] = 0.0;
 
     //// ---- the codes of the bounds of each subject and test of the tile, from the data's rows (and the checks
@@ -277,6 +269,29 @@ inline double GHK_mixture_log_likelihood_of_one_tile_of_subjects(
             }
             code_of_lower_bound[static_cast<std::size_t>(t) * n + i] = lower_code;
             code_of_upper_bound[static_cast<std::size_t>(t) * n + i] = upper_code;
+        }
+    }
+
+    //// (only missing results use the untruncated draw; the tile's branch buffers hold their inputs)
+    for (int j = 0; j < T; ++j) {
+        const int t = test_at_GHK_position[j] - 1;
+        const std::size_t offset = static_cast<std::size_t>(j) * n;
+        int n_missing = 0;
+        for (int i = 0; i < n; ++i) {
+            if (category[first_data_row + i][t] >= 0) continue;
+            if (nuisance_transformation == 1 && Phi_type == 1) {
+                Z_of_missing_results[offset + i] = u_raw_values[offset + i];
+            } else {
+                rows_of_each_branch[n_missing] = i;
+                gathered[n_missing] = log_u_values[offset + i];
+                gathered[n + n_missing] = log_1m_u_values[offset + i];
+                ++n_missing;
+            }
+        }
+        if (n_missing == 0) continue;
+        inverse_of_F_from_the_log_scale(gathered, gathered + n, n_missing, Phi_type, gathered + 2 * n);
+        for (int r = 0; r < n_missing; ++r) {
+            Z_of_missing_results[offset + rows_of_each_branch[r]] = gathered[2 * n + r];
         }
     }
 
@@ -424,8 +439,7 @@ inline double GHK_mixture_log_likelihood_of_one_tile_of_subjects(
             }
             for (int i = 0; i < n; ++i) log_mass_sum[i] += log_mass[i];
 
-            //// (the partial derivatives of the step, every subject of the tile at once; an infinite bound takes
-            ////  exponent 0 and partial 0)
+            //// (the partial derivatives of the step: only finite bounds enter the exponential packet)
             if constexpr (gradient_is_needed) {
                 double* log_density_of_a = log_density;
                 double* log_density_of_b = log_density + n;
@@ -438,32 +452,31 @@ inline double GHK_mixture_log_likelihood_of_one_tile_of_subjects(
                 k_log_density_of_F(log_density_of_a, n, Phi_type, work);
                 k_log_density_of_F(log_density_of_b, n, Phi_type, work);
                 k_log_density_of_F(log_density_of_Z, n, Phi_type, work);
-                double* exponent_dZ_da = exponent;
-                double* exponent_dZ_db = exponent + n;
-                double* exponent_dZ_du_raw = exponent + 2 * n;
-                double* exponent_dlog_mass_da = exponent + 3 * n;
-                double* exponent_dlog_mass_db = exponent + 4 * n;
+                int n_exponents = 0;
                 for (int i = 0; i < n; ++i) {
-                    const bool a_is_finite = (a[i] != -infinity);
-                    const bool b_is_finite = (b[i] != infinity);
-                    exponent_dZ_da[i] = a_is_finite ? log_1m_u_of_position[i] + log_density_of_a[i]
-                                                      - log_density_of_Z[i] : 0.0;
-                    exponent_dZ_db[i] = b_is_finite ? log_u_of_position[i] + log_density_of_b[i]
-                                                      - log_density_of_Z[i] : 0.0;
-                    exponent_dZ_du_raw[i] = log_mass[i] + log_derivative_of_u_of_position[i]
-                                            - log_density_of_Z[i];
-                    exponent_dlog_mass_da[i] = a_is_finite ? log_density_of_a[i] - log_mass[i] : 0.0;
-                    exponent_dlog_mass_db[i] = b_is_finite ? log_density_of_b[i] - log_mass[i] : 0.0;
+                    exponent[n_exponents++] = log_mass[i] + log_derivative_of_u_of_position[i]
+                                              - log_density_of_Z[i];
+                    if (a[i] != -infinity) {
+                        exponent[n_exponents++] = log_1m_u_of_position[i] + log_density_of_a[i]
+                                                  - log_density_of_Z[i];
+                        exponent[n_exponents++] = log_density_of_a[i] - log_mass[i];
+                    }
+                    if (b[i] != infinity) {
+                        exponent[n_exponents++] = log_u_of_position[i] + log_density_of_b[i]
+                                                  - log_density_of_Z[i];
+                        exponent[n_exponents++] = log_density_of_b[i] - log_mass[i];
+                    }
                 }
-                k_exp(exponent, 5 * n);
+                k_exp(exponent, n_exponents);
+                int next_exponent = 0;
                 for (int i = 0; i < n; ++i) {
                     const bool a_is_finite = (a[i] != -infinity);
                     const bool b_is_finite = (b[i] != infinity);
-                    dZ_da_of_class[offset + i] = a_is_finite ? exponent_dZ_da[i] : 0.0;
-                    dZ_db_of_class[offset + i] = b_is_finite ? exponent_dZ_db[i] : 0.0;
-                    dZ_du_raw_of_class[offset + i] = exponent_dZ_du_raw[i];
-                    dlog_mass_da_of_class[offset + i] = a_is_finite ? -exponent_dlog_mass_da[i] : 0.0;
-                    dlog_mass_db_of_class[offset + i] = b_is_finite ? exponent_dlog_mass_db[i] : 0.0;
+                    dZ_du_raw_of_class[offset + i] = exponent[next_exponent++];
+                    dZ_da_of_class[offset + i] = a_is_finite ? exponent[next_exponent++] : 0.0;
+                    dlog_mass_da_of_class[offset + i] = a_is_finite ? -exponent[next_exponent++] : 0.0;
+                    dZ_db_of_class[offset + i] = b_is_finite ? exponent[next_exponent++] : 0.0;
+                    dlog_mass_db_of_class[offset + i] = b_is_finite ? exponent[next_exponent++] : 0.0;
                     finite_a_of_class[offset + i] = a_is_finite ? a[i] : 0.0;
                     finite_b_of_class[offset + i] = b_is_finite ? b[i] : 0.0;
                 }

@@ -216,7 +216,9 @@ ALWAYS_INLINE simd_t exp_of_negative_absolute_value(const simd_t x) {
 
     const simd_t argument = negative_absolute_value(x);
     const simd_t smallest = broadcast(smallest_fast_exp_argument);
-    return zero_where_false(greater_than(argument, smallest), nico_exp(maximum(argument, smallest)));
+    const simd_mask_t active = greater_than(argument, smallest);
+    if (count_true(active) == 0) return broadcast(0.0);
+    return zero_where_false(active, nico_exp(maximum(argument, smallest)));
 
 }
 
