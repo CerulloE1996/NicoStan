@@ -216,6 +216,9 @@ std::vector<double>                                   fn_find_initial_eps_main_a
     // evaluation after acceptance/rejection throughout this step-size search.
     bool current_lp_grad_valid = true;
    
+   bool main_eps_found = false;
+   bool us_eps_found = false;
+   
    for (int i = 0; i < 25; i++) { 
      
      if (g_debug_cutpoint_grads) std::cerr << "LOOP iter " << i << " start" << std::endl << std::flush;
@@ -296,55 +299,81 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                if    ( (result_input.us_div() == 0) && (result_input.main_div() == 0) )  { // if no divs
                  
                      if (result_input.us_p_jump() < 0.80) {
-                           EHMC_args_as_cpp_struct.eps_us = 0.5 * EHMC_args_as_cpp_struct.eps_us;
-                           EHMC_args_as_cpp_struct.tau_us =       EHMC_args_as_cpp_struct.eps_us;
+                           if (us_eps_found == false) {
+                                 EHMC_args_as_cpp_struct.eps_us = 0.5 * EHMC_args_as_cpp_struct.eps_us;
+                                 EHMC_args_as_cpp_struct.tau_us =       EHMC_args_as_cpp_struct.eps_us;
+                           }
+                     } else {
+                           us_eps_found = true;
                      }
-                     
+
                      if (result_input.main_p_jump() < 0.80) {
-                           EHMC_args_as_cpp_struct.eps_main = 0.5 * EHMC_args_as_cpp_struct.eps_main;
-                           EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
-                     } 
+                           if (main_eps_found == false) {
+                                 EHMC_args_as_cpp_struct.eps_main = 0.5 * EHMC_args_as_cpp_struct.eps_main;
+                                 EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
+                           }
+                     } else {
+                           main_eps_found = true;
+                     }
                  
                } else {
-                     
-                     EHMC_args_as_cpp_struct.eps_us  =  0.5 * EHMC_args_as_cpp_struct.eps_us;
-                     EHMC_args_as_cpp_struct.tau_us =       EHMC_args_as_cpp_struct.eps_us;
-                     
-                     EHMC_args_as_cpp_struct.eps_main  =  0.5 * EHMC_args_as_cpp_struct.eps_main;
-                     EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
-                 
+
+                     if (us_eps_found == false) {
+                           EHMC_args_as_cpp_struct.eps_us  =  0.5 * EHMC_args_as_cpp_struct.eps_us;
+                           EHMC_args_as_cpp_struct.tau_us =       EHMC_args_as_cpp_struct.eps_us;
+                     }
+
+                     if (main_eps_found == false) {
+                           EHMC_args_as_cpp_struct.eps_main  =  0.5 * EHMC_args_as_cpp_struct.eps_main;
+                           EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
+                     }
+
                }
                ////
-       
+
        } else if (partitioned_HMC == false) {
                
                ////
                if    (result_input.main_div() == 0) { // if no divs
-                 
+
                      if (result_input.main_p_jump() < 0.80) {
-                         EHMC_args_as_cpp_struct.eps_main = 0.5 * EHMC_args_as_cpp_struct.eps_main;
-                         EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
+                         if (main_eps_found == false) {
+                               EHMC_args_as_cpp_struct.eps_main = 0.5 * EHMC_args_as_cpp_struct.eps_main;
+                               EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
+                         }
+                     } else {
+                         main_eps_found = true;
                      }
-                 
+
                } else {
-                     
-                     EHMC_args_as_cpp_struct.eps_main  =  0.5 * EHMC_args_as_cpp_struct.eps_main;
-                     EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
-                 
+
+                     if (main_eps_found == false) {
+                           EHMC_args_as_cpp_struct.eps_main  =  0.5 * EHMC_args_as_cpp_struct.eps_main;
+                           EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
+                     }
+
                }
                ////
-         
+
+       }
+
+       if ( (main_eps_found == true) && ((partitioned_HMC == false) || (us_eps_found == true)) ) {
+             break;
        }
        
        
-     } catch (...) { 
-       
-             EHMC_args_as_cpp_struct.eps_us  =  0.5 * EHMC_args_as_cpp_struct.eps_us;
-             EHMC_args_as_cpp_struct.tau_us =       EHMC_args_as_cpp_struct.eps_us;
-             
-             EHMC_args_as_cpp_struct.eps_main  =  0.5 * EHMC_args_as_cpp_struct.eps_main;
-             EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
-       
+     } catch (...) {
+
+             if (us_eps_found == false) {
+                   EHMC_args_as_cpp_struct.eps_us  =  0.5 * EHMC_args_as_cpp_struct.eps_us;
+                   EHMC_args_as_cpp_struct.tau_us =       EHMC_args_as_cpp_struct.eps_us;
+             }
+
+             if (main_eps_found == false) {
+                   EHMC_args_as_cpp_struct.eps_main  =  0.5 * EHMC_args_as_cpp_struct.eps_main;
+                   EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;
+             }
+
      }
      
    }
