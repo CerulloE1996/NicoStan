@@ -442,11 +442,42 @@ fn_calibrate_eps_on_sampling_chains_from_one_call_to_adapt_delta <-  function(
               }
               ##
               c_main <-  -stats::qnorm(mean_acceptance_main / 2) / eps_main_of_call^2
-              eps_main_of_call <-  min(max_eps_main, sqrt(minus_qnorm_of_half_adapt_delta / c_main))
+              eps_main_of_adapt_delta <-  min(max_eps_main, sqrt(minus_qnorm_of_half_adapt_delta / c_main))
+              eps_us_of_adapt_delta <-  eps_us_of_call
               if (isTRUE(calibrate_eps_us)) {
                     c_us <-  -stats::qnorm(mean_acceptance_us / 2) / eps_us_of_call^2
-                    eps_us_of_call <-  min(max_eps_us, sqrt(minus_qnorm_of_half_adapt_delta / c_us))
+                    eps_us_of_adapt_delta <-  min(max_eps_us, sqrt(minus_qnorm_of_half_adapt_delta / c_us))
               }
+              ##
+              ## ---- never more than double the eps measured: a call that accepted nearly every proposal says little
+              ## ---- about an eps far above it, so the doubled eps is measured first (another call)
+              ##
+              eps_main_is_too_far <-  eps_main_of_adapt_delta > 2 * eps_main_of_call
+              eps_us_is_too_far <-  isTRUE(calibrate_eps_us) && (eps_us_of_adapt_delta > 2 * eps_us_of_call)
+              if ((eps_main_is_too_far || eps_us_is_too_far) && (call < max_calls)) {
+                    if (eps_main_is_too_far) {
+                          eps_main_accepted_almost_always <-  max(eps_main_accepted_almost_always,
+                                                                  eps_main_of_call,
+                                                                  na.rm = TRUE)
+                          eps_main_of_call <-  fn_next_eps_of_an_uninformative_call(
+                                                   eps_accepted_almost_always = eps_main_accepted_almost_always,
+                                                   eps_rejected_almost_always = eps_main_rejected_almost_always,
+                                                   max_eps = max_eps_main)
+                    }
+                    if (eps_us_is_too_far) {
+                          eps_us_accepted_almost_always <-  max(eps_us_accepted_almost_always,
+                                                                eps_us_of_call,
+                                                                na.rm = TRUE)
+                          eps_us_of_call <-  fn_next_eps_of_an_uninformative_call(
+                                                 eps_accepted_almost_always = eps_us_accepted_almost_always,
+                                                 eps_rejected_almost_always = eps_us_rejected_almost_always,
+                                                 max_eps = max_eps_us)
+                    }
+                    calls[[call]]$used_in_fit <-  FALSE
+                    next
+              }
+              eps_main_of_call <-  eps_main_of_adapt_delta
+              eps_us_of_call <-  eps_us_of_adapt_delta
               break
         ##
         }
