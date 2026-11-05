@@ -583,12 +583,14 @@ get_model_info <- function(  Model_type,
                 ## (a library in NicoStan's nuisance-block form: its nuisance block is NicoStan's, not one of
                 ##  BridgeStan's parameters, so every BridgeStan parameter is a main one and the size of the
                 ##  nuisance block is given by n_nuisance_override)
-                ## (the export is a runtime capability shared by ordinary models; the writer's generated
-                ##  quantity identifies a model whose nuisance block NicoStan holds, even when its size is 0)
+                ## (the writer's generated quantity identifies a model whose nuisance block NicoStan holds, even
+                ##  when its size is 0; a hand-written model of this form has no such quantity: it is in the form
+                ##  when it exports the nuisance-block gradient and the size of its block is given)
                 nuisance_block_owned_by_NicoStan <-  R_fn_model_library_is_in_NicoStan_nuisance_block_form(
                                                            outs_bs_model$model_so_file) &&
-                      ("nicostan_size_of_the_nuisance_block_held_by_NicoStan" %in%
-                       bs_model$param_names(include_tp = FALSE, include_gq = TRUE))
+                      (!is.null(n_nuisance_override) ||
+                       ("nicostan_size_of_the_nuisance_block_held_by_NicoStan" %in%
+                        bs_model$param_names(include_tp = FALSE, include_gq = TRUE)))
                 if (nuisance_block_owned_by_NicoStan) {
                       # if (is.null(n_nuisance_override)) {
                       #       stop(paste0("get_model_info (Stan): the library is in NicoStan's nuisance-block ",
