@@ -460,6 +460,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            restart_stuck_chains_in_burnin = FALSE,
                                            n_iter_of_a_stuck_chain = 30,
                                            hold_tau_within_the_cap_of_steps_in_burnin = FALSE,
+                                           eps_search_at_handover_from_each_chain = FALSE,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                            resident_burnin = TRUE,
@@ -5224,6 +5225,43 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                   Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
                   EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
                   EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List)
+              }
+              ## the search from each chain's own position, the median of the chains in place of the search above:
+              if (isTRUE(eps_search_at_handover_from_each_chain)) {
+
+                    theta_us_of_the_chains <-  if (use_resident_burnin && isTRUE(sample_nuisance))
+                                                     resident_api$fn_persistent_burnin_get_state(
+                                                           worker_ptr,
+                                                           "theta_us_vectors_all_chains_output_to_R") else
+                                                     theta_us_vectors_all_chains_input_from_R
+                    eps_of_each_chain <-  rep(NA_real_, ncol(theta_main_vectors_all_chains_input_from_R))
+                    for (chain_i in seq_along(eps_of_each_chain)) {
+
+                          arguments_of_the_search <-  list(
+                                theta_main_vec_initial_ref = matrix(theta_main_vectors_all_chains_input_from_R[, chain_i], ncol = 1),
+                                theta_us_vec_initial_ref = matrix(if (isTRUE(sample_nuisance))
+                                                                        theta_us_of_the_chains[, chain_i] else
+                                                                        theta_us_vec, ncol = 1),
+                                partitioned_HMC = partitioned_HMC,
+                                seed = seed + ii + chain_i,
+                                Model_type = Model_type,
+                                force_autodiff = force_autodiff,
+                                force_PartialLog = force_PartialLog,
+                                multi_attempts = multi_attempts,
+                                y_ref = y,
+                                Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                                EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List)
+                          if (isTRUE(eps_search_has_n_threads)) {
+                                arguments_of_the_search$n_threads <-  eps_search_n_threads
+                          }
+                          eps_of_each_chain[chain_i] <-  do.call(fn_find_initial_eps_main_and_us, arguments_of_the_search)[[1]]
+
+                    }
+                    cat("eps search from each chain at ChEES handover (ii =", ii, "):", signif(eps_of_each_chain, 3),
+                        "; from the mean of the chains:", signif(par_res[[1]], 3), "\n")
+                    par_res[[1]] <-  stats::median(eps_of_each_chain)
+
               }
               eps_new <- min(max_eps_main, par_res[[1]])
               EHMC_args_as_Rcpp_List$eps_main <- eps_new
