@@ -957,6 +957,8 @@ MVP_model <- R6Class("MVP_model",
                           ## handover, tau is never longer than max_L * eps.
                           ## @param freeze_tau_while_the_cap_of_steps_binds_in_burnin FALSE (default); TRUE: after the
                           ## tau handover, tau and its moments are held while tau is longer than max_L * eps.
+                          ## @param tau_sampling_scale_with_a_jittered_burnin FALSE (default); TRUE: tau_sampling_scale
+                          ## also applies when the burn-in tau is jittered.
                           ## @param eps_search_while_the_acceptance_is_high_in_burnin FALSE (default); TRUE: while the
                           ## acceptance of the last iterations is 0.95 or more, the eps search runs from each chain and eps
                           ## goes up to the smallest result, at most 4 times at once, never down.
@@ -1170,6 +1172,7 @@ MVP_model <- R6Class("MVP_model",
                                               reported_quantities_centre_and_scale_from_last_n_iterations = 10,
                                               tau_jitter_burnin = "uniform",
                                               tau_sampling_scale = "none",
+                                              tau_sampling_scale_with_a_jittered_burnin = FALSE,
                                               tau_jitter_sampling_type = "uniform",
                                               bulk_local_tuner = NULL,
                                               ## NULL = not set: "main", or the built-in interest_only set for
@@ -1668,6 +1671,7 @@ MVP_model <- R6Class("MVP_model",
                                                       reported_quantities_centre_and_scale_from_last_n_iterations,
                                                             tau_jitter_burnin = tau_jitter_burnin,
                                                             tau_sampling_scale = tau_sampling_scale,
+                                                            tau_sampling_scale_with_a_jittered_burnin = tau_sampling_scale_with_a_jittered_burnin,
                                                             tau_jitter_sampling_type = tau_jitter_sampling_type,
                                                             bulk_local_tuner = bulk_local_tuner,
                                                             tau_adaptation_block = tau_adaptation_block,

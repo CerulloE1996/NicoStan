@@ -539,6 +539,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         ##                                          analysis of Hoffman, Radul and Sountsov (2021) - NOT a published method.
                                         ##                                          See docs/adaptation-notes.md.
                                         tau_sampling_scale = "none",
+                                        tau_sampling_scale_with_a_jittered_burnin = FALSE,
                                         ## sampling-phase jitter of the trajectory length: "uniform" (iid U(0, 2 tau)) or "halton" (the base-2
                                         tau_jitter_sampling_type = "uniform",
                                         bulk_local_tuner = NULL,
@@ -4576,10 +4577,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           ##
                           {
                                 tau_sampling_scale_applicable <- !isTRUE(manual_tau) &&
-                                                                 !isTRUE(randomize_tau_burnin) &&
+                                                                 (!isTRUE(randomize_tau_burnin) || isTRUE(tau_sampling_scale_with_a_jittered_burnin)) &&
                                                                  isTRUE(randomize_tau_sampling)
                                 tau_sampling_scale_not_applied_reason <- if (isTRUE(manual_tau)) "tau_not_adapted_manual_tau" else
-                                                                         if (isTRUE(randomize_tau_burnin)) "tau_adapted_under_jitter" else
+                                                                         if (isTRUE(randomize_tau_burnin) && !isTRUE(tau_sampling_scale_with_a_jittered_burnin)) "tau_adapted_under_jitter" else
                                                                          if (!isTRUE(randomize_tau_sampling)) "sampling_not_randomised" else NA_character_
                                 ##
                                 tau_sampling_scale_effective <- if (!tau_sampling_scale_applicable || identical(tau_sampling_scale, "none")) "none" else
