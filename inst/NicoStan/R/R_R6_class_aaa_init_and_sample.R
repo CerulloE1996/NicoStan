@@ -953,6 +953,8 @@ MVP_model <- R6Class("MVP_model",
                           ## acceptance is under 0.01 for n_iter_of_a_stuck_chain iterations in a row restarts
                           ## from the position of a chain that moves.
                           ## @param n_iter_of_a_stuck_chain 30 (default).
+                          ## @param hold_tau_within_the_cap_of_steps_in_burnin FALSE (default); TRUE: after the tau
+                          ## handover, tau is never longer than max_L * eps.
                           ## @param M_update_rescale_guard c(0.5, 2.0) (default): a metric update's rescale of
                           ## eps and tau is applied only when its factor lies within these inclusive bounds; a
                           ## factor outside them skips that rescale, and the metric update itself still happens.
@@ -1323,6 +1325,7 @@ MVP_model <- R6Class("MVP_model",
                                               initial_eps_search_at_each_chain = FALSE,
                                               restart_stuck_chains_in_burnin = FALSE,
                                               n_iter_of_a_stuck_chain = 30,
+                                              hold_tau_within_the_cap_of_steps_in_burnin = FALSE,
                                               M_update_rescale_guard = c(0.5, 2.0),
                                               learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                               resident_burnin = TRUE,
@@ -1544,6 +1547,7 @@ MVP_model <- R6Class("MVP_model",
                         initial_eps_search_at_each_chain = initial_eps_search_at_each_chain,
                         restart_stuck_chains_in_burnin = restart_stuck_chains_in_burnin,
                         n_iter_of_a_stuck_chain = n_iter_of_a_stuck_chain,
+                        hold_tau_within_the_cap_of_steps_in_burnin = hold_tau_within_the_cap_of_steps_in_burnin,
                         M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =
                               learning_rate_initial_n_tau_updates_held_from_tau_handover,

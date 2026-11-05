@@ -459,6 +459,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            initial_eps_search_at_each_chain = FALSE,
                                            restart_stuck_chains_in_burnin = FALSE,
                                            n_iter_of_a_stuck_chain = 30,
+                                           hold_tau_within_the_cap_of_steps_in_burnin = FALSE,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                            resident_burnin = TRUE,
@@ -7450,6 +7451,17 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                 EHMC_args_as_Rcpp_List$tau_us <- if (isTRUE(partitioned_HMC))
                                     min(max_tau_us, EHMC_args_as_Rcpp_List$tau_us) else
                                                                  EHMC_args_as_Rcpp_List$tau_main
+                            }
+                            ## tau is never longer than the trajectory the cap of steps can run at this eps:
+                            if (isTRUE(hold_tau_within_the_cap_of_steps_in_burnin) && !isTRUE(manual_tau) &&
+                                ii >= gap && ii < n_adapt) {
+
+                                EHMC_args_as_Rcpp_List$tau_main <- min(max_L * EHMC_args_as_Rcpp_List$eps_main,
+                                                                       EHMC_args_as_Rcpp_List$tau_main)
+                                EHMC_args_as_Rcpp_List$tau_us <- if (isTRUE(partitioned_HMC))
+                                    min(max_L * EHMC_args_as_Rcpp_List$eps_us, EHMC_args_as_Rcpp_List$tau_us) else
+                                                                 EHMC_args_as_Rcpp_List$tau_main
+
                             }
                             ## ---- "probe_then_average": log tau after the ceiling, averaged over the tau updates
                             ##      from iteration metric_adaptation_end_iter on:
