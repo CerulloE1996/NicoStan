@@ -336,7 +336,10 @@ std::vector<double>                                   fn_find_initial_eps_main_a
                ////
                if    (result_input.main_div() == 0) { // if no divs
 
-                     if (result_input.main_p_jump() < 0.80) {
+                     //// (a stable step: the energy change of the one leapfrog step is within log(0.8) in
+                     ////  BOTH directions; the acceptance probability alone is 1 for an energy drop of any
+                     ////  size, so it cannot tell a stable step from an exploding one)
+                     if (std::fabs(result_input.main_energy_change()) > - std::log(0.80)) {
                          if (main_eps_found == false) {
                                EHMC_args_as_cpp_struct.eps_main = 0.5 * EHMC_args_as_cpp_struct.eps_main;
                                EHMC_args_as_cpp_struct.tau_main =       EHMC_args_as_cpp_struct.eps_main;

@@ -36,6 +36,7 @@ class HMCResult {
            Eigen::Matrix<double, -1, 1> main_velocity_vec_;
            
            double main_p_jump_;
+double main_energy_change_;
            int main_div_;
            
            Eigen::Matrix<double, -1, 1> us_theta_vec_0_;
@@ -83,6 +84,7 @@ class HMCResult {
            , main_velocity_vec_(Eigen::Matrix<double, -1, 1>::Zero(n_params_main))
            ////
            , main_p_jump_(0.0)
+, main_energy_change_(0.0)
            , main_div_(0)
            //// nuisance
            , us_theta_vec_0_(Eigen::Matrix<double, -1, 1>::Zero(n_nuisance))
@@ -142,6 +144,8 @@ class HMCResult {
            const Eigen::Matrix<double, -1, 1> &main_velocity_vec() const { return main_velocity_vec_; }
            double &main_p_jump() { return main_p_jump_; }
            const double &main_p_jump() const { return main_p_jump_; }
+double &main_energy_change() { return main_energy_change_; }
+const double &main_energy_change() const { return main_energy_change_; }
            int &main_div() { return main_div_; }
            const int &main_div() const { return main_div_; }
            ////

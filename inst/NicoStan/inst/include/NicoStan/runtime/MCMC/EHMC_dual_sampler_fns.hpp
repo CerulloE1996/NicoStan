@@ -388,6 +388,7 @@ ALWAYS_INLINE  void                         fn_standard_HMC_dual_single_iter_InP
                     //// if  div, reject proposal 
                     result_input.main_div() = 1;  
                     result_input.main_p_jump() = 0.0;
+                    result_input.main_energy_change() = std::numeric_limits<double>::infinity();
                     result_input.us_div() = 1;
                     result_input.us_p_jump() = 0.0;
                     result_input.reject_proposal_main();  // # reject proposal
@@ -398,6 +399,7 @@ ALWAYS_INLINE  void                         fn_standard_HMC_dual_single_iter_InP
           
                     result_input.main_div() = 0;
                     result_input.main_p_jump() = std::min(1.0, stan::math::exp(log_ratio));
+                    result_input.main_energy_change() = - log_ratio;
                     result_input.us_div()   = 0;
                     result_input.us_p_jump() =   std::min(1.0, stan::math::exp(log_ratio));
                     
@@ -438,6 +440,7 @@ ALWAYS_INLINE  void                         fn_standard_HMC_dual_single_iter_InP
                 
                 result_input.main_div() = 1; // record as div 
                 result_input.main_p_jump() = 0.0; // set p_jump to zero
+                result_input.main_energy_change() = std::numeric_limits<double>::infinity();
                 result_input.reject_proposal_main(); // # reject proposal
   
               
@@ -2088,6 +2091,7 @@ ALWAYS_INLINE void fn_diffusion_HMC_dual_single_iter_InPlace_process(    HMCResu
                   
                   result_input.main_div() = 1;
                   result_input.main_p_jump() = 0.0;
+                  result_input.main_energy_change() = std::numeric_limits<double>::infinity();
                   result_input.us_div() = 1;
                   result_input.us_p_jump() = 0.0;
                   result_input.reject_proposal_main();
@@ -2097,6 +2101,7 @@ ALWAYS_INLINE void fn_diffusion_HMC_dual_single_iter_InPlace_process(    HMCResu
             
                   result_input.main_div() = 0;
                   result_input.main_p_jump() = std::min(1.0, stan::math::exp(log_ratio));
+                  result_input.main_energy_change() = - log_ratio;
                   result_input.us_div() = 0;
                   result_input.us_p_jump() = std::min(1.0, stan::math::exp(log_ratio));
                   
@@ -2134,6 +2139,7 @@ ALWAYS_INLINE void fn_diffusion_HMC_dual_single_iter_InPlace_process(    HMCResu
                 result_input.reject_proposal_us();
                 result_input.main_div() = 1;
                 result_input.main_p_jump() = 0.0;
+                result_input.main_energy_change() = std::numeric_limits<double>::infinity();
                 result_input.reject_proposal_main();
           
         }
