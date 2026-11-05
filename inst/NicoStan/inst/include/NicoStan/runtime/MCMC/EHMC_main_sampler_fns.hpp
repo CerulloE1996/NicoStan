@@ -249,6 +249,14 @@ ALWAYS_INLINE  void leapfrog_integrator_diag_M_standard_HMC_main_InPlace(       
 
       Eigen::Matrix<double, -1, 1> grad_main =   lp_and_grad_outs.segment(1 + n_nuisance, n_params_main);
 
+      //// Stan's divergence test at every leapfrog step (base_nuts.hpp tests each new point against
+      //// the energy at the start of the trajectory): a rise of more than energy_threshold_of_the_steps
+      //// ends the trajectory with lp = -inf, so that the proposal is rejected and counted as a divergence
+      const double energy_threshold_of_the_steps = 1000.0;
+      const double energy_at_the_start =
+            - lp_and_grad_outs(0)
+            + 0.5 * (velocity_main_vec_proposed_ref.array().square() / M_inv_main_vec.array()).sum();
+
       for (int l = 0; l < L_ii; l++) {
             if (Model_args_as_cpp_struct.burnin_leapfrog_steps != nullptr) {
                 ++(*Model_args_as_cpp_struct.burnin_leapfrog_steps);
@@ -274,6 +282,15 @@ ALWAYS_INLINE  void leapfrog_integrator_diag_M_standard_HMC_main_InPlace(       
             // Update velocity (second half step)
             velocity_main_vec_proposed_ref.array() +=  0.5 * eps * M_inv_main_vec.array() *  grad_main.array()   ;
 
+            {
+                  const double energy_of_the_step =
+                        - lp_and_grad_outs(0)
+                        + 0.5 * (velocity_main_vec_proposed_ref.array().square() / M_inv_main_vec.array()).sum();
+                  if (energy_of_the_step - energy_at_the_start > energy_threshold_of_the_steps) {
+                        lp_and_grad_outs(0) = - std::numeric_limits<double>::infinity();
+                        return;
+                  }
+            }
       } // End of leapfrog steps
 
 }
