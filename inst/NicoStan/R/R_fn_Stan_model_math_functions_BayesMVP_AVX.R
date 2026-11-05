@@ -329,6 +329,60 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
                     "          vector linear_weights, vector prefix_weights, data matrix x, vector beta,\n",
                     "          real scale, vector z, real log_offset);"),
               log_cumulative_sum_exp = "    vector nico_log_cumulative_sum_exp(vector x, real log_offset);")
+        ## (the GHK log likelihood of the observed results only, one Cholesky factor per pattern of tests done:
+        ##  u_raw one value per observed result, or the T x M matrix)
+        name_of_the_GHK_of_the_observed_results <-  paste0(
+              "finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_",
+              "of_the_observed_results_in_tiles_of_subjects")
+        fused_distribution_declarations[[name_of_the_GHK_of_the_observed_results]] <-  c(
+              paste0("      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
+                     "log_likelihood_of_the_observed_results_in_tiles_of_subjects(\n",
+                     "            vector u_raw_of_each_observed_result,\n",
+                     "            data int first_subject,\n",
+                     "            data int nuisance_transformation,\n",
+                     "            matrix intercept,\n",
+                     "            array[] matrix coefficients,\n",
+                     "            data array[,] int coefficient_set_of_class_and_test,\n",
+                     "            data array[,] matrix covariates,\n",
+                     "            data array[,] int n_covariates,\n",
+                     "            array[] vector cutpoints,\n",
+                     "            data array[,] int cutpoint_set_of_class_and_test,\n",
+                     "            data array[] int position_of_first_cutpoint_of_test,\n",
+                     "            array[] matrix L_of_each_class_and_pattern,\n",
+                     "            data array[] int pattern_of_subject,\n",
+                     "            matrix log_class_probability,\n",
+                     "            data array[,] int category,\n",
+                     "            data array[,] int upper_category,\n",
+                     "            data array[] int test_is_binary,\n",
+                     "            data array[] int n_categories_of_test,\n",
+                     "            data array[] int test_at_GHK_position,\n",
+                     "            data int Phi_type,\n",
+                     "            data real overflow_threshold,\n",
+                     "            data real underflow_threshold);"),
+              paste0("      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
+                     "log_likelihood_of_the_observed_results_in_tiles_of_subjects(\n",
+                     "            matrix u_raw_of_each_observed_result,\n",
+                     "            data int first_subject,\n",
+                     "            data int nuisance_transformation,\n",
+                     "            matrix intercept,\n",
+                     "            array[] matrix coefficients,\n",
+                     "            data array[,] int coefficient_set_of_class_and_test,\n",
+                     "            data array[,] matrix covariates,\n",
+                     "            data array[,] int n_covariates,\n",
+                     "            array[] vector cutpoints,\n",
+                     "            data array[,] int cutpoint_set_of_class_and_test,\n",
+                     "            data array[] int position_of_first_cutpoint_of_test,\n",
+                     "            array[] matrix L_of_each_class_and_pattern,\n",
+                     "            data array[] int pattern_of_subject,\n",
+                     "            matrix log_class_probability,\n",
+                     "            data array[,] int category,\n",
+                     "            data array[,] int upper_category,\n",
+                     "            data array[] int test_is_binary,\n",
+                     "            data array[] int n_categories_of_test,\n",
+                     "            data array[] int test_at_GHK_position,\n",
+                     "            data int Phi_type,\n",
+                     "            data real overflow_threshold,\n",
+                     "            data real underflow_threshold);"))
         ##
         ## ---- std_normal maps to nico_normal with mu = 0 and sigma = 1: -------------------------------------------------------------
         ##
@@ -515,6 +569,9 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
               dot_products_of_affine_predictor_and_log_cumulative_sum_exp =
                     "stan_external_fused_affine_compositions.hpp",
               log_cumulative_sum_exp = "stan_external_log_cumulative_sum_exp.hpp")
+        fused_distribution_BayesMVP_header_files[[name_of_the_GHK_of_the_observed_results]] <-  paste0(
+              "stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_",
+              "log_likelihood_in_tiles_of_subjects.hpp")
         ##
         return(list( elementwise_functions                     = elementwise_functions,
                      elementwise_function_argument_types       = elementwise_function_argument_types,
