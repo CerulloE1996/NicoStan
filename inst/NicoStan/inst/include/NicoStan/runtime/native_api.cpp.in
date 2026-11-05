@@ -1268,6 +1268,9 @@ Rcpp::List                         fn_find_initial_eps_main_and_us(           Ei
       result_input.main_velocity_0_vec()  = theta_main_vec_initial_ref;
       result_input.main_velocity_vec_proposed()  = theta_main_vec_initial_ref;
       result_input.main_velocity_vec()  = theta_main_vec_initial_ref;
+      result_input.us_theta_vec()  = theta_us_vec_initial_ref;
+      result_input.us_theta_vec_0()  = theta_us_vec_initial_ref;
+      result_input.us_theta_vec_proposed()  = theta_us_vec_initial_ref;
 
       // convert Rcpp::List to cpp structs and pass by reference
       const Model_fn_args_struct Model_args_as_cpp_struct = convert_R_List_to_Model_fn_args_struct(Model_args_as_Rcpp_List);
