@@ -454,8 +454,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            pooled_metric_soft_full_weight_draws = NULL,
                                            pooled_metric_weight_k_draws = 5,
                                            pooled_metric_signal_to_noise_centred = FALSE,
-                                           metric_update_rescales_eps_and_tau = TRUE,
-                                           # metric_update_rescales_eps_and_tau = FALSE,
+                                           metric_update_rescales_eps_and_tau = FALSE,
                                            metric_update_rescales_tau = TRUE,
                                            initial_eps_search_at_each_chain = FALSE,
                                            M_update_rescale_guard,
@@ -2889,7 +2888,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   }
   ##
   ## ---- eps and tau rescale at metric updates. Option NicoStan_metric_update_rescales_eps_and_tau
-  ##      (default TRUE). TRUE: immediately after each metric update of the main burn-in (manual_tau = FALSE, as
+  ##      (default FALSE). TRUE: immediately after each metric update of the main burn-in (manual_tau = FALSE, as
   ##      for the step-size ADAM reset; the pre-burn-in stage is left as it was), eps and tau of the updated block
   ##      are multiplied by 1 / sqrt(c), within their bounds (eps <= max_eps, tau <= max_tau), and the stored
   ##      values that the adaptation restarts from move with them (the log tau of the "probe_then_average"
@@ -2909,7 +2908,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   ##      During the tau ramp (clip_iter to gap) tau is set afresh at the start of every iteration, so there
   ##      the rescaled tau holds for the iteration of the update only.
   ##
-  ## DEFAULT TRUE, together with the 8-draw pooled-metric warm-up ("gate8_rescale"; the evidence is in the
+  ## DEFAULT FALSE: on the R&G model it took tau from 3 to 25 and min ESS per gradient from 2.7x to 0.6x cmdstanr.
+  ## TRUE was chosen with the 8-draw pooled-metric warm-up ("gate8_rescale"; the evidence is in the
   ## DEFAULT 8 block above pooled_metric_warm_up). FALSE, with the warm-up "hard", keeps the earlier results bit
   ## for bit.
   ## metric_update_rescales_eps_and_tau <-  getOption("NicoStan_metric_update_rescales_eps_and_tau",

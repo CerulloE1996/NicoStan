@@ -942,9 +942,9 @@ MVP_model <- R6Class("MVP_model",
                           #'@param pooled_metric_weight_k_draws k of the "n_over_n_plus_k" warm-up (default 5).
                           #'@param pooled_metric_signal_to_noise_centred TRUE centres the "signal_to_noise"
                           #'warm-up (default FALSE).
-                          ## @param metric_update_rescales_eps_and_tau TRUE (default): each metric update
+                          ## @param metric_update_rescales_eps_and_tau FALSE (default): no rescale; TRUE: each metric update
                           ## rescales eps and tau, so that the leapfrog steps per trajectory do not change with
-                          ## the scale of the metric; FALSE: no rescale.
+                          ## the scale of the metric.
                           ## @param metric_update_rescales_tau TRUE (default): the rescale of a metric update
                           ## multiplies tau as well as eps; FALSE: eps only, tau stays where it is.
                           ## @param initial_eps_search_at_each_chain FALSE (default): the initial eps search runs from the
@@ -1314,10 +1314,7 @@ MVP_model <- R6Class("MVP_model",
                                               pooled_metric_soft_full_weight_draws = NULL,
                                               pooled_metric_weight_k_draws = 5,
                                               pooled_metric_signal_to_noise_centred = FALSE,
-                                              ## (back on, as in the earlier library)
-                                              metric_update_rescales_eps_and_tau = TRUE,
-                                              ## (FALSE: the setting is not used)
-                                              # metric_update_rescales_eps_and_tau = FALSE,
+                                              metric_update_rescales_eps_and_tau = FALSE,
                                               metric_update_rescales_tau = TRUE,
                                               initial_eps_search_at_each_chain = FALSE,
                                               M_update_rescale_guard = c(0.5, 2.0),
