@@ -211,6 +211,32 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
 
       }
 
+      source_text <-  rawToChar(source_bytes)
+
+##
+## ---- Function ----------------------------------------------------------------------------------------------------------------------
+##
+      fn_one_match_in_the_source <-  function(pattern) {
+
+            positions <-  gregexpr(
+                  pattern,
+                  source_text,
+                  perl = TRUE,
+                  useBytes = TRUE
+            )[[1]]
+            if (length(positions) != 1L || positions[1] < 1L) {
+                  stop("The source span is missing or ambiguous.")
+            }
+            return(c(
+                  start = positions[1],
+                  length = attr(
+                  positions,
+                  "match.length"
+            )[1]
+            ))
+
+      }
+
       functions_block <-  fn_block("(?<![A-Za-z0-9_])functions\\s*\\{")
       data_block <-  fn_block("(?m)^data\\s*\\{")
       transformed_data_block <-  fn_block("(?<![A-Za-z0-9_])transformed\\s+data\\s*\\{")
@@ -494,16 +520,21 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             text = "data "
       ))
 
+#     nuisance <-  fn_one_match(paste0(
+#           "array\\s*\\[\\s*n_u_rows\\s*\\]\\s*row_vector\\s*",
+#                                       "\\[\\s*n_tests\\s*\\]\\s*u_raw\\s*;"
+#     ))
       nuisance <-  fn_one_match(paste0(
-            "array\\s*\\[\\s*n_u_rows\\s*\\]\\s*row_vector\\s*",
-                                        "\\[\\s*n_tests\\s*\\]\\s*u_raw\\s*;"
+            "vector\\s*\\[\\s*n_u_rows\\s*>\\s*0\\s*\\?\\s*n_obs_cells\\s*:\\s*0\\s*\\]\\s*",
+            "u_raw\\s*;"
       ))
       if (nuisance["start"] <= parameters_block["opening"] ||
 ##
 ## ---- Block -------------------------------------------------------------------------------------------------------------------------
 ##
           nuisance["start"] >= parameters_block["closing"]) {
-            stop("The nuisance block is not the reference's array of rows.")
+#           stop("The nuisance block is not the reference's array of rows.")
+            stop("The nuisance block is not the reference's vector of the cells done.")
       }
 
 ##
@@ -593,9 +624,11 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "overflow_threshold",
             "underflow_threshold"
       )
+#     for (nuisance_name in c(
+#           "u_raw_CI",
+#           "u_raw"
       for (nuisance_name in c(
-            "u_raw_CI",
-            "u_raw"
+            "u_raw_CI"
 ##
 ## ---- Block -------------------------------------------------------------------------------------------------------------------------
 ##
@@ -641,14 +674,342 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
       }
 
 ##
+## ---- the sum of the cells done: guarded, and in the fused version replaced with the fused GHK function of the
+## ---- observed results, from the commented-out call before it to the end of the call:
+##
+
+      extra_arguments <-  c(
+            "pattern_of_subject",
+            "cell_of_subject",
+            "cells_before_subject_int",
+            "cells_through_subject",
+            "L_diag_recip_of_pattern",
+            "log_L_diag_recip_of_pattern",
+            "L_of_pattern"
+      )
+      tests_done_call <-  fn_one_match(paste0(
+            "target\\s*\\+=\\s*reduce_sum_static\\s*\\(\\s*partial_log_lik_of_the_tests_done\\s*,\\s*",
+            "u_raw_of_subject\\s*,\\s*",
+            paste(
+                  c(old_arguments, extra_arguments),
+                  collapse = "\\s*,\\s*"
+            ),
+            "\\s*\\)\\s*;"
+      ))
+      if (tests_done_call["start"] <= model_block["opening"] ||
+          tests_done_call["start"] >= model_block["closing"]) {
+            stop("The sum of the cells done is not in the model block.")
+      }
+      commented_call <-  fn_one_match_in_the_source(paste0(
+            "\\Q//        target += reduce_sum_static(partial_log_lik,\\E\\R",
+            "\\Q//                             u_raw,\\E"
+      ))
+      if (commented_call["start"] <= model_block["opening"] ||
+          commented_call["start"] >= tests_done_call["start"]) {
+            stop("The commented-out sum is not before the sum of the cells done.")
+      }
+      fused_model_text <-  c(
+            "//        target += reduce_sum_static(partial_log_lik_by_the_fused_GHK_mixture_log_likelihood,",
+            "//                             u_raw,",
+            "//                             chunk_size,",
+            "//                             category_of_subject_and_test,",
+            "//                             upper_category_of_subject_and_test,",
+            "//                             covariates_of_each_set_and_test,",
+            "//                             n_covs_per_outcome,",
+            "//                             pop,",
+            "//                             beta,",
+            "//                             beta_cov_by_own_status,",
+            "//                             L_Omega,",
+            "//                             X_prevalence,",
+            "//                             use_OR_prior,",
+            "//                             prev_simplex,",
+            "//                             mu_logit_A,",
+            "//                             sigma_logit_A,",
+            "//                             z_logit_A,",
+            "//                             beta_prevalence_A,",
+            "//                             mu_logit_B,",
+            "//                             sigma_logit_B,",
+            "//                             z_logit_B,",
+            "//                             beta_prevalence_B,",
+            "//                             log_OR_par,",
+            "//                             log_OR_shared,",
+            "//                             use_cond_prior,",
+            "//                             C_vec_tp,",
+            "//                             own_status_set_of_class_and_test,",
+            "//                             position_of_first_cutpoint_of_test,",
+            "//                             test_is_binary_of_test,",
+            "//                             n_categories_of_test,",
+            "//                             latent_test_order,",
+            "//                             n_tests,",
+            "//                             n_class,",
+            "//                             n_covariates_max,",
+            "//                             Phi_type,",
+            "//                             overflow_threshold,",
+            "//                             underflow_threshold);",
+            "          ////",
+            paste0(
+                  "          //// ---- The rows of the subjects that reduce_sum_static slices: u_raw's cells ",
+                  "of the tests each subject did,"
+            ),
+            paste0(
+                  "          //// ---- a data zero in the slots not done (they carry nothing: the fused funct",
+                  "ion reads only the results a"
+            ),
+            "          //// ---- subject has), filled test by test:",
+            "          ////",
+            paste0(
+                  "          array[N] row_vector[n_tests] u_raw_of_subject = rep_array(rep_row_vector(0.0, n_",
+                  "tests), N);"
+            ),
+            "          for (j in 1:n_tests) {",
+            "                int n_j = n_subjects_doing_latent[j];",
+            "                if (n_j > 0) {",
+            "                      array[n_j] int doing = subjects_doing_latent[j, 1:n_j];",
+            "                      u_raw_of_subject[doing, j] = to_array_1d(u_raw[cell_of_subject[j, doing]]);",
+            "                }",
+            "          }",
+            "          ////",
+            paste0(
+                  "          //// ---- The Cholesky factor of the correlations of each pattern's tests, by cl",
+                  "ass, at the tests' own latent"
+            ),
+            paste0(
+                  "          //// positions (L_Omega itself when the pattern has every test; zero at the test",
+                  "s the pattern does not have),"
+            ),
+            "          //// [(c - 1) * n_patterns + p] (fixed size, given whole to every chunk):",
+            "          ////",
+            "          array[n_class * n_patterns] matrix[n_tests, n_tests] L_of_each_class_and_pattern;",
+            "          for (c in 1:n_class) {",
+            "                matrix[n_tests, n_tests] Sigma = multiply_lower_tri_self_transpose(L_Omega[c]);",
+            "                for (p in 1:n_patterns) {",
+            "                      int P = n_tests_of_pattern[p];",
+            "                      matrix[n_tests, n_tests] L_cp = rep_matrix(0.0, n_tests, n_tests);",
+            "                      if (P == n_tests) {",
+            "                            L_cp = L_Omega[c];",
+            "                      } else if (P > 0) {",
+            "                            array[P] int latent_positions = latent_positions_of_pattern[p, 1:P];",
+            paste0(
+                  "                            L_cp[latent_positions, latent_positions] = cholesky_decompose(",
+                  "Sigma[latent_positions, latent_positions]);"
+            ),
+            "                      }",
+            "                      L_of_each_class_and_pattern[(c - 1) * n_patterns + p] = L_cp;",
+            "                }",
+            "          }",
+            paste0(
+                  "          target += reduce_sum_static(partial_log_lik_by_the_fused_GHK_mixture_log_likelih",
+                  "ood_of_the_tests_done,"
+            ),
+            "                               u_raw_of_subject,",
+            "                               chunk_size,",
+            "                               category_of_subject_and_test,",
+            "                               upper_category_of_subject_and_test,",
+            "                               covariates_of_each_set_and_test,",
+            "                               n_covs_per_outcome,",
+            "                               pop,",
+            "                               beta,",
+            "                               beta_cov_by_own_status,",
+            "                               L_Omega,",
+            "                               X_prevalence,",
+            "                               use_OR_prior,",
+            "                               prev_simplex,",
+            "                               mu_logit_A,",
+            "                               sigma_logit_A,",
+            "                               z_logit_A,",
+            "                               beta_prevalence_A,",
+            "                               mu_logit_B,",
+            "                               sigma_logit_B,",
+            "                               z_logit_B,",
+            "                               beta_prevalence_B,",
+            "                               log_OR_par,",
+            "                               log_OR_shared,",
+            "                               use_cond_prior,",
+            "                               C_vec_tp,",
+            "                               own_status_set_of_class_and_test,",
+            "                               position_of_first_cutpoint_of_test,",
+            "                               test_is_binary_of_test,",
+            "                               n_categories_of_test,",
+            "                               latent_test_order,",
+            "                               n_tests,",
+            "                               n_class,",
+            "                               n_covariates_max,",
+            "                               Phi_type,",
+            "                               overflow_threshold,",
+            "                               underflow_threshold,",
+            "                               L_of_each_class_and_pattern,",
+            "                               pattern_of_subject);"
+      )
+      if (fuse_likelihood) {
+            edits[[length(edits) + 1L]] <-  list(
+                  span = c(
+                        start = commented_call["start"],
+                        length = tests_done_call["start"] + tests_done_call["length"] - commented_call["start"]
+                  ),
+                  text = paste(
+                        fused_model_text,
+                        collapse = "\n"
+                  )
+            )
+      }
+
+##
+## ---- the non-fused partial sum of the cells done, and its helper, are not in the fused version:
+##
+
+      tests_done_functions <-  fn_one_match_in_the_source(paste0(
+            "\\Q      ////\\E\\R",
+            "\\Q      //// ---- The chunk's own cell of each subject given\\E"
+      ))
+      tests_done_function <-  fn_block(
+            "(?<![A-Za-z0-9_])real\\s+partial_log_lik_of_the_tests_done\\s*\\([^{};]*\\)\\s*\\{"
+      )
+      if (tests_done_functions["start"] <= functions_block["opening"] ||
+          tests_done_function["closing"] >= functions_block["closing"] ||
+          tests_done_functions["start"] >= tests_done_function["opening"]) {
+            stop("The partial sum of the cells done is not in the functions block.")
+      }
+      if (fuse_likelihood) {
+            edits[[length(edits) + 1L]] <-  list(
+                  span = c(
+                        start = tests_done_functions["start"],
+                        length = tests_done_function["closing"] + 2L - tests_done_functions["start"]
+                  ),
+                  text = ""
+            )
+      }
+
+##
 ## ---- the existing tiled GHK declaration and slice wrapper: -------------------------------------------------------------------------
 ##
 
+#     wrapper <-  c(
+#           "",
+#           paste0(
+#                 "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
+#                  "log_likelihood_in_tiles_of_subjects("
+#           ),
+#           "            matrix u_raw_of_each_test_and_subject,",
+#           "            data int first_subject,",
+#           "            data int nuisance_transformation,",
+#           "            matrix intercept,",
+#           "            array[] matrix coefficients,",
+#           "            data array[,] int coefficient_set_of_class_and_test,",
+#           "            data array[,] matrix covariates,",
+#           "            data array[,] int n_covariates,",
+#           "            array[] vector cutpoints,",
+#           "            data array[,] int cutpoint_set_of_class_and_test,",
+#           "            data array[] int position_of_first_cutpoint_of_test,",
+#           "            array[] matrix L_Omega,",
+#           "            matrix log_class_probability,",
+#           "            data array[,] int category,",
+#           "            data array[,] int upper_category,",
+#           "            data array[] int test_is_binary,",
+#           "            data array[] int n_categories_of_test,",
+#           "            data array[] int test_at_GHK_position,",
+#           "            data int Phi_type,",
+#           "            data real overflow_threshold,",
+#           "            data real underflow_threshold);",
+#           "",
+#           "      real partial_log_lik_by_the_fused_GHK_mixture_log_likelihood(",
+#           "            array[] row_vector u_raw_slice,",
+#           "            int start,",
+#           "            int end,",
+#           "            data array[,] int category_of_subject_and_test,",
+#           "            data array[,] int upper_category_of_subject_and_test,",
+#           "            data array[,] matrix covariates_of_each_set_and_test,",
+#           "            data array[] int n_covs_per_outcome,",
+#           "            data array[] int pop,",
+#           "            matrix beta,",
+#           "            array[] matrix beta_cov,",
+#           "            array[] matrix L_Omega,",
+#           "            data matrix X_prevalence,",
+#           "            data int use_OR_prior,",
+#           "            array[] vector prev_simplex,",
+#           "            array[] real mu_logit_A,",
+#           "            array[] real sigma_logit_A,",
+#           "            array[] real z_logit_A,",
+#           "            vector beta_prevalence_A,",
+#           "            array[] real mu_logit_B,",
+#           "            array[] real sigma_logit_B,",
+#           "            array[] real z_logit_B,",
+#           "            vector beta_prevalence_B,",
+#           "            array[] real log_OR_par,",
+#           "            data int log_OR_shared,",
+#           "            data int use_cond_prior,",
+#           "            array[] vector C_vec_tp,",
+#           "            data array[,] int own_status_set_of_class_and_test,",
+#           "            data array[] int position_of_first_cutpoint_of_test,",
+#           "            data array[] int test_is_binary_of_test,",
+#           "            data array[] int n_categories_of_test,",
+#           "            data array[] int latent_test_order,",
+#           "            data int n_tests,",
+#           "            data int n_class,",
+#           "            data int n_covariates_max,",
+#           "            data int Phi_type,",
+#           "            data real overflow_threshold,",
+#           "            data real underflow_threshold) {",
+#           "",
+#           "            int M = end - start + 1;",
+#           "            matrix[M, n_class] log_prev = log_prev_for_slice(",
+#           "                  X_prevalence[start:end, ],",
+#           "                  pop[start:end],",
+#           "                  n_class,",
+#           "                  use_OR_prior,",
+#           "                  prev_simplex,",
+#           "                  mu_logit_A,",
+#           "                  sigma_logit_A,",
+#           "                  z_logit_A,",
+#           "                  beta_prevalence_A,",
+#           "                  mu_logit_B,",
+#           "                  sigma_logit_B,",
+#           "                  z_logit_B,",
+#           "                  beta_prevalence_B,",
+#           "                  log_OR_par,",
+#           "                  log_OR_shared,",
+#           "                  use_cond_prior);",
+#           "            int n_covariate_sets = (n_covariates_max > 0) ? 1 : 0;",
+#           "            array[n_covariate_sets, n_tests] int n_covariates_s;",
+#           "            for (s in 1:n_covariate_sets) {",
+#           "                  n_covariates_s[s] = n_covs_per_outcome;",
+#           "            }",
+#           "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
+#           "            return",
+#           paste0(
+#                 "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
+#                  "log_likelihood_in_tiles_of_subjects("
+#           ),
+#           "                  u_raw_of_each_test_and_subject,",
+#           "                  start,",
+#           "                  2,",
+#           "                  beta,",
+#           "                  beta_cov,",
+#           "                  own_status_set_of_class_and_test,",
+#           "                  covariates_of_each_set_and_test,",
+#           "                  n_covariates_s,",
+#           "                  C_vec_tp,",
+#           "                  own_status_set_of_class_and_test,",
+#           "                  position_of_first_cutpoint_of_test,",
+#           "                  L_Omega,",
+#           "                  log_prev,",
+#           "                  category_of_subject_and_test,",
+#           "                  upper_category_of_subject_and_test,",
+#           "                  test_is_binary_of_test,",
+#           "                  n_categories_of_test,",
+#           "                  latent_test_order,",
+#           "                  Phi_type,",
+#           "                  overflow_threshold,",
+#           "                  underflow_threshold);",
+#           "",
+#           "      }",
+#           "",
+#           ""
+#     )
       wrapper <-  c(
             "",
             paste0(
-                  "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-                   "log_likelihood_in_tiles_of_subjects("
+                  "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_",
+                  "of_subjects("
             ),
             "            matrix u_raw_of_each_test_and_subject,",
             "            data int first_subject,",
@@ -662,6 +1023,33 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            data array[,] int cutpoint_set_of_class_and_test,",
             "            data array[] int position_of_first_cutpoint_of_test,",
             "            array[] matrix L_Omega,",
+            "            matrix log_class_probability,",
+            "            data array[,] int category,",
+            "            data array[,] int upper_category,",
+            "            data array[] int test_is_binary,",
+            "            data array[] int n_categories_of_test,",
+            "            data array[] int test_at_GHK_position,",
+            "            data int Phi_type,",
+            "            data real overflow_threshold,",
+            "            data real underflow_threshold);",
+            "",
+            paste0(
+                  "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_ob",
+                  "served_results_in_tiles_of_subjects("
+            ),
+            "            matrix u_raw_of_each_observed_result,",
+            "            data int first_subject,",
+            "            data int nuisance_transformation,",
+            "            matrix intercept,",
+            "            array[] matrix coefficients,",
+            "            data array[,] int coefficient_set_of_class_and_test,",
+            "            data array[,] matrix covariates,",
+            "            data array[,] int n_covariates,",
+            "            array[] vector cutpoints,",
+            "            data array[,] int cutpoint_set_of_class_and_test,",
+            "            data array[] int position_of_first_cutpoint_of_test,",
+            "            array[] matrix L_of_each_class_and_pattern,",
+            "            data array[] int pattern_of_subject,",
             "            matrix log_class_probability,",
             "            data array[,] int category,",
             "            data array[,] int upper_category,",
@@ -737,8 +1125,8 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
             "            return",
             paste0(
-                  "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-                   "log_likelihood_in_tiles_of_subjects("
+                  "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in",
+                  "_tiles_of_subjects("
             ),
             "                  u_raw_of_each_test_and_subject,",
             "                  start,",
@@ -752,6 +1140,106 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "                  own_status_set_of_class_and_test,",
             "                  position_of_first_cutpoint_of_test,",
             "                  L_Omega,",
+            "                  log_prev,",
+            "                  category_of_subject_and_test,",
+            "                  upper_category_of_subject_and_test,",
+            "                  test_is_binary_of_test,",
+            "                  n_categories_of_test,",
+            "                  latent_test_order,",
+            "                  Phi_type,",
+            "                  overflow_threshold,",
+            "                  underflow_threshold);",
+            "",
+            "      }",
+            "",
+            "      real partial_log_lik_by_the_fused_GHK_mixture_log_likelihood_of_the_tests_done(",
+            "            array[] row_vector u_raw_slice,",
+            "            int start,",
+            "            int end,",
+            "            data array[,] int category_of_subject_and_test,",
+            "            data array[,] int upper_category_of_subject_and_test,",
+            "            data array[,] matrix covariates_of_each_set_and_test,",
+            "            data array[] int n_covs_per_outcome,",
+            "            data array[] int pop,",
+            "            matrix beta,",
+            "            array[] matrix beta_cov,",
+            "            array[] matrix L_Omega,",
+            "            data matrix X_prevalence,",
+            "            data int use_OR_prior,",
+            "            array[] vector prev_simplex,",
+            "            array[] real mu_logit_A,",
+            "            array[] real sigma_logit_A,",
+            "            array[] real z_logit_A,",
+            "            vector beta_prevalence_A,",
+            "            array[] real mu_logit_B,",
+            "            array[] real sigma_logit_B,",
+            "            array[] real z_logit_B,",
+            "            vector beta_prevalence_B,",
+            "            array[] real log_OR_par,",
+            "            data int log_OR_shared,",
+            "            data int use_cond_prior,",
+            "            array[] vector C_vec_tp,",
+            "            data array[,] int own_status_set_of_class_and_test,",
+            "            data array[] int position_of_first_cutpoint_of_test,",
+            "            data array[] int test_is_binary_of_test,",
+            "            data array[] int n_categories_of_test,",
+            "            data array[] int latent_test_order,",
+            "            data int n_tests,",
+            "            data int n_class,",
+            "            data int n_covariates_max,",
+            "            data int Phi_type,",
+            "            data real overflow_threshold,",
+            "            data real underflow_threshold,",
+            "            array[] matrix L_of_each_class_and_pattern,",
+            "            data array[] int pattern_of_subject) {",
+            "",
+            "            int M = end - start + 1;",
+            "            matrix[M, n_class] log_prev = log_prev_for_slice(",
+            "                  X_prevalence[start:end, ],",
+            "                  pop[start:end],",
+            "                  n_class,",
+            "                  use_OR_prior,",
+            "                  prev_simplex,",
+            "                  mu_logit_A,",
+            "                  sigma_logit_A,",
+            "                  z_logit_A,",
+            "                  beta_prevalence_A,",
+            "                  mu_logit_B,",
+            "                  sigma_logit_B,",
+            "                  z_logit_B,",
+            "                  beta_prevalence_B,",
+            "                  log_OR_par,",
+            "                  log_OR_shared,",
+            "                  use_cond_prior);",
+            "            int n_covariate_sets = (n_covariates_max > 0) ? 1 : 0;",
+            "            array[n_covariate_sets, n_tests] int n_covariates_s;",
+            "            for (s in 1:n_covariate_sets) {",
+            "                  n_covariates_s[s] = n_covs_per_outcome;",
+            "            }",
+            "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
+            "            return",
+            paste0(
+                  "//                nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in",
+                  "_tiles_of_subjects("
+            ),
+            paste0(
+                  "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of",
+                  "_the_observed_results_in_tiles_of_subjects("
+            ),
+            "                  u_raw_of_each_test_and_subject,",
+            "                  start,",
+            "                  2,",
+            "                  beta,",
+            "                  beta_cov,",
+            "                  own_status_set_of_class_and_test,",
+            "                  covariates_of_each_set_and_test,",
+            "                  n_covariates_s,",
+            "                  C_vec_tp,",
+            "                  own_status_set_of_class_and_test,",
+            "                  position_of_first_cutpoint_of_test,",
+            "//                L_Omega,",
+            "                  L_of_each_class_and_pattern,",
+            "                  pattern_of_subject,",
             "                  log_prev,",
             "                  category_of_subject_and_test,",
             "                  upper_category_of_subject_and_test,",
