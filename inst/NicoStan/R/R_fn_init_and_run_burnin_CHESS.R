@@ -461,6 +461,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            n_iter_of_a_stuck_chain = 30,
                                            hold_tau_within_the_cap_of_steps_in_burnin = FALSE,
                                            freeze_tau_while_the_cap_of_steps_binds_in_burnin = FALSE,
+                                           eps_search_while_the_acceptance_is_high_in_burnin = FALSE,
+                                           first_iter_of_the_eps_searches = 130L,
+                                           n_iter_between_the_eps_searches = 10L,
                                            eps_search_at_handover_from_each_chain = FALSE,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
@@ -5275,6 +5278,66 @@ init_and_run_burnin_ChESSR   <- function(  debug,
               eps_adam_updates_us <-  0
               cat("eps re-initialised at ChEES handover (ii =", ii, "):", signif(eps_new, 4), "\n")
             })
+          }
+          ##
+          ## ---- The eps search from each chain while the acceptance is far above its target -----------------------------------------
+          ##
+          if (isTRUE(eps_search_while_the_acceptance_is_high_in_burnin) &&
+              (ii >= first_iter_of_the_eps_searches) && (ii < n_adapt) &&
+              (((ii - first_iter_of_the_eps_searches) %% n_iter_between_the_eps_searches) == 0L) &&
+              isTRUE(mean(p_jump_main_for_eps_during_burnin_vec[(ii - n_iter_between_the_eps_searches):(ii - 1L)]) >= 0.95)) {
+
+                try({
+                      if (use_resident_burnin) {
+                            EHMC_Metric_as_Rcpp_List$theta_hat_us_vec <-  matrix(resident_api$fn_persistent_burnin_get_resident_statistic(worker_ptr,
+                                                                                                                                          "theta_hat_us_vec"))
+                      }
+                      theta_us_of_the_chains <-  if (use_resident_burnin && isTRUE(sample_nuisance))
+                                                       resident_api$fn_persistent_burnin_get_state(
+                                                             worker_ptr,
+                                                             "theta_us_vectors_all_chains_output_to_R") else
+                                                       theta_us_vectors_all_chains_input_from_R
+                      eps_of_each_chain <-  rep(NA_real_, ncol(theta_main_vectors_all_chains_input_from_R))
+                      for (chain_i in seq_along(eps_of_each_chain)) {
+
+                            arguments_of_the_search <-  list(
+                                  theta_main_vec_initial_ref = matrix(theta_main_vectors_all_chains_input_from_R[, chain_i], ncol = 1),
+                                  theta_us_vec_initial_ref = matrix(if (isTRUE(sample_nuisance))
+                                                                          theta_us_of_the_chains[, chain_i] else
+                                                                          theta_us_vec, ncol = 1),
+                                  partitioned_HMC = partitioned_HMC,
+                                  seed = seed + ii + chain_i,
+                                  Model_type = Model_type,
+                                  force_autodiff = force_autodiff,
+                                  force_PartialLog = force_PartialLog,
+                                  multi_attempts = multi_attempts,
+                                  y_ref = y,
+                                  Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                                  EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                                  EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List)
+                            if (isTRUE(eps_search_has_n_threads)) {
+                                  arguments_of_the_search$n_threads <-  eps_search_n_threads
+                            }
+                            eps_of_each_chain[chain_i] <-  do.call(fn_find_initial_eps_main_and_us, arguments_of_the_search)[[1]]
+
+                      }
+                      eps_before_the_search <-  EHMC_args_as_Rcpp_List$eps_main
+                      eps_after_the_search <-  max(eps_before_the_search,
+                                                   min(max_eps_main, 4 * eps_before_the_search, min(eps_of_each_chain)))
+                      if (eps_after_the_search > eps_before_the_search) {
+
+                            EHMC_args_as_Rcpp_List$eps_main <-  eps_after_the_search
+                            EHMC_args_as_Rcpp_List$eps_us   <-  eps_after_the_search
+                            EHMC_burnin_as_Rcpp_List$eps_m_adam_main <-  0 ; EHMC_burnin_as_Rcpp_List$eps_v_adam_main <-  0
+                            EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <-  0 ; EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <-  0
+                            eps_adam_updates_main <-  0
+                            eps_adam_updates_us <-  0
+
+                      }
+                      cat("eps search from each chain (ii =", ii, "):", signif(eps_of_each_chain, 3),
+                          "; eps", signif(eps_before_the_search, 3), "->", signif(eps_after_the_search, 3), "\n")
+                })
+
           }
           ##
           if (isTRUE(burnin_tau_set_to_eps_so_every_trajectory_is_one_leapfrog_step)) {
