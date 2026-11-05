@@ -114,11 +114,12 @@ init_EHMC_Metric_as_Rcpp_List   <- function(  n_params_main,
         
         M_diag_vec <- rep(1, n_params)
         
-        M_dense_main <- diag(n_params_main)
+        ## (a diagonal main metric has no dense matrices, only the 10 x 10 placeholders of the burn-in)
+        M_dense_main <- if (identical(metric_shape_main, "dense")) diag(n_params_main) else diag(10)
         M_inv_dense_main <- M_dense_main
         M_inv_dense_main_chol <- M_dense_main
         
-        M_inv_main_vec <- matrix(c(diag(M_inv_dense_main)))
+        M_inv_main_vec <- matrix(rep(1, n_params_main))
         M_main_vec <- matrix(c(1 / M_inv_main_vec))
         
         ## ncol = 1 keeps these TRUE column vectors when n_nuisance == 0
@@ -212,7 +213,7 @@ init_EHMC_burnin_as_Rcpp_List   <- function(n_params_main,
         tau_m_adam_main <-  1.0
         tau_v_adam_main <-  1.0
         index_main <- index_main
-        M_dense_sqrt <- matrix(c(diag(n_params_main)))
+        M_dense_sqrt <- diag(10)
         snaper_m_vec_main  <- matrix(c(rep(1, n_params_main)))
         snaper_w_vec_main  <- matrix(c(rep(0.01, n_params_main)))
         
@@ -625,18 +626,7 @@ update_M_Empirical_main <- function( debug,
                 ##
                 EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec <- c(M_main_diag_sqrt)
                 ##
-                ## Dummy dense parameters:
-                ## (nrow = n_params_main, because with ONE main parameter diag(x) of a length-1 vector
-                ##  builds a floor(x) x floor(x) identity - 0x0 for a variance below 1 - instead of the 1x1 matrix
-                ##  x.)
-                ##
-                n_params_main_diag_shape <-  length(EHMC_Metric_as_Rcpp_List$M_main_vec)
-                EHMC_Metric_as_Rcpp_List$M_dense_main          <- diag( c(EHMC_Metric_as_Rcpp_List$M_main_vec),
-                                                                        nrow = n_params_main_diag_shape)
-                EHMC_burnin_as_Rcpp_List$M_dense_sqrt          <- diag(c(EHMC_burnin_as_Rcpp_List$sqrt_M_main_vec), nrow = n_params_main_diag_shape)
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main      <- diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), nrow = n_params_main_diag_shape)
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag( c(M_inv_main_diag_sqrt),
-                                                                        nrow = n_params_main_diag_shape)
+                ## (the dense matrices are left as they are: a diagonal metric has none)
  
           
                 # outs <- update_M_diag_Empirical_main(     

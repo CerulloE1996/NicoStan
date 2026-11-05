@@ -1131,7 +1131,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
           ##
           EHMC_Metric_as_Rcpp_List$M_us_vec <-   1.0 / EHMC_Metric_as_Rcpp_List$M_inv_us_vec  
           ##
-          EHMC_burnin_as_Rcpp_List$M_dense_sqrt <- diag(n_params_main)
+          if (identical(metric_shape_main, "dense")) EHMC_burnin_as_Rcpp_List$M_dense_sqrt <- diag(n_params_main)
           ##
           snaper_m_vec_all <-    theta_vec_mean
           snaper_m_prop_vec_all <-  theta_vec_mean
@@ -1420,9 +1420,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
       EHMC_burnin_as_Rcpp_List$sqrt_M_us_vec <- rep(1, n_nuisance)
   
       # -------- M for main (to load into C++ structs)
-      EHMC_Metric_as_Rcpp_List$M_inv_dense_main <- diag(rep(1, n_params_main))
-      EHMC_Metric_as_Rcpp_List$M_dense_main <- diag(rep(1, n_params_main))
-      EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(rep(1, n_params_main))
+      if (identical(metric_shape_main, "dense")) {
+            EHMC_Metric_as_Rcpp_List$M_inv_dense_main <- diag(rep(1, n_params_main))
+            EHMC_Metric_as_Rcpp_List$M_dense_main <- diag(rep(1, n_params_main))
+            EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <- diag(rep(1, n_params_main))
+      }
   }
  
   if (metric_shape_main == "diag") {
@@ -3040,8 +3042,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   wf_n  <- 0
   wf_m  <- rep(0, n_params)
   wf_M2 <- rep(0, n_params)
-  wf_C2 <- matrix(0, n_params_main, n_params_main)
-  empicical_cov_main <- diag(rep(1, n_params_main))
+  ## (a diagonal main metric reads the pooled variances only, never a covariance matrix)
+  wf_C2 <- if (identical(metric_shape_main, "dense")) matrix(0, n_params_main, n_params_main) else NULL
+  empicical_cov_main <- if (identical(metric_shape_main, "dense")) diag(rep(1, n_params_main)) else NULL
+  empicical_var_main <- rep(1, n_params_main)
   var_draws_all      <- rep(1, n_params)
   ##
   ## per-iteration metric estimator (metric_estimator = "per_iteration"): the main-parameter variances of the
@@ -4076,7 +4080,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                          delta <- m_b - wf_m
                          n_new <- wf_n + K
                          wf_M2 <- wf_M2 + rowSums(D_b^2) + delta^2 * (wf_n * K / n_new)
-                         wf_C2 <- wf_C2 + tcrossprod(D_b) +
+                         if (identical(metric_shape_main, "dense")) wf_C2 <- wf_C2 + tcrossprod(D_b) +
                                           tcrossprod(delta) * (wf_n * K / n_new)
                          wf_m  <- wf_m + delta * (K / n_new)
                          wf_n  <- n_new
@@ -4097,8 +4101,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                              stop("BUG: the resident pooled-estimator count differs from wf_n.")
                          ##
                          if (wf_n >= wf_min_draws) {
-                             cov_draws     <- wf_C2 / (wf_n - 1)
                              w <- wf_n / (wf_n + 5)
+                             empicical_var_main <- as.numeric(w * wf_M2 / (wf_n - 1) + (1 - w) * 1e-3)
+                             if (identical(metric_shape_main, "dense")) {
+                             cov_draws     <- wf_C2 / (wf_n - 1)
                              empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
                              if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
                                    adaptive_shrinkage_resolution <-  fn_resolve_adaptive_metric_shrinkage(
@@ -4126,6 +4132,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                    }
                              }
                              empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
+                             }
                              metric_ready <- TRUE
                              pooled_metric_weight_factor <-  if (identical(pooled_metric_warm_up, "soft"))
                                                                  min(1, wf_n /
@@ -4161,7 +4168,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                     delta <- m_b - wf_m
                     n_new <- wf_n + K
                     wf_M2 <- wf_M2 + rowSums(D_b^2) + delta^2 * (wf_n * K / n_new)
-                    wf_C2 <- wf_C2 + tcrossprod(D_b[index_main, , drop = FALSE]) +
+                    if (identical(metric_shape_main, "dense")) wf_C2 <- wf_C2 + tcrossprod(D_b[index_main, , drop = FALSE]) +
                                      tcrossprod(delta[index_main]) * (wf_n * K / n_new)
                     wf_m  <- wf_m + delta * (K / n_new)
                     wf_n  <- n_new
@@ -4175,8 +4182,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                     ##
                     if (wf_n >= wf_min_draws) {
                         var_draws_all <- wf_M2 / (wf_n - 1)
-                        cov_draws     <- wf_C2 / (wf_n - 1)
                         w <- wf_n / (wf_n + 5)
+                        empicical_var_main <- as.numeric(w * wf_M2[index_main] / (wf_n - 1) + (1 - w) * 1e-3)
+                        if (identical(metric_shape_main, "dense")) {
+                        cov_draws     <- wf_C2 / (wf_n - 1)
                         empicical_cov_main <- w * cov_draws + (1 - w) * 1e-3 * diag(n_params_main)
                         if (metric_pooled_offdiagonal_shrinkage_adaptive_active) {
                               adaptive_shrinkage_resolution <-  fn_resolve_adaptive_metric_shrinkage(
@@ -4205,6 +4214,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                               }
                         }
                         empicical_cov_main <- 0.5 * (empicical_cov_main + t(empicical_cov_main))
+                        }
                         metric_ready <- TRUE
                         pooled_metric_weight_factor <-  if (identical(pooled_metric_warm_up, "soft"))
                                                             min(1, wf_n / pooled_metric_full_weight_draws) else 1
@@ -4732,9 +4742,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                          if (metric_type_main == "unit") { 
                            
                                                    EHMC_Metric_as_Rcpp_List$M_inv_main_vec <- c(rep(1, n_params_main))
-                                                   EHMC_Metric_as_Rcpp_List$M_inv_dense_main <-  diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec))
-                                                   EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <-  EHMC_Metric_as_Rcpp_List$M_inv_dense_main
-                                                   EHMC_Metric_as_Rcpp_List$M_dense_sqrt <-           EHMC_Metric_as_Rcpp_List$M_inv_dense_main
+                                                   if (identical(metric_shape_main, "dense")) {
+                                                         EHMC_Metric_as_Rcpp_List$M_inv_dense_main <-  diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec))
+                                                         EHMC_Metric_as_Rcpp_List$M_inv_dense_main_chol <-  EHMC_Metric_as_Rcpp_List$M_inv_dense_main
+                                                         EHMC_Metric_as_Rcpp_List$M_dense_sqrt <-           EHMC_Metric_as_Rcpp_List$M_inv_dense_main
+                                                   }
                            
                          } else { 
                            
@@ -4874,8 +4886,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                              ## empicical_cov_main; dense: x metric_variance_scale) and the current M_inv
                              ## diagonal; the factor applied is recorded at every update:
                              if (pooled_metric_signal_to_noise_active) {
-                                   proposed_variance_vec_main_for_weight <-  diag(empicical_cov_main) *
-                                         (if (identical(metric_shape_main, "dense")) metric_variance_scale else 1)
+                                   proposed_variance_vec_main_for_weight <-  if (identical(metric_shape_main, "dense"))
+                                         diag(empicical_cov_main) * metric_variance_scale else empicical_var_main
                                    pooled_metric_weight_factor <-  fn_signal_to_noise_weight_factor(
                                          proposed_variance_vec = proposed_variance_vec_main_for_weight,
                                          current_variance_vec  = fn_M_inv_main_diagonal(EHMC_Metric_as_Rcpp_List),
@@ -4947,7 +4959,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                                                  ## cross-chain mean (snaper_s_vec_main_empirical,
                                                                  ## ~ Sigma / n_chains):
                                                                  per_iteration_variance_vec_main = if (metric_estimator == "per_iteration") per_iteration_variance_vec_main else
-                                                                                                   if (metric_estimator == "pooled") diag(empicical_cov_main) else NULL,
+                                                                                                   if (metric_estimator == "pooled") empicical_var_main else NULL,
                                                                  adaptive_shrinkage_state = NULL,
                                                                  ## M_dense_sqrt is only read by SNAPER
                                                                  compute_M_dense_sqrt = FALSE)
@@ -8357,20 +8369,24 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                       signif(start_of_the_last_trajectory[largest_positions], 4),
                                       collapse = ", ")))
           }
-          M_inv_of_the_debug_print <-  if (identical(metric_shape_main, "dense")) {
-                EHMC_Metric_as_Rcpp_List$M_inv_dense_main
+          if (identical(metric_shape_main, "dense")) {
+                eigen_of_the_debug_print <-  eigen(EHMC_Metric_as_Rcpp_List$M_inv_dense_main, symmetric = TRUE)
+                values_of_the_debug_print <-  eigen_of_the_debug_print$values
+                positions_of_the_smallest <-  order(abs(eigen_of_the_debug_print$vectors[, n_params_main]),
+                                                    decreasing = TRUE)[1:min(4, n_params_main)]
+                positions_of_the_largest <-  order(abs(eigen_of_the_debug_print$vectors[, 1]),
+                                                   decreasing = TRUE)[1:min(4, n_params_main)]
           } else {
-                diag(c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec), nrow = n_params_main)
+                M_inv_main_vec_of_the_debug_print <-  c(EHMC_Metric_as_Rcpp_List$M_inv_main_vec)
+                values_of_the_debug_print <-  sort(M_inv_main_vec_of_the_debug_print, decreasing = TRUE)
+                positions_of_the_smallest <-  order(M_inv_main_vec_of_the_debug_print)[1:min(4, n_params_main)]
+                positions_of_the_largest <-  order(M_inv_main_vec_of_the_debug_print,
+                                                   decreasing = TRUE)[1:min(4, n_params_main)]
           }
-          eigen_of_the_debug_print <-  eigen(M_inv_of_the_debug_print, symmetric = TRUE)
-          positions_of_the_smallest <-  order(abs(eigen_of_the_debug_print$vectors[, n_params_main]),
-                                              decreasing = TRUE)[1:min(4, n_params_main)]
-          positions_of_the_largest <-  order(abs(eigen_of_the_debug_print$vectors[, 1]),
-                                             decreasing = TRUE)[1:min(4, n_params_main)]
           message(paste0("burn-in debug, final inverse metric: largest eigenvalue ",
-                         signif(eigen_of_the_debug_print$values[1], 4), " (heaviest coordinates ",
+                         signif(values_of_the_debug_print[1], 4), " (heaviest coordinates ",
                          paste(positions_of_the_largest, collapse = ", "), "), smallest eigenvalue ",
-                         signif(eigen_of_the_debug_print$values[n_params_main], 4), " (heaviest coordinates ",
+                         signif(values_of_the_debug_print[n_params_main], 4), " (heaviest coordinates ",
                          paste(positions_of_the_smallest, collapse = ", "), ")"))
     }
     ##
