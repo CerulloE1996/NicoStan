@@ -456,6 +456,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            pooled_metric_signal_to_noise_centred = FALSE,
                                            metric_update_rescales_eps_and_tau = TRUE,
                                            # metric_update_rescales_eps_and_tau = FALSE,
+                                           metric_update_rescales_tau = TRUE,
+                                           initial_eps_search_at_each_chain = FALSE,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                            resident_burnin = TRUE,
@@ -1244,6 +1246,33 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
         }
 
+
+        ## the same search from each chain's own start (as Stan), keeping the smallest eps of the chains:
+        if (isTRUE(initial_eps_search_at_each_chain)) {
+              for (chain_i in seq_len(ncol(theta_main_vectors_all_chains_input_from_R))) {
+                    arguments_of_the_search <-  list(
+                          theta_main_vec_initial_ref = matrix(theta_main_vectors_all_chains_input_from_R[, chain_i], ncol = 1),
+                          theta_us_vec_initial_ref = matrix(if (sample_nuisance == TRUE)
+                                                                  theta_us_vectors_all_chains_input_from_R[, chain_i] else
+                                                                  theta_us_vec, ncol = 1),
+                          partitioned_HMC = partitioned_HMC,
+                          seed = seed + chain_i,
+                          Model_type = Model_type,
+                          force_autodiff = force_autodiff,
+                          force_PartialLog = force_PartialLog,
+                          multi_attempts = multi_attempts,
+                          y_ref = y,
+                          Model_args_as_Rcpp_List = Model_args_as_Rcpp_List,
+                          EHMC_args_as_Rcpp_List = EHMC_args_as_Rcpp_List,
+                          EHMC_Metric_as_Rcpp_List = EHMC_Metric_as_Rcpp_List)
+                    if (isTRUE(eps_search_has_n_threads)) {
+                          arguments_of_the_search$n_threads <-  eps_search_n_threads
+                    }
+                    par_res_of_this_chain <-  do.call(fn_find_initial_eps_main_and_us, arguments_of_the_search)
+                    par_res[[1]] <-  min(par_res[[1]], par_res_of_this_chain[[1]])
+                    par_res[[2]] <-  min(par_res[[2]], par_res_of_this_chain[[2]])
+              }
+        }
 
         message(paste("Initial step_sizes = "))
         ## main
@@ -2889,6 +2918,10 @@ init_and_run_burnin_ChESSR   <- function(  debug,
       is.na(metric_update_rescales_eps_and_tau)) {
         stop("metric_update_rescales_eps_and_tau must be TRUE or FALSE.")
   }
+  if (!is.logical(metric_update_rescales_tau) || length(metric_update_rescales_tau) != 1 ||
+      is.na(metric_update_rescales_tau)) {
+        stop("metric_update_rescales_tau must be TRUE or FALSE.")
+  }
   ##  tests of the checks of 17 Oct 17:57 showed that its removal cost 2-25x in min ESS per gradient: "YES")
   ## ---- M_update_rescale_guard: the inclusive bounds a metric update's rescale factor must lie within for the
   ##      rescale of eps and tau to be applied; outside them that rescale is skipped, the factor is never clamped,
@@ -2987,7 +3020,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
         rescaled_eps <-  EHMC_args_as_Rcpp_List[[eps_name]] * rescale_factor
         rescaled_tau <-  EHMC_args_as_Rcpp_List[[tau_name]] * rescale_factor
         EHMC_args_as_Rcpp_List[[eps_name]] <-  min(max_eps_block, max(.Machine$double.xmin, rescaled_eps))
-        EHMC_args_as_Rcpp_List[[tau_name]] <-  min(max_tau_block, max(.Machine$double.xmin, rescaled_tau))
+        if (metric_update_rescales_tau) {
+              EHMC_args_as_Rcpp_List[[tau_name]] <-  min(max_tau_block, max(.Machine$double.xmin, rescaled_tau))
+        }
         return(EHMC_args_as_Rcpp_List)
   }
   ##
@@ -4944,12 +4979,15 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                      if (!isTRUE(partitioned_HMC)) {
                                            EHMC_args_as_Rcpp_List$tau_us <-  EHMC_args_as_Rcpp_List$tau_main
                                      }
-                                     if (tau_probe_then_average && isTRUE(tau_probe_state$probing)) {
+                                     if (metric_update_rescales_tau && tau_probe_then_average &&
+                                         isTRUE(tau_probe_state$probing)) {
                                            tau_probe_state$log_tau_start <-  tau_probe_state$log_tau_start +
                                                                              log(rescale_factor_main)
                                      }
-                                     tau_average_sum_log_tau <-  tau_average_sum_log_tau +
-                                                                 tau_average_n_updates * log(rescale_factor_main)
+                                     if (metric_update_rescales_tau) {
+                                           tau_average_sum_log_tau <-  tau_average_sum_log_tau +
+                                                                       tau_average_n_updates * log(rescale_factor_main)
+                                     }
                                      if (use_eps_warm_start && ii <= eps_initial_iter) {
                                            eps_main_after_warm_start <-  eps_main_after_warm_start *
                                                                          rescale_factor_main
