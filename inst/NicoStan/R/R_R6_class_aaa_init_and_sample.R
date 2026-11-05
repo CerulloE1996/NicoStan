@@ -962,6 +962,10 @@ MVP_model <- R6Class("MVP_model",
                           ## goes up to the smallest result, at most 4 times at once, never down.
                           ## @param first_iter_of_the_eps_searches The first iteration of these searches (default 130).
                           ## @param n_iter_between_the_eps_searches The iterations between these searches (default 10).
+                          ## @param eps_doubling_while_the_acceptance_is_high_in_burnin FALSE (default); TRUE: every few
+                          ## iterations, while the mean acceptance of those iterations is 0.95 or more, eps is doubled.
+                          ## @param first_iter_of_the_eps_doublings The first iteration of these doublings (default 60).
+                          ## @param n_iter_between_the_eps_doublings The iterations between these doublings (default 5).
                           ## @param eps_search_at_handover_from_each_chain FALSE (default): the eps search at the
                           ## handover runs from the mean of the chains; TRUE: from each chain's own position, the
                           ## median of the chains.
@@ -1340,6 +1344,9 @@ MVP_model <- R6Class("MVP_model",
                                               eps_search_while_the_acceptance_is_high_in_burnin = FALSE,
                                               first_iter_of_the_eps_searches = 130L,
                                               n_iter_between_the_eps_searches = 10L,
+                                              eps_doubling_while_the_acceptance_is_high_in_burnin = FALSE,
+                                              first_iter_of_the_eps_doublings = 60L,
+                                              n_iter_between_the_eps_doublings = 5L,
                                               eps_search_at_handover_from_each_chain = FALSE,
                                               M_update_rescale_guard = c(0.5, 2.0),
                                               learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
@@ -1567,6 +1574,9 @@ MVP_model <- R6Class("MVP_model",
                         eps_search_while_the_acceptance_is_high_in_burnin = eps_search_while_the_acceptance_is_high_in_burnin,
                         first_iter_of_the_eps_searches = first_iter_of_the_eps_searches,
                         n_iter_between_the_eps_searches = n_iter_between_the_eps_searches,
+                        eps_doubling_while_the_acceptance_is_high_in_burnin = eps_doubling_while_the_acceptance_is_high_in_burnin,
+                        first_iter_of_the_eps_doublings = first_iter_of_the_eps_doublings,
+                        n_iter_between_the_eps_doublings = n_iter_between_the_eps_doublings,
                         eps_search_at_handover_from_each_chain = eps_search_at_handover_from_each_chain,
                         M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =

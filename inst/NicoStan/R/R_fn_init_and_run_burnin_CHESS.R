@@ -464,6 +464,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            eps_search_while_the_acceptance_is_high_in_burnin = FALSE,
                                            first_iter_of_the_eps_searches = 130L,
                                            n_iter_between_the_eps_searches = 10L,
+                                           eps_doubling_while_the_acceptance_is_high_in_burnin = FALSE,
+                                           first_iter_of_the_eps_doublings = 60L,
+                                           n_iter_between_the_eps_doublings = 5L,
                                            eps_search_at_handover_from_each_chain = FALSE,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
@@ -5337,6 +5340,23 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                       cat("eps search from each chain (ii =", ii, "):", signif(eps_of_each_chain, 3),
                           "; eps", signif(eps_before_the_search, 3), "->", signif(eps_after_the_search, 3), "\n")
                 })
+
+          }
+          ##
+          ## ---- eps is doubled while the acceptance is far above its target ---------------------------------------------------------
+          ##
+          if (isTRUE(eps_doubling_while_the_acceptance_is_high_in_burnin) &&
+              (ii >= first_iter_of_the_eps_doublings) && (ii < n_adapt) &&
+              (((ii - first_iter_of_the_eps_doublings) %% n_iter_between_the_eps_doublings) == 0L) &&
+              isTRUE(mean(p_jump_main_for_eps_during_burnin_vec[(ii - n_iter_between_the_eps_doublings):(ii - 1L)]) >= 0.95)) {
+
+                eps_after_the_doubling <-  min(max_eps_main, 2 * EHMC_args_as_Rcpp_List$eps_main)
+                EHMC_args_as_Rcpp_List$eps_main <-  eps_after_the_doubling
+                EHMC_args_as_Rcpp_List$eps_us   <-  eps_after_the_doubling
+                EHMC_burnin_as_Rcpp_List$eps_m_adam_main <-  0 ; EHMC_burnin_as_Rcpp_List$eps_v_adam_main <-  0
+                EHMC_burnin_as_Rcpp_List$eps_m_adam_us   <-  0 ; EHMC_burnin_as_Rcpp_List$eps_v_adam_us   <-  0
+                eps_adam_updates_main <-  0
+                eps_adam_updates_us <-  0
 
           }
           ##
