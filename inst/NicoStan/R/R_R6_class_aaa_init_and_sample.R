@@ -949,6 +949,10 @@ MVP_model <- R6Class("MVP_model",
                           ## multiplies tau as well as eps; FALSE: eps only, tau stays where it is.
                           ## @param initial_eps_search_at_each_chain FALSE (default): the initial eps search runs from the
                           ## mean of the chains; TRUE: also from each chain's own start, keeping the smallest eps.
+                          ## @param restart_stuck_chains_in_burnin FALSE (default); TRUE: in burn-in, a chain whose
+                          ## acceptance is under 0.01 for n_iter_of_a_stuck_chain iterations in a row restarts
+                          ## from the position of a chain that moves.
+                          ## @param n_iter_of_a_stuck_chain 30 (default).
                           ## @param M_update_rescale_guard c(0.5, 2.0) (default): a metric update's rescale of
                           ## eps and tau is applied only when its factor lies within these inclusive bounds; a
                           ## factor outside them skips that rescale, and the metric update itself still happens.
@@ -1317,6 +1321,8 @@ MVP_model <- R6Class("MVP_model",
                                               metric_update_rescales_eps_and_tau = FALSE,
                                               metric_update_rescales_tau = TRUE,
                                               initial_eps_search_at_each_chain = FALSE,
+                                              restart_stuck_chains_in_burnin = FALSE,
+                                              n_iter_of_a_stuck_chain = 30,
                                               M_update_rescale_guard = c(0.5, 2.0),
                                               learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                               resident_burnin = TRUE,
@@ -1536,6 +1542,8 @@ MVP_model <- R6Class("MVP_model",
                         metric_update_rescales_eps_and_tau = metric_update_rescales_eps_and_tau,
                         metric_update_rescales_tau = metric_update_rescales_tau,
                         initial_eps_search_at_each_chain = initial_eps_search_at_each_chain,
+                        restart_stuck_chains_in_burnin = restart_stuck_chains_in_burnin,
+                        n_iter_of_a_stuck_chain = n_iter_of_a_stuck_chain,
                         M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =
                               learning_rate_initial_n_tau_updates_held_from_tau_handover,

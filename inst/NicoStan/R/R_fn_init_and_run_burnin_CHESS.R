@@ -457,6 +457,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            metric_update_rescales_eps_and_tau = FALSE,
                                            metric_update_rescales_tau = TRUE,
                                            initial_eps_search_at_each_chain = FALSE,
+                                           restart_stuck_chains_in_burnin = FALSE,
+                                           n_iter_of_a_stuck_chain = 30,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
                                            resident_burnin = TRUE,
@@ -3283,6 +3285,8 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   proposal_entry_limit <-  0.5 * .Machine$double.xmax
   ##
  ####  Start burnin   ------------------------------------------------------------------------------------------------------------------------------------------------
+ n_iter_without_a_move_of_each_chain <-  rep(0L, n_chains_burnin)
+ restarts_of_stuck_chains <-  list()
  for (ii in iter_seq_burnin) {
 
               ## ---- learning-rate hold. Nothing else writes LR_main / LR_us inside the loop, so
@@ -5778,6 +5782,47 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                           
                         })
                         ##
+                        ## ---- A chain that has not moved for n_iter_of_a_stuck_chain iterations restarts from a chain that moves ----
+                        ##
+                        if (isTRUE(restart_stuck_chains_in_burnin)) {
+
+                              chain_did_not_move <-  is.na(p_jump_per_chain) | (p_jump_per_chain < 0.01)
+                              n_iter_without_a_move_of_each_chain <-  ifelse(chain_did_not_move,
+                                                                             n_iter_without_a_move_of_each_chain + 1L,
+                                                                             0L)
+                              stuck_chains <-  which(n_iter_without_a_move_of_each_chain >= n_iter_of_a_stuck_chain)
+                              moving_chains <-  which(!chain_did_not_move)
+                              if ((length(stuck_chains) > 0L) && (length(moving_chains) > 0L)) {
+
+                                    theta_us_of_the_restart <-  if (use_resident_burnin && isTRUE(sample_nuisance))
+                                                                      resident_api$fn_persistent_burnin_get_state(
+                                                                            worker_ptr,
+                                                                            "theta_us_vectors_all_chains_output_to_R") else
+                                                                      theta_us_vectors_all_chains_input_from_R
+                                    for (stuck_chain in stuck_chains) {
+
+                                          n_restarts <-  length(restarts_of_stuck_chains) + 1L
+                                          moving_chain <-  moving_chains[(n_restarts - 1L) %% length(moving_chains) + 1L]
+                                          theta_main_vectors_all_chains_input_from_R[, stuck_chain] <-
+                                                theta_main_vectors_all_chains_input_from_R[, moving_chain]
+                                          if (isTRUE(sample_nuisance)) {
+                                                theta_us_of_the_restart[, stuck_chain] <-  theta_us_of_the_restart[, moving_chain]
+                                          }
+                                          n_iter_without_a_move_of_each_chain[stuck_chain] <-  0L
+                                          restarts_of_stuck_chains[[n_restarts]] <-  c(iteration = ii,
+                                                                                       chain = stuck_chain,
+                                                                                       from_chain = moving_chain)
+
+                                    }
+                                    if (!use_resident_burnin) theta_us_vectors_all_chains_input_from_R <-  theta_us_of_the_restart
+                                    fn_persistent_burnin_set_theta(worker_ptr,
+                                                                   theta_main_vectors_all_chains_input_from_R,
+                                                                   theta_us_of_the_restart)
+
+                              }
+
+                        }
+                        ##
                         ## ---- tau_criteria_monitor_reported_quantities = TRUE (see the block before the
                         ##      burn-in loop), at every burn-in iteration: the reported quantities at this
                         ##      iteration's trajectory starts, Q_initial = f(theta_initial); the window of
@@ -8128,6 +8173,9 @@ init_and_run_burnin_ChESSR   <- function(  debug,
     ##
     ## ---- the burn-in debug record (debug = TRUE only; see its allocation): absent otherwise, so the
     ##      burn-in object of every run without debug is unchanged:
+    if (isTRUE(restart_stuck_chains_in_burnin)) {
+          burnin_result$restarts_of_stuck_chains <-  restarts_of_stuck_chains
+    }
     if (debug_record) {
           burnin_result$burnin_tau_main_ii_all_chains   <-  burnin_tau_main_ii_all_chains
           burnin_result$burnin_eps_main_all_chains      <-  burnin_eps_main_all_chains
