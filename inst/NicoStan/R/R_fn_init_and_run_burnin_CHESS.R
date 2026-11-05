@@ -126,7 +126,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##                  Radul & Sountsov 2021, Algorithm 1) and SNAPER-HMC
                                            ##                  (Sountsov & Hoffman 2022, eq. (15)). A chain with
                                            ##                  zero acceptance (a divergent proposal, which
-                                           ##                  includes |log ratio| > 1000 in either direction, or
+                                           ##                  includes an energy rise of more than 1000, or
                                            ##                  an exp(log ratio) that underflowed to 0) makes it
                                            ##                  exactly 0.
                                            ##   "arithmetic" - mean(alpha_k, na.rm = TRUE), the rule used before

@@ -75,7 +75,9 @@ ALWAYS_INLINE  bool check_divergence(   double log_ratio,
       // if (std::abs(log_ratio) > 10000) {
       //   return true;  // Reject suspiciously large energy differences
       // }
-      if (std::abs(log_ratio) > 1000.0) return true;
+      //// (an energy rise of more than 1000 is a divergence, as in Stan; an energy fall of more than 1000 is a valid
+      ////  proposal, accepted with probability 1, so a chain far out in a tail is never held there)
+      if (log_ratio < -1000.0) return true;
     
       return false; // If no issues detected
   

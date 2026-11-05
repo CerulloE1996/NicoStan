@@ -534,8 +534,8 @@ MVP_model <- R6Class("MVP_model",
                           #'that the harmonic mean over the burn-in chains of the per-chain acceptance
                           #'probabilities, K / sum_k (1 / alpha_k), reaches adapt_delta, as in ChEES-HMC (Hoffman,
                           #'Radul & Sountsov, 2021) and SNAPER-HMC (Sountsov & Hoffman, 2022); a chain with zero
-                          #'acceptance (a divergent proposal, which includes |log ratio| > 1000 in either
-                          #'direction, or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic"
+                          #'acceptance (a divergent proposal, which includes an energy rise of more than 1000,
+                          #'or an exp(log ratio) that underflowed to 0) makes this mean 0. "arithmetic"
                           #'uses the arithmetic mean, the rule used before this option existed. "geometric" uses
                           #'exp(mean(log(alpha_k))), each alpha_k clamped to [1e-8, 1] first, which lies between
                           #'the harmonic and the arithmetic mean.

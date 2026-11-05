@@ -28,13 +28,12 @@
 ##   alpha_k = 0  - either a divergent proposal or an acceptance probability that underflows to 0:
 ##                  - check_divergence() (EHMC_main_sampler_fns.hpp; also used by the nuisance and dual samplers)
 ##                    flags the proposal when the state is invalid, the log ratio is non-finite, the log density
-##                    or gradient holds a NaN / Inf, or |log_ratio| > 1000. The C++ then records div = 1 and
-##                    p_jump = 0 and rejects. The |log_ratio| > 1000 rule applies in BOTH directions, so a very
-##                    large energy DECREASE (log_ratio > +1000) also gives alpha_k = 0, where ChEES (Hoffman,
-##                    Radul & Sountsov 2021, Algorithm 1), SNAPER (Sountsov & Hoffman 2022, eq. (15)) and
-##                    TensorFlow Probability all have alpha_k = min(1, exp(log_ratio_k)) = 1 (TFP's
-##                    hmc_like_log_accept_prob_getter_fn maps only a NON-FINITE log accept ratio to -Inf, then
-##                    takes min(., 0)).
+##                    or gradient holds a NaN / Inf, or log_ratio < -1000 (an energy rise of more than 1000, as
+##                    in Stan). The C++ then records div = 1 and p_jump = 0 and rejects. A very large energy
+##                    DECREASE (log_ratio > +1000) is not flagged: alpha_k = min(1, exp(log_ratio_k)) = 1, as in
+##                    ChEES (Hoffman, Radul & Sountsov 2021, Algorithm 1), SNAPER (Sountsov & Hoffman 2022, eq.
+##                    (15)) and TensorFlow Probability (TFP's hmc_like_log_accept_prob_getter_fn maps only a
+##                    NON-FINITE log accept ratio to -Inf, then takes min(., 0)).
 ##                  - a proposal that is not flagged but has log_ratio below about -745 gives exp(log_ratio) = 0
 ##                    (or a denormal number) with div = 0, i.e. alpha_k = 0 (or effectively 0) without a
 ##                    divergence.
@@ -42,8 +41,8 @@
 ##                  mean is exactly 0, i.e. g = -adapt_delta, the largest downward push on eps (a denormal alpha_k
 ##                  gives a harmonic mean of at most K * alpha_k, i.e. 0 or effectively 0). This is the limit of K
 ##                  / sum_k (1 / alpha_k) as any alpha_k -> 0, and is what TensorFlow Probability's
-##                  reduce_log_harmonic_mean_exp returns for log(alpha_k) = -Inf; it is NOT what TFP returns for a
-##                  finite log_ratio > +1000 (there alpha_k = 1). The value is exactly 0, which is finite, so the
+##                  reduce_log_harmonic_mean_exp returns for log(alpha_k) = -Inf (a finite log_ratio > +1000 gives
+##                  alpha_k = 1 here too, as in TFP). The value is exactly 0, which is finite, so the
 ##                  eps update never receives NaN from a zero chain. A positive floor bounds each alpha_k below
 ##                  before it is inverted (pmax(alpha_k, floor)).
 ##   alpha_k = NA - no acceptance probability was returned for that chain (a failed read on the R side, NOT a
@@ -80,8 +79,8 @@ fn_harmonic_mean_acceptance <-  function( p,
         ##
         p <-  pmin(pmax(p, floor), 1)
         ##
-        ## any chain with zero acceptance (divergent proposal, including |log_ratio| > 1000 in either direction,
-        ## or an exp(log_ratio) that underflowed to 0; floor = 0) makes the harmonic mean exactly 0:
+        ## any chain with zero acceptance (divergent proposal, including log_ratio < -1000, or an exp(log_ratio)
+        ## that underflowed to 0; floor = 0) makes the harmonic mean exactly 0:
         if (any(p == 0)) {
               return(0)
         }
