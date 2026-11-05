@@ -18,6 +18,13 @@
 ##      <function>_nicostan_chunked_of_<block>) reads the chunk's own terms at its start, under the name of its
 ##      sliced argument, so the rest of the user's function is unchanged: each chunk's values live on the
 ##      chunk's own tape only;
+##   2c. a block whose terms own different numbers of values (a flat vector[E] block holding, say, one value per
+##      test each subject did, subject by subject) is declared in nuisance_block_terms, with the data arrays of
+##      the values before each term and through each term, the container the model's reduce_sum slices in its
+##      place (built from the block in the model block, by one statement, which is dropped) and the partial-sum
+##      function written on the chunk's own values of the block (its first argument, a vector): the reduce_sum
+##      gets the block's term indices as its sliced argument and a copy of that function, whose head reads the
+##      chunk's own values, before[start] + 1 .. through[end], with nicostan_nuisance_vector();
 ##   3. every other use of a nuisance block reads its values where it is used: one term (z[i]), several terms
 ##      (z[idx], z[a:b]) or the whole block (z), whichever the use is (for an index, stanc decides between the
 ##      readers of one term and of several terms); on the main tape these values are correct, but not chunked;
@@ -47,6 +54,12 @@
 #'
 #' @param Stan_model_file_path The Stan model, with its nuisance blocks declared in its parameters block.
 #' @param nuisance_params The names of its nuisance blocks (in the order NicoStan holds them).
+#' @param nuisance_block_terms NULL, or a list named by nuisance block for the blocks whose terms own different
+#'   numbers of values (a flat vector[E] or row_vector[E] block): each a list with before and through (the
+#'   names of the data arrays of the values before each term and through each term), sliced_as (the container
+#'   the model's reduce_sum slices in the block's place, built from the block by one statement of the model
+#'   block) and partial_sum_on_the_chunk (the partial-sum function written on the chunk's own values of the
+#'   block, a vector, as its first argument).
 #' @param stanc_file_path The stanc compiler (BridgeStan's, which compiles the model).
 #' @param stanc_include_paths_arguments The --include-paths arguments of the model's stanc arguments (NULL:
 #'   none).
@@ -59,6 +72,7 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                     Stan_model_file_path,
                     nuisance_params,
                     stanc_file_path,
+                    nuisance_block_terms                       = NULL,
                     stanc_include_paths_arguments              = NULL,
                     Stan_cpp_user_header                       = NULL,
                     nico_reduce_sum_Stan_model_file_path       =
@@ -66,6 +80,23 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
 ) {
 
         stopifnot(is.character(nuisance_params), length(nuisance_params) >= 1, !anyDuplicated(nuisance_params))
+        ##
+        ## ---- the blocks whose terms own different numbers of values (see 2c): their declaration checked
+        ##
+        if (!is.null(nuisance_block_terms)) {
+              stopifnot(is.list(nuisance_block_terms), !is.null(names(nuisance_block_terms)),
+                        all(names(nuisance_block_terms) %in% nuisance_params))
+              for (name in names(nuisance_block_terms)) {
+                    ragged <-  nuisance_block_terms[[name]]
+                    fields <-  c("before", "through", "sliced_as", "partial_sum_on_the_chunk")
+                    if (!is.list(ragged) || !all(fields %in% names(ragged)) ||
+                        !all(vapply(ragged[fields], function(f) is.character(f) && length(f) == 1 && nzchar(f),
+                                    logical(1)))) {
+                          stop(paste0("nico_reduce_sum: nuisance_block_terms$", name, " needs before, through, ",
+                                      "sliced_as and partial_sum_on_the_chunk, each one name"))
+                    }
+              }
+        }
         ##
         ## (a version already written under the former name, <model>_reduce_sum_chunked.stan, keeps that name and
         ##  the wording of its written comments, so that its compiled library is still the one it was built from)
@@ -103,6 +134,9 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                                      package = "NicoStan", mustWork = TRUE))
         files_of_the_key <-  files_of_the_key[file.exists(files_of_the_key)]
         key_of_this_version <-  paste(c(nuisance_params,
+                                        if (!is.null(nuisance_block_terms)) {
+                                              paste(deparse(nuisance_block_terms), collapse = "")
+                                        },
                                         nico_reduce_sum_Stan_model_file_path,
                                         files_of_the_key,
                                         unname(tools::md5sum(files = files_of_the_key))), collapse = "|")
@@ -613,13 +647,38 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                                 "row_vector[E], array[E] real, array[E] vector[K], array[E] row_vector[K], ",
                                 "matrix[R, C] or array[A] matrix[R, C]"))
               }
+              ## (a block whose terms own different numbers of values: a flat vector, its terms the reduce_sum
+              ##  slices counted by its through array; in R, its size is still terms x values per term)
+              ragged <-  !is.null(nuisance_block_terms[[name]])
+              if (ragged && !(shape %in% c("vector", "row_vector"))) {
+                    stop(paste0("nico_reduce_sum: the nuisance block ", name, " of nuisance_block_terms must be ",
+                                "a vector[E] or a row_vector[E]"))
+              }
+              if (ragged && nzchar(declaration$constraint)) {
+                    stop(paste0("nico_reduce_sum: the nuisance block ", name, " of nuisance_block_terms must be ",
+                                "unconstrained"))
+              }
               nuisance_blocks <-  rbind(nuisance_blocks,
                                         data.frame( name = name, shape = shape, terms = terms,
                                                     values_per_term = values_per_term,
-                                                    offset = offset_expression, stringsAsFactors = FALSE))
-              offset_expression <-  paste0("nicostan_offset_of_", name, " + nicostan_terms_of_", name,
-                                           " * nicostan_values_per_term_of_", name)
+                                                    offset = offset_expression,
+                                                    ragged_before = if (ragged) {
+                                                          nuisance_block_terms[[name]]$before
+                                                    } else NA_character_,
+                                                    ragged_through = if (ragged) {
+                                                          nuisance_block_terms[[name]]$through
+                                                    } else NA_character_,
+                                                    stringsAsFactors = FALSE))
+              offset_expression <-  if (ragged) {
+                    paste0("nicostan_offset_of_", name, " + nicostan_values_of_", name)
+              } else {
+                    paste0("nicostan_offset_of_", name, " + nicostan_terms_of_", name,
+                           " * nicostan_values_per_term_of_", name)
+              }
         }
+        sliced_containers_of_the_ragged_blocks <-  vapply(names(nuisance_block_terms),
+                                                          function(name) nuisance_block_terms[[name]]$sliced_as,
+                                                          character(1), USE.NAMES = TRUE)
         ##
         ## ---- each bound of a constraint is a real number, or one value per value of the block (a container of
         ##      the block's own type and sizes, as Stan allows): stanc's check of the model with the bound given
@@ -839,18 +898,28 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
         repeat {
               match <-  regexpr(pattern = paste0("(?<![A-Za-z0-9_])reduce_sum(_static)?\\s*\\(",
                                                  "\\s*[A-Za-z0-9_]+\\s*,",
-                                                 "\\s*(", paste(nuisance_params, collapse = "|"), ")\\s*,"),
+                                                 "\\s*(", paste(c(nuisance_params,
+                                                                   sliced_containers_of_the_ragged_blocks),
+                                                                 collapse = "|"), ")\\s*,"),
                                 text = text, perl = TRUE)
               if (match == -1) break
               opening <-  match + regexpr(pattern = "\\(", text = regmatches(text, match)) - 1
               closing <-  fn_position_of_closing_bracket(text, opening)
               arguments <-  trimws(fn_split_at_top_level(substr(text, opening + 1, closing - 1), ","))
-              block <-  nuisance_blocks[nuisance_blocks$name == arguments[2], ]
-              if (block$shape %in% c("vector", "row_vector", "matrix")) {
+              ## (a ragged block: the call slices the container built from it; the copy is of the partial-sum
+              ##  function written on the chunk's own values of the block)
+              ragged <-  arguments[2] %in% sliced_containers_of_the_ragged_blocks
+              name_of_the_block <-  if (ragged) {
+                    names(sliced_containers_of_the_ragged_blocks)[
+                          match(arguments[2], sliced_containers_of_the_ragged_blocks)]
+              } else arguments[2]
+              block <-  nuisance_blocks[nuisance_blocks$name == name_of_the_block, ]
+              if (!ragged && block$shape %in% c("vector", "row_vector", "matrix")) {
                     stop(paste0("nico_reduce_sum: reduce_sum slices arrays only, not the ", block$shape, " ",
                                 block$name))
               }
-              partial_sum <-  arguments[1]
+              partial_sum <-  if (ragged) nuisance_block_terms[[block$name]]$partial_sum_on_the_chunk else
+                                    arguments[1]
               suffix <-  regmatches(partial_sum, regexpr(pattern = "_(lpdf|lupdf|lpmf|lupmf)$",
                                                          text = partial_sum))
               if (length(suffix) == 0) suffix <-  ""
@@ -903,7 +972,13 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                     slice_read_as_a_matrix <-  slice$read_as_a_matrix
                     body_of_definition <-  slice$body_of_definition
                     # declaration_of_slice <-  if (block$shape == "array_of_reals") {
-                    declaration_of_slice <-  if (slice_read_as_a_matrix) {
+                    declaration_of_slice <-  if (ragged) {
+                          paste0("vector[nicostan_through_of_the_terms[", end_name,
+                                 "] - nicostan_before_of_the_terms[", start_name, "]] ", slice_name,
+                                 " = nicostan_nuisance_vector(nicostan_before_of_the_terms[", start_name,
+                                 "] + 1, nicostan_through_of_the_terms[", end_name,
+                                 "], nicostan_offset, nicostan_type);")
+                    } else if (slice_read_as_a_matrix) {
                           paste0("matrix[", end_name, " - ", start_name, " + 1, nicostan_values_per_term] ",
                                  slice_name, " = nicostan_nuisance_matrix_of_terms(", start_name, ", ", end_name,
                                  ", nicostan_values_per_term, nicostan_offset, nicostan_type);")
@@ -972,6 +1047,10 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                           if (block$shape == "array_of_matrices") {
                                 "data int nicostan_rows_per_term, data int nicostan_columns_per_term, "
                           } else "",
+                          if (ragged) {
+                                paste0("data array[] int nicostan_before_of_the_terms, ",
+                                       "data array[] int nicostan_through_of_the_terms, ")
+                          } else "",
                           if (constraint$kind > 0) {
                                 ## (a bound of one value per value of the block: the whole block's type)
                                 types_of_the_whole_blocks <-  c("vector" = "vector", "row_vector" = "row_vector",
@@ -1023,6 +1102,10 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                           paste0(", nicostan_rows_per_term_of_", block$name, ", nicostan_columns_per_term_of_",
                                  block$name)
                     } else "",
+                    if (ragged) {
+                          paste0(", ", nuisance_block_terms[[block$name]]$before, ", ",
+                                 nuisance_block_terms[[block$name]]$through)
+                    } else "",
                     if (constraint$kind > 0) {
                           paste0(", ", constraint$first_bound, ", ", constraint$second_bound, ", ",
                                  with_the_log_jacobian)
@@ -1034,6 +1117,37 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
                                   ", nicostan_offset_of_", block$name, other_arguments_of_the_call, ", ",
                                   type_of_the_readers, ")")
               text <-  paste0(substr(text, 1, match - 1), new_call, substring(text, closing + 1))
+        }
+        ##
+        ## ---- 2c. the container a ragged block's reduce_sum sliced, built from the block by one statement of the
+        ##      model block: that statement (its declaration, with its assignment) dropped, and no other use of
+        ##      the container left (one would read the block whole, outside the chunks):
+        ##
+        for (name in names(nuisance_block_terms)) {
+              container <-  nuisance_block_terms[[name]]$sliced_as
+              model_block <-  fn_blocks(text)[["model"]]
+              if (is.null(model_block)) stop("nico_reduce_sum: the model has no model block")
+              body_of_the_model <-  substr(text, model_block[["opening"]] + 1, model_block[["closing"]] - 1)
+              declaration <-  regexpr(pattern = paste0("(?m)^[^\\S\\n]*(array\\s*\\[[^\\]]*\\]\\s*)?",
+                                                       "(vector|row_vector|matrix|real|int|complex)",
+                                                       "[^;{}]*?(?<![A-Za-z0-9_])", container,
+                                                       "(?![A-Za-z0-9_])[^;]*;[^\\S\\n]*\\n?"),
+                                      text = body_of_the_model, perl = TRUE)
+              if (declaration == -1) {
+                    stop(paste0("nico_reduce_sum: the model block does not declare ", container,
+                                ", the container the reduce_sum slices in the place of ", name))
+              }
+              body_of_the_model <-  paste0(substr(body_of_the_model, 1, declaration - 1),
+                                           substring(body_of_the_model,
+                                                     declaration + attr(declaration, "match.length")))
+              if (grepl(pattern = paste0("(?<![A-Za-z0-9_])", container, "(?![A-Za-z0-9_])"),
+                        x = fn_without_markers(body_of_the_model), perl = TRUE)) {
+                    stop(paste0("nico_reduce_sum: ", container, " is still used in the model block after its ",
+                                "declaration and the reduce_sum that sliced it; it must be built by that one ",
+                                "statement and sliced only"))
+              }
+              text <-  paste0(substr(text, 1, model_block[["opening"]]), body_of_the_model,
+                              substring(text, model_block[["closing"]]))
         }
         ##
         ## ---- the readers' declarations (functions block) and the blocks' transformed data (at the end of the
@@ -1119,9 +1233,17 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
         transformed_data <-  c()
         for (i in seq_len(nrow(nuisance_blocks))) {
               block <-  nuisance_blocks[i, ]
+              ## (a ragged block: its terms are those its through array counts, its values its declared size)
               transformed_data <-  c(transformed_data,
-                    paste0("    int nicostan_terms_of_", block$name, " = ", block$terms, ";"),
-                    paste0("    int nicostan_values_per_term_of_", block$name, " = ", block$values_per_term, ";"),
+                    if (!is.na(block$ragged_through)) {
+                          c(paste0("    int nicostan_terms_of_", block$name, " = size(", block$ragged_through,
+                                   ");"),
+                            paste0("    int nicostan_values_of_", block$name, " = ", block$terms, ";"))
+                    } else {
+                          paste0("    int nicostan_terms_of_", block$name, " = ", block$terms, ";")
+                    },
+                    paste0("    int nicostan_values_per_term_of_", block$name, " = ", block$values_per_term,
+                           ";"),
                     paste0("    int nicostan_offset_of_", block$name, " = ", block$offset, ";"),
                     # paste0("    array[nicostan_terms_of_", block$name, "] int nicostan_term_indices_of_",
                     #        block$name, " = linspaced_int_array(nicostan_terms_of_", block$name, ", 1, ",
@@ -1143,9 +1265,14 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
         }
         last_block <-  nuisance_blocks[nrow(nuisance_blocks), ]
         transformed_data <-  c(transformed_data,
-              paste0("    int nicostan_size_of_the_nuisance_block = nicostan_offset_of_", last_block$name,
-                     " + nicostan_terms_of_", last_block$name, " * nicostan_values_per_term_of_",
-                     last_block$name, ";"))
+              if (!is.na(last_block$ragged_through)) {
+                    paste0("    int nicostan_size_of_the_nuisance_block = nicostan_offset_of_", last_block$name,
+                           " + nicostan_values_of_", last_block$name, ";")
+              } else {
+                    paste0("    int nicostan_size_of_the_nuisance_block = nicostan_offset_of_", last_block$name,
+                           " + nicostan_terms_of_", last_block$name, " * nicostan_values_per_term_of_",
+                           last_block$name, ";")
+              })
         transformed_data <-  paste0("\n    // (the nuisance blocks held by NicoStan: ",
                                     name_of_the_method_in_the_written_comments, ")\n",
                                     paste(transformed_data, collapse = "\n"), "\n")
@@ -1744,12 +1871,11 @@ R_fn_write_nico_reduce_sum_version_of_Stan_model <-  function(
               return(invisible(TRUE))
         }
 
-        ## (each reduce_sum_static call this writer rewrote, i.e. whose partial sum is its _nicostan_chunked_of_
-        ##  copy, calls NicoStan's name, nico_reduce_sum_static; every other call is left as the model has it;
-        ##  R_fn_Stan_parallel_call_names gives stanc Stan's name back, so the C++ is the same)
+        ## (every reduce_sum_static call of the version calls NicoStan's name, nico_reduce_sum_static, whether or not
+        ##  this writer rewrote it, as a nico_reduce_sum model calls no other; R_fn_Stan_parallel_call_names gives
+        ##  stanc Stan's name back, so the C++ is the same; comments and strings are masked in text)
         text_with_the_name_of_NicoStan <-  gsub(
-              pattern = paste0("(?<![A-Za-z0-9_])reduce_sum_static",
-                               "(\\s*\\(\\s*[A-Za-z_][A-Za-z0-9_]*_nicostan_chunked_of_)"),
+              pattern = "(?<![A-Za-z0-9_])reduce_sum_static(\\s*\\()",
               replacement = "nico_reduce_sum_static\\1",
               x = text,
               perl = TRUE)
