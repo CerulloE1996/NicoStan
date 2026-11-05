@@ -955,6 +955,8 @@ MVP_model <- R6Class("MVP_model",
                           ## @param n_iter_of_a_stuck_chain 30 (default).
                           ## @param hold_tau_within_the_cap_of_steps_in_burnin FALSE (default); TRUE: after the tau
                           ## handover, tau is never longer than max_L * eps.
+                          ## @param freeze_tau_while_the_cap_of_steps_binds_in_burnin FALSE (default); TRUE: after the
+                          ## tau handover, tau and its moments are held while tau is longer than max_L * eps.
                           ## @param eps_search_at_handover_from_each_chain FALSE (default): the eps search at the
                           ## handover runs from the mean of the chains; TRUE: from each chain's own position, the
                           ## median of the chains.
@@ -1329,6 +1331,7 @@ MVP_model <- R6Class("MVP_model",
                                               restart_stuck_chains_in_burnin = FALSE,
                                               n_iter_of_a_stuck_chain = 30,
                                               hold_tau_within_the_cap_of_steps_in_burnin = FALSE,
+                                              freeze_tau_while_the_cap_of_steps_binds_in_burnin = FALSE,
                                               eps_search_at_handover_from_each_chain = FALSE,
                                               M_update_rescale_guard = c(0.5, 2.0),
                                               learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
@@ -1552,6 +1555,7 @@ MVP_model <- R6Class("MVP_model",
                         restart_stuck_chains_in_burnin = restart_stuck_chains_in_burnin,
                         n_iter_of_a_stuck_chain = n_iter_of_a_stuck_chain,
                         hold_tau_within_the_cap_of_steps_in_burnin = hold_tau_within_the_cap_of_steps_in_burnin,
+                        freeze_tau_while_the_cap_of_steps_binds_in_burnin = freeze_tau_while_the_cap_of_steps_binds_in_burnin,
                         eps_search_at_handover_from_each_chain = eps_search_at_handover_from_each_chain,
                         M_update_rescale_guard = M_update_rescale_guard,
                         learning_rate_initial_n_tau_updates_held_from_tau_handover =

@@ -460,6 +460,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            restart_stuck_chains_in_burnin = FALSE,
                                            n_iter_of_a_stuck_chain = 30,
                                            hold_tau_within_the_cap_of_steps_in_burnin = FALSE,
+                                           freeze_tau_while_the_cap_of_steps_binds_in_burnin = FALSE,
                                            eps_search_at_handover_from_each_chain = FALSE,
                                            M_update_rescale_guard,
                                            learning_rate_initial_n_tau_updates_held_from_tau_handover = NULL,
@@ -7425,6 +7426,17 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                         if (tau_probe_fixed_length_decay)
                                             EHMC_args_as_Rcpp_List$randomize_tau <-  randomize_tau_burnin
                                     }
+                                }
+                                ## tau and its moments are held while tau is longer than the cap of steps can run at this eps:
+                                if (isTRUE(freeze_tau_while_the_cap_of_steps_binds_in_burnin) && (ii >= gap) &&
+                                    (EHMC_args_as_Rcpp_List[[tau_name]] / (if (identical(block_name, "us"))
+                                                                                 EHMC_args_as_Rcpp_List$eps_us else
+                                                                                 EHMC_args_as_Rcpp_List$eps_main) >= max_L)) {
+
+                                      updated <-  c(EHMC_args_as_Rcpp_List[[tau_name]],
+                                                    EHMC_burnin_as_Rcpp_List[[adam_mean_name]],
+                                                    EHMC_burnin_as_Rcpp_List[[adam_variance_name]])
+
                                 }
                                 EHMC_args_as_Rcpp_List[[tau_name]] <-  updated[1]
                                 EHMC_burnin_as_Rcpp_List[[adam_mean_name]] <-  updated[2]
