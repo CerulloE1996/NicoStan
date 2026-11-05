@@ -2289,6 +2289,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
 
           X <-  as.matrix(X)
           n_draws_new <-  ncol(X)
+          ## (a diagonal metric with fewer draws in the window than main parameters keeps the draws: no P x P matrix)
+          if (is.null(moments$mean) && is.null(moments$draws) && identical(metric_shape_main, "diag") &&
+              nrow(X) > (gap - tau_initial_moments_start_iter + 1) * n_draws_new) {
+              moments$draws <-  list()
+          }
+          if (!is.null(moments$draws)) {
+              moments$draws[[length(moments$draws) + 1]] <-  X
+              moments$n <-  moments$n + n_draws_new
+              return(moments)
+          }
           if (is.null(moments$mean)) {
               moments$mean <-  rep(0, nrow(X))
               moments$C2   <-  matrix(0, nrow = nrow(X), ncol = nrow(X))
@@ -2310,6 +2320,16 @@ init_and_run_burnin_ChESSR   <- function(  debug,
   fn_tau_initial_lambda_max_main <-  function( moments,
                                                mass) {
 
+          ## (the kept draws: B D t(D) t(B) / (n - 1) and t(D) t(B) B D / (n - 1) have the same largest eigenvalue)
+          if (!is.null(moments$draws)) {
+              if (moments$n < 2) return(NA_real_)
+              draws <-  do.call(cbind, moments$draws)
+              metric_factor <-  fn_trajectory_metric_factor(mass, nrow(draws))
+              draws_metric <-  fn_apply_trajectory_metric(metric_factor, draws - rowMeans(draws))
+              draws_by_draws <-  crossprod(draws_metric) / (moments$n - 1)
+              if (!all(is.finite(draws_by_draws))) return(NA_real_)
+              return(base::eigen(draws_by_draws, symmetric = TRUE, only.values = TRUE)$values[1])
+          }
           if (is.null(moments$C2) || moments$n < 2) return(NA_real_)
           covariance <-  moments$C2 / (moments$n - 1)
           metric_factor <-  fn_trajectory_metric_factor(mass, nrow(covariance))
