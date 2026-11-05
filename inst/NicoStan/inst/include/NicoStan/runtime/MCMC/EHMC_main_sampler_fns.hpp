@@ -62,22 +62,17 @@ ALWAYS_INLINE  bool check_divergence(   double log_ratio,
         
       }
       
-      // //  now check for large energy changes
-      // {
-      //     const double energy_diff = std::fabs(log_ratio);
-      //     const double energy_threshold = 100000000.0; // arbitrary
-      //   
-      //     if (energy_diff > energy_threshold) {
-      //       return true;
-      //     }
-      // }
-      
-      // if (std::abs(log_ratio) > 10000) {
-      //   return true;  // Reject suspiciously large energy differences
-      // }
-      //// (an energy rise of more than 1000 is a divergence, as in Stan; an energy fall of more than 1000 is a valid
-      ////  proposal, accepted with probability 1, so a chain far out in a tail is never held there)
-      if (log_ratio < -1000.0) return true;
+      //// now check for large energy changes: energy_change = H(proposal) - H(start) = - log_ratio; only a RISE of
+      //// more than energy_threshold is a divergence (as in Stan); a fall is a valid proposal, accepted with
+      //// probability 1
+      {
+          const double energy_change = - log_ratio;
+          const double energy_threshold = 1000.0;
+        
+          if (energy_change > energy_threshold) {
+            return true;
+          }
+      }
     
       return false; // If no issues detected
   
