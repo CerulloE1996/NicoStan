@@ -1507,7 +1507,6 @@ data {
       //// ---- Types 1 and 3 use P = Sp and 1 - Se; types 2 and 4 use Sp and Se:
       ////
       int<lower=0, upper=1> use_Se_Sp_prior;      //// 0 = original cutpoint prior
-      int<lower=0, upper=1> anchor_at_location;   //// 1 = cutpoints centred at the baseline location
       int<lower=1, upper=4> Se_Sp_prior_type;     //// 1 = Dirichlet, 2-3 = Betas, 4 = link-scale Normal
       int<lower=0, upper=(n_ordinal_tests > 0 ? max(n_cat_per_ord_test) - 1 : 0)> n_chosen_max;
       array[2, n_ordinal_tests] int<lower=0, upper=n_chosen_max> n_chosen;
@@ -2438,19 +2437,12 @@ model {
                       if (use_Se_Sp_prior == 1 && n_chosen[s, t_ord] > 0) {
                             int m = n_chosen[s, t_ord];
                             ////
-                            //// ---- anchor: the set's own-status location (0 for ordinal tests, whose location
-                            //// ---- IS the cutpoints); the baseline is the cutpoints centred at it:
+                            //// ---- the cutpoints centred at the anchor (anchor_t: the ordinal tests' location, 0):
                             ////
-                            vector[n_thr_t] baseline_location = rep_vector(beta_own[s, t], n_thr_t);
-                            vector[n_thr_t] C_anchor = rep_vector(0.0, n_thr_t);
-                            if (anchor_at_location == 1) {
-                                 C_anchor = baseline_location;
-                            }
-                            vector[n_thr_t] C_centred = C_t - C_anchor;
-                            vector[n_thr_t] C_baseline = C_t - baseline_location;
+                            vector[n_thr_t] C_centred = C_t - anchor_t;
                             matrix[m, 2] beta_ab = prior_Se_Sp_beta[s, t_ord][1:m, ];
                             matrix[m, 2] link_mean_SD = prior_Se_Sp_link_mean_SD[s, t_ord][1:m, ];
-                            //// flip for the present set: C_baseline is on the probit(1 - Se) scale
+                            //// flip for the present set: C_centred is on the probit(1 - Se) scale
                             if (s == 2) {
                                  link_mean_SD[, 1] = - link_mean_SD[, 1];
                                  if (Se_Sp_prior_type == 2) {
@@ -2459,7 +2451,7 @@ model {
                             }
                             target += induced_dirichlet_with_Se_Sp_prior_lpdf(
                                       C_centred | log_C_gap_t,
-                                      C_baseline,
+                                      C_centred,
                                       to_vector(prior_dirichlet_alpha[s][1:n_cat_t, t_ord]),
                                       alpha_seg[s, t_ord][1:(m + 1)],
                                       chosen_cutoffs[s, t_ord, 1:m],
