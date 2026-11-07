@@ -3,7 +3,7 @@
 // -| --------- BayesMVP GHK log likelihood of a finite mixture of multivariate (ordered) probit models ----------
 // -| --------- (Stan external function) -------------------------------------------------------------------------
 //
-//     nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(u_raw, nuisance_transformation,
+//     nico_LC_MVP_MVOP_GHK_log_lik(u_raw, nuisance_transformation,
 //           intercept, coefficients, coefficient_set_of_class_and_test, covariates, n_covariates, cutpoints,
 //           cutpoint_set_of_class_and_test, position_of_first_cutpoint_of_test, L_Omega, log_class_probability,
 //           category, upper_category, test_is_binary, n_categories_of_test, test_at_GHK_position, Phi_type,
@@ -82,7 +82,7 @@
 //
 // Declared in the Stan functions block (no body; stanc --allow-undefined):
 //
-//     real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(
+//     real nico_LC_MVP_MVOP_GHK_log_lik(
 //           array[] row_vector u_raw, data int nuisance_transformation, matrix intercept,
 //           array[] matrix coefficients, data array[,] int coefficient_set_of_class_and_test,
 //           data array[,] matrix covariates, data array[,] int n_covariates, array[] vector cutpoints,
@@ -846,7 +846,7 @@ inline void GHK_rows_of_a_narrow_interval(const int n, const int Phi_type, const
 
 inline void stop_with_a_message_about_the_arguments(const std::string& message) {
 
-    throw std::domain_error(std::string("nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood: ")
+    throw std::domain_error(std::string("nico_LC_MVP_MVOP_GHK_log_lik: ")
                             + message);
 
 }
@@ -858,7 +858,7 @@ namespace nico::math {
 template <typename T_u_raw, typename T_intercept, typename T_coefficients, typename T_cutpoints,
           typename T_L_Omega, typename T_log_class_probability>
 inline stan::return_type_t<T_u_raw, T_intercept, T_coefficients, T_cutpoints, T_L_Omega, T_log_class_probability>
-nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(
+nico_LC_MVP_MVOP_GHK_log_lik(
         const T_u_raw& u_raw,
         const int nuisance_transformation,
         const T_intercept& intercept,
@@ -1491,7 +1491,7 @@ nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(
 
 }  // namespace nico::math
 
-using nico::math::nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood;
+using nico::math::nico_LC_MVP_MVOP_GHK_log_lik;
 
 
 

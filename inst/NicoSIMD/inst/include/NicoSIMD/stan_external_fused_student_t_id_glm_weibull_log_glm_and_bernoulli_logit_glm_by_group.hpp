@@ -12,9 +12,9 @@
 //     nico_weibull_log_glm_lpdf(y | x, alpha, beta, shape, log_y)  and  _lccdf(y | x, alpha, beta, shape, log_y)
 //                       = the same, with log_y = log(y) given as data (made once, e.g. in transformed data), so
 //                         the pass reads L_i in place of taking the log of y_i at every call
-//     nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(y | x, group, alpha, B)
+//     nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(y | x, group, alpha, B)
 //                       = bernoulli_logit_lpmf(y | f),   f_i = alpha(group_i) + sum_k x(i, k) B(group_i, k)
-//     nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(y | x, group, B)     (the same without alpha)
+//     nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(y | x, group, B)     (the same without alpha)
 //
 // with x an N x K matrix of data; alpha a real or a vector of length N; beta a vector of length K; nu, sigma and
 // shape reals; group an array of N ints in 1, ..., G; B a G x K matrix (row g: the coefficients of group g, e.g.
@@ -71,14 +71,14 @@
 //     real nico_weibull_log_glm_lccdf(vector y, matrix x, real alpha, vector beta, real shape);
 //     real nico_weibull_log_glm_lpdf(array[] real y, matrix x, real alpha, vector beta, real shape, vector log_y);
 //     real nico_weibull_log_glm_lccdf(vector y, matrix x, real alpha, vector beta, real shape, vector log_y);
-//     real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, array[] int group,
+//     real nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(array[] int y, matrix x, array[] int group,
 //                                                                   vector alpha, matrix B);
-//     real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, array[] int group,
+//     real nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(array[] int y, matrix x, array[] int group,
 //                                                                   matrix B);
 //
-// AUTO_ROW_SUM nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf
+// AUTO_ROW_SUM nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf
 // AUTO_ROW_SUM_ARGUMENTS y:rows x:data_matrix_rows group:group_index alpha:group_vector B:group_matrix
-// AUTO_ROW_SUM nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf
+// AUTO_ROW_SUM nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf
 // AUTO_ROW_SUM_ARGUMENTS y:rows x:data_matrix_rows group:group_index B:group_matrix
 //
 // Included at the end of stan_external_functions.hpp, after stan_external_fused_bernoulli_logit_and_probit_glm_
@@ -940,7 +940,7 @@ inline stan::return_type_t<T_x, T_B> fused_bernoulli_logit_glm_by_group_with_gat
     static_assert(std::is_same<stan::value_type_t<T_group>, int>::value, "group must be an array of int");
     static_assert(std::is_arithmetic<stan::value_type_t<T_x>>::value, "x must be data");
     constexpr bool B_is_var = stan::is_var<stan::value_type_t<T_B>>::value;
-    static const char* function_name = "nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf";
+    static const char* function_name = "nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf";
     const int N = static_cast<int>(x.rows());
     const int K = static_cast<int>(x.cols());
     const int G = static_cast<int>(B.rows());
@@ -1233,7 +1233,7 @@ inline stan::return_type_t<T_x, T_alpha, T_B> fused_bernoulli_logit_glm_by_group
     static_assert(std::is_arithmetic<stan::value_type_t<T_x>>::value, "x must be data");
     constexpr bool alpha_is_var = stan::is_var<stan::value_type_t<T_alpha>>::value;
     constexpr bool B_is_var = stan::is_var<stan::value_type_t<T_B>>::value;
-    static const char* function_name = "nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf";
+    static const char* function_name = "nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf";
     const auto& alpha_ref = stan::math::to_ref(alpha);
     const auto& B_ref = stan::math::to_ref(B);
     const int N = static_cast<int>(x.rows());
@@ -1490,7 +1490,7 @@ template <bool propto, typename T_y, typename T_x, typename T_group, typename T_
           stan::require_eigen_matrix_dynamic_t<T_x>* = nullptr,
           stan::require_std_vector_vt<std::is_integral, T_group>* = nullptr,
           stan::require_eigen_matrix_dynamic_t<T_B>* = nullptr>
-inline stan::return_type_t<T_x, T_B> nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(
+inline stan::return_type_t<T_x, T_B> nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(
         const T_y& y, const T_x& x, const T_group& group, const T_B& B, std::ostream* /*pstream__*/) {
 
     namespace fused = nico::math::fused_glms_by_family;
@@ -1500,7 +1500,7 @@ inline stan::return_type_t<T_x, T_B> nico_bernoulli_logit_glm_with_coefficients_
 
 }  // namespace nico::math
 
-using nico::math::nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf;
+using nico::math::nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf;
 
 namespace nico::math {
 
@@ -1510,7 +1510,7 @@ template <bool propto, typename T_y, typename T_x, typename T_group, typename T_
           stan::require_std_vector_vt<std::is_integral, T_group>* = nullptr,
           stan::require_eigen_col_vector_t<T_alpha>* = nullptr,
           stan::require_eigen_matrix_dynamic_t<T_B>* = nullptr>
-inline stan::return_type_t<T_x, T_alpha, T_B> nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(
+inline stan::return_type_t<T_x, T_alpha, T_B> nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(
         const T_y& y, const T_x& x, const T_group& group, const T_alpha& alpha, const T_B& B,
         std::ostream* /*pstream__*/) {
 
@@ -1521,7 +1521,7 @@ inline stan::return_type_t<T_x, T_alpha, T_B> nico_bernoulli_logit_glm_with_coef
 
 }  // namespace nico::math
 
-using nico::math::nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf;
+using nico::math::nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf;
 
 
 

@@ -3,7 +3,7 @@
 // -| --------- BayesMVP dot products of an affine predictor with indexed effects and its log cumulative sum of
 // -| --------- exponentials, with its blocks of rows run in parallel (Stan external function) -------------------
 //
-//     nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+//     nico_dot_prod_log_cumul_sum_exp(
 //           linear_weights, prefix_weights, X, beta, scale, z, index, rows_in_order_of_index,
 //           last_position_of_each_index, offset, rows_per_block_run_in_parallel)
 //       = sum_i linear_weights[i] eta[i] + sum_i prefix_weights[i] L[i],
@@ -54,7 +54,7 @@
 //
 // Declared in the Stan functions block (no body; stanc --allow-undefined), next to the serial function:
 //
-//     real nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+//     real nico_dot_prod_log_cumul_sum_exp(
 //           data vector linear_weights, data vector prefix_weights, data matrix X, vector beta, real scale,
 //           array[] real z, data array[] int index, data array[] int rows_in_order_of_index,
 //           data array[] int last_position_of_each_index, real log_offset,
@@ -273,7 +273,7 @@ namespace nico::math {
 template <typename T_linear_weights, typename T_prefix_weights, typename T_x, typename T_beta, typename T_scale,
           typename T_z, typename T_offset>
 inline stan::return_type_t<T_beta, T_scale, T_z, T_offset>
-nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+nico_dot_prod_log_cumul_sum_exp(
         const T_linear_weights& linear_weights, const T_prefix_weights& prefix_weights, const T_x& x,
         const T_beta& beta, const T_scale& scale, const std::vector<T_z>& z, const std::vector<int>& index,
         const std::vector<int>& rows_in_order_of_index, const std::vector<int>& last_position_of_each_index,
@@ -283,7 +283,7 @@ nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_su
     static_assert(stan::is_constant_all<T_linear_weights, T_prefix_weights, T_x>::value,
                   "The weights and the predictor matrix must be data.");
     static const char* function =
-          "nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp";
+          "nico_dot_prod_log_cumul_sum_exp";
     const auto& x_ref = stan::math::to_ref(x);
     const auto& beta_ref = stan::math::to_ref(beta);
     const Eigen::Ref<const Eigen::Matrix<double, -1, 1>> linear_values(linear_weights);
@@ -297,7 +297,7 @@ nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_su
           ((std::max<Eigen::Index>(1, rows_per_block_run_in_parallel) + multiple - 1) / multiple) * multiple;
     auto serial_function = [&]() {
 
-          return nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+          return nico_dot_prod_log_cumul_sum_exp(
                        linear_weights, prefix_weights, x, beta, scale, z, index, rows_in_order_of_index,
                        last_position_of_each_index, offset, pstream__);
 
@@ -712,7 +712,7 @@ nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_su
 
 }  // namespace nico::math
 
-using nico::math::nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp;
+using nico::math::nico_dot_prod_log_cumul_sum_exp;
 
 
 

@@ -6,7 +6,7 @@
 ## The source is the hierarchical logistic regression's Stan::math-fused file (bernoulli_logit_glm on the
 ## columns [1, x]), with Stan's reduce_sum or with nico_reduce_sum. The groups' intercepts and slopes
 ## (mu + sigma * beta_raw) are made once per slice and passed by group to
-## nico_bernoulli_logit_glm_with_coefficients_by_group, on the data column x. Every other line is left as it is,
+## nico_bernoulli_logit_glm_with_coeffs_by_group, on the data column x. Every other line is left as it is,
 ## for the remaining NicoSIMD conversion.
 ##
 ##
@@ -175,7 +175,7 @@ fn_write_NicoSIMD_fused_hierarchical_logistic_regression_Stan_model <-  function
                               strrep(" ", 43L), "+ (sigma[2] * beta_raw_of_slice[position_in_slice, 2])\n",
                               strrep(" ", 45L), ".* x_sorted[first:last],\n",
                               strrep(" ", 43L), "mu);"),
-                 new = paste0("+ nico_bernoulli_logit_glm_with_coefficients_by_group_lupmf(",
+                 new = paste0("+ nico_bernoulli_logit_glm_with_coeffs_by_group_lupmf(",
                               "y_sorted[first:last] |\n",
                               continuation, "x_sorted_as_matrix[first:last],\n",
                               continuation, "position_in_slice,\n",
@@ -200,7 +200,7 @@ fn_write_NicoSIMD_fused_hierarchical_logistic_regression_Stan_model <-  function
                  active = TRUE),
             list(old = "functions {\n",
                  new = paste0("functions {\n",
-                              "    real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, ",
+                              "    real nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(array[] int y, ",
                               "matrix x, array[] int group,\n",
                               strrep(" ", 66L), "vector alpha, matrix B);\n"),
                  times = c(1L, 1L),
@@ -279,7 +279,7 @@ fn_write_NicoSIMD_fused_hierarchical_logistic_regression_Stan_model <-  function
 
       fused_call_positions <-  gregexpr(
             paste0("(?<![A-Za-z0-9_])",
-                   "nico_bernoulli_logit_glm_with_coefficients_by_group_lupmf\\s*\\("),
+                   "nico_bernoulli_logit_glm_with_coeffs_by_group_lupmf\\s*\\("),
             masked_output,
             perl = TRUE)[[1]]
       n_fused_calls <-  if (fused_call_positions[1] < 1L) 0L else length(fused_call_positions)
@@ -310,7 +310,7 @@ fn_write_NicoSIMD_fused_hierarchical_logistic_regression_Stan_model <-  function
       return(list(source_Stan_model_file_path = source_path,
                   source_Stan_model_md5 = unname(tools::md5sum(source_path)),
                   NicoSIMD_fused_Stan_model_file_path = output_path,
-                  fused_calls = "nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf",
+                  fused_calls = "nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf",
                   source_for_remaining_backend_conversion = output_path))
 
 }

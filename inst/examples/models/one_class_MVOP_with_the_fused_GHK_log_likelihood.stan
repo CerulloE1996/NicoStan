@@ -9,7 +9,7 @@
 //// is handled by the GHK method too: its latent value is the untruncated GHK draw, with no likelihood term.
 ////
 //// The log likelihood of each chunk of subjects is ONE call of
-//// nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood, which computes the GHK recursion, and
+//// nico_LC_MVP_MVOP_GHK_log_lik, which computes the GHK recursion, and
 //// its gradient, in one autodiff node, with NicoSIMD's AVX-512 or AVX2 functions (x86-64) or with NEON (64-bit
 //// ARM, e.g. Apple Silicon, through SIMDe). The same function also takes 2 or 4 latent classes,
 //// interval-censored ordinal results and either Phi_type. The nuisance block u_raw is the sliced argument of
@@ -24,7 +24,7 @@ functions {
       ////
       //// ---- NicoSIMD's fused GHK log likelihood (declared without a body: its C++ is NicoSIMD's user header)
       ////
-      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(
+      real nico_LC_MVP_MVOP_GHK_log_lik(
             array[] row_vector u_raw, data int nuisance_transformation, matrix intercept,
             array[] matrix coefficients, data array[,] int coefficient_set_of_class_and_test,
             data array[,] matrix covariates, data array[,] int n_covariates, array[] vector cutpoints,
@@ -52,7 +52,7 @@ functions {
                                                        data real overflow_threshold,
                                                        data real underflow_threshold) {
             matrix[end - start + 1, 1] log_class_probability = rep_matrix(0.0, end - start + 1, 1);
-            return nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(
+            return nico_LC_MVP_MVOP_GHK_log_lik(
                          u_raw_slice, 1, intercept, coefficients, set_of_class_and_test,
                          covariates[:, :, start:end], n_covariates, cutpoints, set_of_class_and_test,
                          position_of_first_cutpoint_of_test, L_Omega, log_class_probability,

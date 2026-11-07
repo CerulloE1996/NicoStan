@@ -880,8 +880,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
 #     wrapper <-  c(
 #           "",
 #           paste0(
-#                 "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-#                  "log_likelihood_in_tiles_of_subjects("
+#                 "      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
 #           ),
 #           "            matrix u_raw_of_each_test_and_subject,",
 #           "            data int first_subject,",
@@ -970,8 +969,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
 #           "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
 #           "            return",
 #           paste0(
-#                 "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-#                  "log_likelihood_in_tiles_of_subjects("
+#                 "                  nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
 #           ),
 #           "                  u_raw_of_each_test_and_subject,",
 #           "                  start,",
@@ -1002,8 +1000,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
       wrapper <-  c(
             "",
             paste0(
-                  "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_",
-                  "of_subjects("
+                  "      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             "            matrix u_raw_of_each_test_and_subject,",
             "            data int first_subject,",
@@ -1028,8 +1025,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            data real underflow_threshold);",
             "",
             paste0(
-                  "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_ob",
-                  "served_results_in_tiles_of_subjects("
+                  "      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             "            matrix u_raw_of_each_observed_result,",
             "            data int first_subject,",
@@ -1055,8 +1051,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            data real underflow_threshold);",
             "",
             paste0(
-                  "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_ob",
-                  "served_results_in_tiles_of_subjects("
+                  "      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             "            vector u_raw_of_each_observed_result,",
             "            data int first_subject,",
@@ -1146,8 +1141,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
             "            return",
             paste0(
-                  "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in",
-                  "_tiles_of_subjects("
+                  "                  nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             "                  u_raw_of_each_test_and_subject,",
             "                  start,",
@@ -1240,12 +1234,10 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
             "            return",
             paste0(
-                  "//                nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in",
-                  "_tiles_of_subjects("
+                  "//                nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             paste0(
-                  "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of",
-                  "_the_observed_results_in_tiles_of_subjects("
+                  "                  nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             "                  u_raw_of_each_test_and_subject,",
             "                  start,",
@@ -1342,12 +1334,10 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
             "            }",
             "            return",
             paste0(
-                  "//                nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in",
-                  "_tiles_of_subjects("
+                  "//                nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             paste0(
-                  "                  nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of",
-                  "_the_observed_results_in_tiles_of_subjects("
+                  "                  nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("
             ),
             "                  u_raw_c,",
             "                  start,",
@@ -1575,8 +1565,7 @@ fn_write_NicoSIMD_four_class_LC_MVOP_Stan_model <-  function(
 ##
             fused_calls = if (fuse_likelihood) {
                   paste0(
-                        "nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-                         "log_likelihood_in_tiles_of_subjects"
+                        "nico_LC_MVP_MVOP_GHK_log_lik_using_tiles"
                   )
 ##
 ## ---- Conditions --------------------------------------------------------------------------------------------------------------------

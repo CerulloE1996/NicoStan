@@ -3,7 +3,7 @@
 // -| --------- BayesMVP GHK log likelihood of a finite mixture of multivariate (ordered) probit models, ---------
 // -| --------- computed in tiles of subjects (Stan external function) -------------------------------------------
 //
-//     nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects(
+//     nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(
 //           u_raw_of_each_test_and_subject, first_subject, nuisance_transformation, intercept, coefficients,
 //           coefficient_set_of_class_and_test, covariates, n_covariates, cutpoints,
 //           cutpoint_set_of_class_and_test,
@@ -12,7 +12,7 @@
 //           underflow_threshold)
 //
 // The same model, the same value and the same gradient as
-// nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood
+// nico_LC_MVP_MVOP_GHK_log_lik
 // (stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood.hpp, whose SIMD kernels and
 // rows of each branch are called here unchanged), computed in three different ways:
 //   (1) the M subjects of the slice are taken in tiles of at most 128 subjects: the forward pass of every class,
@@ -38,7 +38,7 @@
 //
 // Declared in the Stan functions block (no body; stanc --allow-undefined):
 //
-//     real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects(
+//     real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(
 //           matrix u_raw_of_each_test_and_subject, data int first_subject, data int nuisance_transformation,
 //           matrix intercept, array[] matrix coefficients, data array[,] int coefficient_set_of_class_and_test,
 //           data array[,] matrix covariates, data array[,] int n_covariates, array[] vector cutpoints,
@@ -96,8 +96,7 @@ buffers_of_mixture_of_multivariate_ordered_probit_GHK_in_tiles_of_subjects() {
 
 inline void stop_with_a_message_about_the_arguments_of_the_function_in_tiles(const std::string& message) {
 
-    throw std::domain_error(std::string("nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_")
-                            + "in_tiles_of_subjects: " + message);
+    throw std::domain_error(std::string("nico_LC_MVP_MVOP_GHK_log_lik_using_tiles: ") + message);
 
 }
 
@@ -638,7 +637,7 @@ namespace nico::math {
 template <typename T_u_raw, typename T_intercept, typename T_coefficients, typename T_cutpoints,
           typename T_L_Omega, typename T_log_class_probability>
 inline stan::return_type_t<T_u_raw, T_intercept, T_coefficients, T_cutpoints, T_L_Omega, T_log_class_probability>
-nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects(
+nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(
         const T_u_raw& u_raw_of_each_test_and_subject,
         const int first_subject,
         const int nuisance_transformation,
@@ -901,14 +900,14 @@ nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_o
 
 }  // namespace nico::math
 
-using nico::math::nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects;
+using nico::math::nico_LC_MVP_MVOP_GHK_log_lik_using_tiles;
 
 
 //
 // -| --------- The same GHK log likelihood of a finite mixture of multivariate (ordered) probit models, in ----
 // -| --------- tiles of subjects, of the observed results only (Stan external function) ---------------------
 //
-//     nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects(
+//     nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(
 //           u_raw_of_each_observed_result, first_subject, nuisance_transformation, intercept, coefficients,
 //           coefficient_set_of_class_and_test, covariates, n_covariates, cutpoints,
 //           cutpoint_set_of_class_and_test, position_of_first_cutpoint_of_test, L_of_each_class_and_pattern,
@@ -935,7 +934,7 @@ using nico::math::nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_lik
 //
 // Declared in the Stan functions block (no body; stanc --allow-undefined):
 //
-//     real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects(
+//     real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(
 //           vector u_raw_of_each_observed_result, data int first_subject, data int nuisance_transformation,
 //           (or matrix u_raw_of_each_observed_result, the T x M form)
 //           matrix intercept, array[] matrix coefficients, data array[,] int coefficient_set_of_class_and_test,
@@ -977,8 +976,7 @@ buffers_of_the_observed_results_of_mixture_of_multivariate_ordered_probit_GHK_in
 inline void stop_with_a_message_about_the_arguments_of_the_function_of_the_observed_results(
         const std::string& message) {
 
-    throw std::domain_error(std::string("nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_")
-                            + "of_the_observed_results_in_tiles_of_subjects: " + message);
+    throw std::domain_error(std::string("nico_LC_MVP_MVOP_GHK_log_lik_using_tiles: ") + message);
 
 }
 
@@ -1581,7 +1579,7 @@ inline double GHK_mixture_log_likelihood_of_the_observed_results_of_one_tile_of_
 template <typename T_u_raw, typename T_intercept, typename T_coefficients, typename T_cutpoints,
           typename T_L, typename T_log_class_probability>
 inline stan::return_type_t<T_u_raw, T_intercept, T_coefficients, T_cutpoints, T_L, T_log_class_probability>
-nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects(
+nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(
         const T_u_raw& u_raw_of_each_observed_result,
         const int first_subject,
         const int nuisance_transformation,
@@ -1894,4 +1892,4 @@ nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_obs
 
 }  // namespace nico::math
 
-using nico::math::nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_of_the_observed_results_in_tiles_of_subjects;
+using nico::math::nico_LC_MVP_MVOP_GHK_log_lik_using_tiles;

@@ -303,7 +303,7 @@ using nico::math::nico_log_cumulative_sum_exp;
 //      (operands: w, x and log_offset, those that are parameters) and no vector of results (the backward recursion
 //      with g = w; d / d w_i = L_i); with data w, the log is taken only of the prefix sums whose weight is not 0
 //
-//     real nico_dot_product_log_cumulative_sum_exp(vector w, vector x, real log_offset);
+//     real nico_dot_prod_log_cumul_sum_exp(vector w, vector x, real log_offset);
 //
 namespace nico::math {
 
@@ -311,11 +311,11 @@ template <typename T_w, typename T_x, typename T_offset,
           stan::require_eigen_col_vector_t<T_w>* = nullptr,
           stan::require_eigen_col_vector_t<T_x>* = nullptr,
           stan::require_stan_scalar_t<T_offset>* = nullptr>
-inline stan::return_type_t<T_w, T_x, T_offset> nico_dot_product_log_cumulative_sum_exp(
+inline stan::return_type_t<T_w, T_x, T_offset> nico_dot_prod_log_cumul_sum_exp(
         const T_w& w, const T_x& x, const T_offset& log_offset, std::ostream* /*pstream__*/ = nullptr) {
 
     namespace lcse = nico::math::log_cumulative_sum_exp;
-    static const char* function_name = "nico_dot_product_log_cumulative_sum_exp";
+    static const char* function_name = "nico_dot_prod_log_cumul_sum_exp";
     const auto& w_ref = stan::math::to_ref(w);
     const auto& x_ref = stan::math::to_ref(x);
     const int M = static_cast<int>(x_ref.size());
@@ -399,7 +399,7 @@ inline stan::return_type_t<T_w, T_x, T_offset> nico_dot_product_log_cumulative_s
 
 }  // namespace nico::math
 
-using nico::math::nico_dot_product_log_cumulative_sum_exp;
+using nico::math::nico_dot_prod_log_cumul_sum_exp;
 
 
 

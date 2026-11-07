@@ -73,7 +73,7 @@ fn_write_NicoSIMD_one_class_MVOP_Stan_model <-  function(
       ##
 
       GHK_declaration <-  c(
-            "    real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(",
+            "    real nico_LC_MVP_MVOP_GHK_log_lik(",
             "          array[] row_vector u_raw, data int nuisance_transformation, matrix intercept,",
             "          array[] matrix coefficients, data array[,] int coefficient_set_of_class_and_test,",
             paste0("          data array[,] matrix covariates, data array[,] int n_covariates, array[] vector ",
@@ -85,8 +85,7 @@ fn_write_NicoSIMD_one_class_MVOP_Stan_model <-  function(
             paste0("          data array[] int n_categories_of_test, data array[] int test_at_GHK_position, da",
                    "ta int Phi_type,"),
             "          data real overflow_threshold, data real underflow_threshold);",
-            paste0("    real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_",
-                   "subjects("),
+            paste0("    real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("),
             paste0("          matrix u_raw_of_each_test_and_subject, data int first_subject, data int nuisance_t",
                    "ransformation,"),
             paste0("          matrix intercept, array[] matrix coefficients, data array[,] int coefficient_set_o",
@@ -182,7 +181,7 @@ fn_write_NicoSIMD_one_class_MVOP_Stan_model <-  function(
                    "low as comments)"),
             "            ////",
             "            // array[M, n_tests] int category_s = category_of_subject_and_test[start:end];",
-            "            // return nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(",
+            "            // return nico_LC_MVP_MVOP_GHK_log_lik(",
             paste0("            //              u_raw_slice, 1, intercept_of_each_class_and_test, coefficient",
                    "s_of_each_class,"),
             paste0("            //              // set_of_each_class_and_test, covariates_s, n_covs_per_outco",
@@ -196,8 +195,7 @@ fn_write_NicoSIMD_one_class_MVOP_Stan_model <-  function(
                    " test_at_GHK_position,"),
             "            //              Phi_type, overflow_threshold, underflow_threshold);",
             "            matrix[n_tests, M] u_raw_of_each_test_and_subject = to_matrix(u_raw_slice)';",
-            paste0("            return nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_",
-                   "in_tiles_of_subjects("),
+            paste0("            return nico_LC_MVP_MVOP_GHK_log_lik_using_tiles("),
             paste0("                         u_raw_of_each_test_and_subject, start, 1, intercept_of_each_class_",
                    "and_test,"),
             "                         coefficients_of_each_class, set_of_each_class_and_test,",
@@ -407,7 +405,7 @@ fn_write_NicoSIMD_one_class_MVOP_Stan_model <-  function(
       return(list(
             NicoSIMD_Stan_model_file_path = output_path,
             fused_calls = if (fuse_likelihood) {
-                  "nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects"
+                  "nico_LC_MVP_MVOP_GHK_log_lik_using_tiles"
             } else {
                   character(0)
             },

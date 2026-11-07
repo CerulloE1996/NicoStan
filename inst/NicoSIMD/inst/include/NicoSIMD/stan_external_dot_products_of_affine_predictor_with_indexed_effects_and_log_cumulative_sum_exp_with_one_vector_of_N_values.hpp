@@ -11,7 +11,7 @@
 //     eta[i] = X[i] beta + scale z[index[i]],     L[i] = log(exp(offset) + sum_{j <= i} exp(eta[j])),
 //
 // the same value and gradient (up to floating-point rounding) as
-// nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp with the same arguments
+// nico_dot_prod_log_cumul_sum_exp with the same arguments
 // (stan_external_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp.hpp and its
 // overload whose blocks of rows run in parallel, ..._in_parallel_blocks_of_rows.hpp): the partial likelihood of
 // any proportional-hazards model with group effects, and any running total on the log scale of an affine

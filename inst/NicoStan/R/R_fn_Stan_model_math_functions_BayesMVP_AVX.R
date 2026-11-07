@@ -133,8 +133,8 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
                     "          data matrix basis_2,\n",
                     "          matrix weights);"),
               ## (the Bernoulli-logit GLM on x, with each group's intercept alpha[group] and slopes B[group, ])
-              bernoulli_logit_glm_with_coefficients_by_group = paste0(
-                    "    real nico_bernoulli_logit_glm_with_coefficients_by_group_lpmf(array[] int y, matrix x, ",
+              bernoulli_logit_glm_with_coeffs_by_group = paste0(
+                    "    real nico_bernoulli_logit_glm_with_coeffs_by_group_lpmf(array[] int y, matrix x, ",
                     "array[] int group,\n",
                     "                                                                  vector alpha, matrix B);"),
               ordered_logistic_glm = c(
@@ -239,8 +239,8 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
               normal_log_scale = "    real nico_normal_log_scale_lpdf(vector y, real mu, vector log_scale);",
               AR1_recursion = "    vector nico_AR1_recursion(vector shocks, real carry, real a);",
               ## (the GHK log likelihood of a finite mixture of multivariate ordered probit models)
-              finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood = paste0(
-                    "    real nico_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood(\n",
+              LC_MVP_MVOP_GHK_log_lik = paste0(
+                    "    real nico_LC_MVP_MVOP_GHK_log_lik(\n",
                     "          array[] row_vector u_raw, data int nuisance_transformation, matrix intercept,\n",
                     "          array[] matrix coefficients, ",
                     "data array[,] int coefficient_set_of_class_and_test,\n",
@@ -254,9 +254,8 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
                     "          data array[] int n_categories_of_test, data array[] int test_at_GHK_position, ",
                     "data int Phi_type,\n",
                     "          data real overflow_threshold, data real underflow_threshold);"),
-              finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects = paste0(
-                    "      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-                    "log_likelihood_in_tiles_of_subjects(\n",
+              LC_MVP_MVOP_GHK_log_lik_using_tiles = paste0(
+                    "      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(\n",
                     "            matrix u_raw_of_each_test_and_subject,\n",
                     "            data int first_subject,\n",
                     "            data int nuisance_transformation,\n",
@@ -331,12 +330,9 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
               log_cumulative_sum_exp = "    vector nico_log_cumulative_sum_exp(vector x, real log_offset);")
         ## (the GHK log likelihood of the observed results only, one Cholesky factor per pattern of tests done:
         ##  u_raw one value per observed result, or the T x M matrix)
-        name_of_the_GHK_of_the_observed_results <-  paste0(
-              "finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_",
-              "of_the_observed_results_in_tiles_of_subjects")
-        fused_distribution_declarations[[name_of_the_GHK_of_the_observed_results]] <-  c(
-              paste0("      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-                     "log_likelihood_of_the_observed_results_in_tiles_of_subjects(\n",
+        fused_distribution_declarations$LC_MVP_MVOP_GHK_log_lik_using_tiles <-  c(
+              fused_distribution_declarations$LC_MVP_MVOP_GHK_log_lik_using_tiles,
+              paste0("      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(\n",
                      "            vector u_raw_of_each_observed_result,\n",
                      "            data int first_subject,\n",
                      "            data int nuisance_transformation,\n",
@@ -359,8 +355,7 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
                      "            data int Phi_type,\n",
                      "            data real overflow_threshold,\n",
                      "            data real underflow_threshold);"),
-              paste0("      real nico_finite_mixture_of_multivariate_ordered_probit_GHK_",
-                     "log_likelihood_of_the_observed_results_in_tiles_of_subjects(\n",
+              paste0("      real nico_LC_MVP_MVOP_GHK_log_lik_using_tiles(\n",
                      "            matrix u_raw_of_each_observed_result,\n",
                      "            data int first_subject,\n",
                      "            data int nuisance_transformation,\n",
@@ -476,7 +471,7 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
               bernoulli_logit_glm = list(n_arguments = 4, declaration_suffix = "_lpmf"),
               bernoulli_logit_glm_with_a_tensor_product_basis = list(n_arguments = 7,
                                                                     declaration_suffix = "_lpmf"),
-              bernoulli_logit_glm_with_coefficients_by_group = list(n_arguments = 5,
+              bernoulli_logit_glm_with_coeffs_by_group = list(n_arguments = 5,
                                                                    declaration_suffix = "_lpmf"),
               ordered_logistic = list(n_arguments = 3, declaration_suffix = "_lpmf"),
               ordered_logistic_glm = list(n_arguments = 4, declaration_suffix = "_lpmf"),
@@ -537,7 +532,7 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
                                             "and_bernoulli_logit_glm_by_group.hpp"),
               weibull_log_glm      = paste0("stan_external_fused_student_t_id_glm_weibull_log_glm_",
                                             "and_bernoulli_logit_glm_by_group.hpp"),
-              bernoulli_logit_glm_with_coefficients_by_group = paste0(
+              bernoulli_logit_glm_with_coeffs_by_group = paste0(
                     "stan_external_fused_student_t_id_glm_weibull_log_glm_",
                     "and_bernoulli_logit_glm_by_group.hpp"),
               binomial             = "stan_external_binomial_lpmf.hpp",
@@ -545,9 +540,9 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
               log_sum_exp_2d       = "stan_external_log_sum_exp_with_nico_exponential.hpp",
               normal_log_scale     = "stan_external_fused_normal_log_scale_lpdf.hpp",
               AR1_recursion        = "stan_external_AR1_path.hpp",
-              finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood = paste0(
+              LC_MVP_MVOP_GHK_log_lik = paste0(
                     "stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood.hpp"),
-              finite_mixture_of_multivariate_ordered_probit_GHK_log_likelihood_in_tiles_of_subjects = paste0(
+              LC_MVP_MVOP_GHK_log_lik_using_tiles = paste0(
                     "stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_",
                     "log_likelihood_in_tiles_of_subjects.hpp"),
               sum_of_exponentials_by_group = "stan_external_sum_of_exponentials_by_group.hpp",
@@ -569,9 +564,6 @@ fn_BayesMVP_AVX_functions_and_their_Stan_declarations <-  function() {
               dot_products_of_affine_predictor_and_log_cumulative_sum_exp =
                     "stan_external_fused_affine_compositions.hpp",
               log_cumulative_sum_exp = "stan_external_log_cumulative_sum_exp.hpp")
-        fused_distribution_BayesMVP_header_files[[name_of_the_GHK_of_the_observed_results]] <-  paste0(
-              "stan_external_finite_mixture_of_multivariate_ordered_probit_GHK_",
-              "log_likelihood_in_tiles_of_subjects.hpp")
         ##
         return(list( elementwise_functions                     = elementwise_functions,
                      elementwise_function_argument_types       = elementwise_function_argument_types,

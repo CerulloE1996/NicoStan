@@ -2,7 +2,7 @@
 // hand-written BayesMVP AVX version of
 // shared_frailty_Cox_survival_direct_sliced_shared_offsets_one_fused_node_with_indexed_frailties_when_unchunked
 // (the same model, the same log density), with the whole partial likelihood ONE node at EVERY number of chunks:
-// BayesMVP's general nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp, with
+// BayesMVP's general nico_dot_prod_log_cumul_sum_exp, with
 // its last argument rows_per_block_run_in_parallel = chunk_size
 // (stan_external_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp_in_parallel_
 // blocks_of_rows.hpp): the observations in decreasing order of time are split into N_blocks blocks of chunk_size
@@ -29,7 +29,7 @@
 // shared_frailty_Cox_survival_direct_sliced_shared_offsets_one_fused_node_with_indexed_frailties_when_unchunked:
 // the hand-written BayesMVP AVX version of shared_frailty_Cox_survival_direct_sliced_shared_offsets (the same
 // model, the same log density), but with one block (N_chunks = 1) the whole partial likelihood is ONE node,
-// BayesMVP's general nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp: the
+// BayesMVP's general nico_dot_prod_log_cumul_sum_exp: the
 // raw log frailties are read by their group inside the node (no vector of N raw log frailties on the main tape,
 // no reduce_sum, one partial per group), with BayesMVP's exp and log kernels and SIMD scans. With more blocks,
 // the version it comes from, unchanged. Its Stan math library is that of
@@ -184,12 +184,12 @@
 // original model (the numerator, then log_sum_exp over its risk set, in the order j = 1, ..., N).
 
 functions {
-    real nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+    real nico_dot_prod_log_cumul_sum_exp(
         data vector linear_weights, data vector prefix_weights, data matrix X, vector beta, real scale,
         array[] real z, data array[] int index, data array[] int rows_in_order_of_index,
         data array[] int last_position_of_each_index, real log_offset);
     // (the same, with its blocks of rows_per_block_run_in_parallel rows run in parallel on the chain's threads)
-    real nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+    real nico_dot_prod_log_cumul_sum_exp(
         data vector linear_weights, data vector prefix_weights, data matrix X, vector beta, real scale,
         array[] real z, data array[] int index, data array[] int rows_in_order_of_index,
         data array[] int last_position_of_each_index, real log_offset,
@@ -229,7 +229,7 @@ functions {
     // call, so that the calls stop. The values are those of the scalar log_sum_exp recursion up to
     // floating-point rounding.
     vector nico_log_cumulative_sum_exp(vector x, real log_offset);
-    real nico_dot_product_log_cumulative_sum_exp(vector w, vector x, real log_offset);
+    real nico_dot_prod_log_cumul_sum_exp(vector w, vector x, real log_offset);
     real nico_dot_products_of_affine_predictor_and_log_cumulative_sum_exp(
         vector linear_weights, vector prefix_weights, data matrix x, vector beta,
         real scale, vector z, real log_offset);
@@ -345,7 +345,7 @@ functions {
         // lp -= weighted_sum_of_log_cumulative_sum_exp(w_decreasing_time[first:last], eta, log_offset);
         // (the same values, with BayesMVP's log_cumulative_sum_exp: one autodiff step for the whole vector)
         // lp -= dot_product(w_decreasing_time[first:last], nico_log_cumulative_sum_exp(eta, log_offset));
-        // lp -= nico_dot_product_log_cumulative_sum_exp(w_decreasing_time[first:last], eta, log_offset);
+        // lp -= nico_dot_prod_log_cumul_sum_exp(w_decreasing_time[first:last], eta, log_offset);
         lp = nico_dot_products_of_affine_predictor_and_log_cumulative_sum_exp(
             event_decreasing_time[first:last], -w_decreasing_time[first:last],
             X_decreasing_time[first:last], beta, sigma_frailty, log_frailty_raw_of_slice, log_offset);
@@ -906,7 +906,7 @@ model {
     // if (N > 0 && N_blocks == 1) {
     //   // (one block: the whole partial likelihood in ONE node, the raw log frailties read by their group inside
     //   //  it)
-    //   target += nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+    //   target += nico_dot_prod_log_cumul_sum_exp(
     //       event_decreasing_time, minus_w_decreasing_time, X_decreasing_time, beta, sigma_frailty,
     //       log_frailty_raw, group_decreasing_time, rows_in_order_of_group, last_position_of_each_group,
     //       negative_infinity());
@@ -984,7 +984,7 @@ model {
     // (now: the whole partial likelihood ONE node at every number of blocks, its blocks of chunk_size positions
     //  run in parallel on the chain's threads, the two-level scan of the risk sets inside it; see the header)
     if (N > 0) {
-      target += nico_dot_products_of_affine_predictor_with_indexed_effects_and_log_cumulative_sum_exp(
+      target += nico_dot_prod_log_cumul_sum_exp(
           event_decreasing_time, minus_w_decreasing_time, X_decreasing_time, beta, sigma_frailty,
           log_frailty_raw, group_decreasing_time, rows_in_order_of_group, last_position_of_each_group,
           negative_infinity(), chunk_size);
