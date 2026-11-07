@@ -81,9 +81,9 @@ nico_lognormal_lpdf(const T_y& y,
     y_ref_t y_ref = y;
     mu_ref_t mu_ref = mu;
     sigma_ref_t sigma_ref = sigma;
-    decltype(auto) y_value = stan::math::to_ref(stan::math::as_value_column_array_or_scalar(y_ref));
-    decltype(auto) mu_value = stan::math::to_ref(stan::math::as_value_column_array_or_scalar(mu_ref));
-    decltype(auto) sigma_value = stan::math::to_ref(stan::math::as_value_column_array_or_scalar(sigma_ref));
+    const auto y_value = stan::math::as_value_column_array_or_scalar(y_ref);
+    const auto mu_value = stan::math::as_value_column_array_or_scalar(mu_ref);
+    const auto sigma_value = stan::math::as_value_column_array_or_scalar(sigma_ref);
 
     stan::math::check_nonnegative(function, "Random variable", y_value);
     stan::math::check_finite(function, "Location parameter", mu_value);
