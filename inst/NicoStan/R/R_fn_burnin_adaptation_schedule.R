@@ -121,12 +121,12 @@ fn_burnin_adaptation_schedule <-  function( n_burnin,
                     
                 }
                 ##
-                if (is.null(x = clip_iter)) clip_iter <-  max(1, min(fn_scale_ramp_boundary(reference_iterations = c(20, 50, 75, 150)),
+                if (is.null(x = clip_iter)) clip_iter <-  max(1, min(fn_scale_ramp_boundary(reference_iterations = c(20, 50, 70, 150)),
                                                                    metric_adaptation_end_iter - 1,
                                                                    if (theta_hat_us_rule == "running_mean_frozen") theta_hat_us_freeze_iter - 1 else Inf))
                 ##
                 if (is.null(x = clip_iter_tau)) clip_iter_tau <-  max(clip_iter + 1, min(n_adapt - 1,
-                                                                     fn_scale_ramp_boundary(reference_iterations = c(50, 125, 175, 350))))
+                                                                     fn_scale_ramp_boundary(reference_iterations = c(50, 125, 200, 350))))
                 ##
                 clip_iter <-  fn_check_iteration( value = clip_iter,
                                                   name = "clip_iter", 
