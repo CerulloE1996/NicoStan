@@ -49,7 +49,18 @@ nico_lkj_corr_cholesky_lpdf(const Eigen::Matrix<T_L, Eigen::Dynamic, Eigen::Dyna
                   "The factor must contain arithmetic or reverse-mode scalars.");
     static constexpr const char* function = "lkj_corr_cholesky_lpdf";
     stan::math::check_positive(function, "Shape parameter", eta);
-    stan::math::check_cholesky_factor(function, "Random variable", L);
+    //// Stan's checks of a Cholesky factor, read on the values where they are; Stan's own check (which copies the
+    //// factor) runs only to throw its own error
+    bool a_cholesky_factor = L.cols() <= L.rows() && L.cols() > 0;
+    for (Eigen::Index n = 1; n < L.cols() && a_cholesky_factor; ++n) {
+        for (Eigen::Index m = 0; m < n && m < L.rows(); ++m) {
+            if (stan::math::value_of_rec(L.coeff(m, n)) != 0) a_cholesky_factor = false;
+        }
+    }
+    for (Eigen::Index k = 0; k < L.cols() && a_cholesky_factor; ++k) {
+        if (!(stan::math::value_of_rec(L.coeff(k, k)) > 0)) a_cholesky_factor = false;
+    }
+    if (!a_cholesky_factor) stan::math::check_cholesky_factor(function, "Random variable", L);
     const unsigned int K = L.rows();
     if (K == 0) return 0.0;
 
