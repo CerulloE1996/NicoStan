@@ -36,7 +36,7 @@ initialise_model <- function( Model_type,
                               Stan_cpp_flags = NULL,
                               stanc_args = NULL,
                               make_args = NULL,
-                              auto_chunking = TRUE,
+                              auto_chunking = FALSE,
                               ##
                               Stan_model_math_functions = "Stan_math",
                               BayesMVP_AVX_headers_folder = NULL

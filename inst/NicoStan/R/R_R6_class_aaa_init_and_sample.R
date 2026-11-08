@@ -132,7 +132,7 @@ MVP_model <- R6Class("MVP_model",
                           stanc_args = NULL,
                           #'@field make_args C++/make arguments used to compile the generated C++ of the Stan model (e.g. list("STAN_THREADS=true")); distinct from stanc_args.
                           make_args = NULL,
-                          #'@field auto_chunking TRUE (the default): AUTO-CHUNKING of the model's own Stan file; FALSE: off
+                          #'@field auto_chunking FALSE (default): off; TRUE: auto-chunking of the model's own Stan file.
                           auto_chunking = NULL,
                           #'@field Stan_cpp_user_header User C++ header file path
                           Stan_cpp_user_header = NULL,
@@ -373,7 +373,7 @@ MVP_model <- R6Class("MVP_model",
                                                 Stan_cpp_flags = NULL,
                                                 stanc_args = NULL,
                                                 make_args = NULL,
-                                                auto_chunking = TRUE,
+                                                auto_chunking = FALSE,
                                                 ##
                                                 Stan_model_math_functions = "Stan_math",
                                                 BayesMVP_AVX_headers_folder = NULL,
