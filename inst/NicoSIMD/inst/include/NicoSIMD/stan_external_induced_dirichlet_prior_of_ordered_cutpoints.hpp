@@ -138,18 +138,19 @@ inline bool forward_pass(const double* x, const double* alpha, const int link, c
 
 // ---- the reverse pass of one set: d / d x_k (adjoint: the node's adjoint), from the forward pass's buffers, with
 //      f(x_k) / p_j = exp(log f(x_k) - log p_j) (the SIMD exp kernel), so that a tiny p_j never divides 0 by 0:
-//          d / d x_k = (alpha_k - 1) f(x_k) / p_k - (alpha_(k+1) - 1) f(x_k) / p_(k+1) + d / d x_k log f(x_k).
+//          d / d x_k = (alpha_k - 1) f(x_k) / p_k - (alpha_(k+1) - 1) f(x_k) / p_(k+1) + d / d x_k log f(x_k);
+//      ratio_to_own_category and ratio_to_next_category: K values of work space each, made once by the caller.
 inline void reverse_pass(const double* x, const double* alpha, const int link, const int K, const double* lF,
-                         const double* lS, const double* log_p, const double adjoint, double* d_x) {
+                         const double* lS, const double* log_p, const double adjoint, double* d_x,
+                         double* ratio_to_own_category, double* ratio_to_next_category) {
 
-    std::vector<double> ratio_to_own_category(K), ratio_to_next_category(K);
     for (int k = 0; k < K; ++k) {
         const double log_f = (link == 1) ? (-0.5 * x[k] * x[k] - half_log_of_two_pi) : (lF[k] + lS[k]);
         ratio_to_own_category[k] = log_f - log_p[k];
         ratio_to_next_category[k] = log_f - log_p[k + 1];
     }
-    k_exp(ratio_to_own_category.data(), K);
-    k_exp(ratio_to_next_category.data(), K);
+    k_exp(ratio_to_own_category, K);
+    k_exp(ratio_to_next_category, K);
     for (int k = 0; k < K; ++k) {
         double d_F = 0.0;
         if (alpha[k] != 1.0) d_F += (alpha[k] - 1.0) * ratio_to_own_category[k];
@@ -206,12 +207,13 @@ inline stan::return_type_t<T_C, T_alpha> nico_induced_dirichlet_prior_of_ordered
     const auto& C_ref = stan::math::to_ref(C);
     const auto& alpha_ref = stan::math::to_ref(alpha);
     //// (the buffers: x = C - location (row by row), alpha, F (log F), p (log(1 - F)) and log p of every set, kept for the reverse
-    ////  pass on the arena when there is one (J_terms for the forward pass only, its space reused for d_x); in a
-    ////  std::vector when nothing is differentiated, so that no evaluation of the log density alone leaves
-    ////  memory on the arena)
+    ////  pass on the arena when there is one (J_terms for the forward pass only, its space reused for d_x), then
+    ////  the reverse pass's two K-value work spaces, used by each set in turn; in a std::vector when nothing is
+    ////  differentiated, so that no evaluation of the log density alone leaves memory on the arena)
     const std::size_t RK = static_cast<std::size_t>(R) * K;
     const std::size_t n_buffer_values = 3 * RK + (K + 1) + static_cast<std::size_t>(R) * (K + 1) +
-                                        static_cast<std::size_t>(R) * (2 * K + 1);
+                                        static_cast<std::size_t>(R) * (2 * K + 1) +
+                                        2 * static_cast<std::size_t>(K);
     std::vector<double> buffer_without_autodiff;
     double* buffers = nullptr;
     if constexpr (C_is_constant && alpha_is_constant) {
@@ -226,6 +228,7 @@ inline stan::return_type_t<T_C, T_alpha> nico_induced_dirichlet_prior_of_ordered
     double* p = F + RK;
     double* log_p = p + static_cast<std::size_t>(R) * (K + 1);
     double* J_terms = log_p + static_cast<std::size_t>(R) * (2 * K + 1);
+    double* ratios = J_terms + RK;
     for (int r = 0; r < R; ++r) {
         for (int k = 0; k < K; ++k) {
             const double value_of_C = C_is_one_set ? stan::math::value_of(C_ref.coeff(k))
@@ -273,14 +276,15 @@ inline stan::return_type_t<T_C, T_alpha> nico_induced_dirichlet_prior_of_ordered
         if constexpr (!C_is_constant) C_vars = C_ref;
         if constexpr (!alpha_is_constant) alpha_vars = alpha_ref;
         return stan::math::make_callback_var(sum, [C_vars, alpha_vars, x, alpha_kept, link, R, K, F, p, log_p,
-                                                   J_terms](auto& vi) mutable {
+                                                   J_terms, ratios](auto& vi) mutable {
             if constexpr (!C_is_constant) {
                 for (int r = 0; r < R; ++r) {
                     double* d_x = J_terms + static_cast<std::size_t>(r) * K;
                     prior::reverse_pass(x + static_cast<std::size_t>(r) * K, alpha_kept, link, K,
                                         F + static_cast<std::size_t>(r) * K,
                                         p + static_cast<std::size_t>(r) * (K + 1),
-                                        log_p + static_cast<std::size_t>(r) * (2 * K + 1), vi.adj(), d_x);
+                                        log_p + static_cast<std::size_t>(r) * (2 * K + 1), vi.adj(), d_x,
+                                        ratios, ratios + K);
                     for (int k = 0; k < K; ++k) {
                         if constexpr (C_is_one_set) {
                             C_vars.coeffRef(k).adj() += d_x[k];
