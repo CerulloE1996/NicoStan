@@ -22,13 +22,11 @@ R_fn_read_Stan_source_with_includes <-  function( model_file,
             protected <-  "\"(?:[^\"\\\\]|\\\\.)*\"|/\\*[\\s\\S]*?\\*/|//[^\\n]*"
             matches <-  gregexpr(protected, code, perl = TRUE)[[1]]
             if (matches[1] > 0) {
-                  lengths <-  attr(matches, "match.length")
-                  for (index in seq_along(matches)) {
-                        first <-  matches[index]
-                        last <-  first + lengths[index] - 1
-                        original <-  substr(visible, first, last)
-                        substr(visible, first, last) <-  gsub("[^\n]", " ", original, perl = TRUE)
-                  }
+                  characters <-  strsplit(visible, "")[[1]]
+                  inside <-  sequence(attr(matches, "match.length"), from = matches)
+                  inside <-  inside[characters[inside] != "\n"]
+                  characters[inside] <-  " "
+                  visible <-  paste(characters, collapse = "")
             }
             matches <-  gregexpr("(?m)^[ \t]*#include[ \t]+[^\n]*", visible, perl = TRUE)[[1]]
             if (matches[1] < 0) return(code)
@@ -63,16 +61,14 @@ R_fn_read_Stan_source_with_includes <-  function( model_file,
 R_fn_Stan_parallel_call_names <-  function(code) {
 
       ## Comments and strings retain their text; only actual call names are translated before stanc.
+      if (!grepl("nico_(?:map_rect|reduce_sum_static)", code, perl = TRUE)) return(code)
       protected_pattern <-  "\"(?:[^\"\\\\]|\\\\.)*\"|/\\*[\\s\\S]*?\\*/|//[^\\n]*"
       protected_matches <-  gregexpr(pattern = protected_pattern, text = code, perl = TRUE)[[1]]
       visible <-  code
       if (protected_matches[1] > 0) {
-            lengths <-  attr(protected_matches, "match.length")
-            for (index in seq_along(protected_matches)) {
-                  first <-  protected_matches[index]
-                  last <-  first + lengths[index] - 1
-                  substr(visible, first, last) <-  strrep(" ", lengths[index])
-            }
+            characters <-  strsplit(visible, "")[[1]]
+            characters[sequence(attr(protected_matches, "match.length"), from = protected_matches)] <-  " "
+            visible <-  paste(characters, collapse = "")
       }
       calls <-  gregexpr(pattern = "\\bnico_(?:map_rect|reduce_sum_static)\\s*(?=\\()",
                          text = visible, perl = TRUE)[[1]]
