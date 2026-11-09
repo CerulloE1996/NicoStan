@@ -3,6 +3,7 @@
 
 #include "stan_external_functions.hpp"
 #include "stan_external_scalar_functions.hpp"
+#include "stan_external_hyperbolic_functions.hpp"
 #include "stan_external_lognormal_lpdf.hpp"
 //
 // (lub_constrain of a matrix of vars on the NicoSIMD kernels: only when NICOSIMD_SIMD_LUB_CONSTRAIN is defined)
