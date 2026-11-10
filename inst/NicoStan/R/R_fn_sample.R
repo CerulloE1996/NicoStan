@@ -737,11 +737,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         budget_of_the_layout_choice_in_lp_grad_calls = 2000,
                                         fewest_seconds_of_the_budget_of_the_layout_choice = 0.5,
                                         rate_criterion_cost_offset_steps = 0,
-                                        pooled_metric_warm_up = 8,
+                                        pooled_metric_warm_up = 16,
                                         pooled_metric_soft_full_weight_draws = NULL,
                                         pooled_metric_weight_k_draws = 5,
                                         pooled_metric_signal_to_noise_centred = FALSE,
-                                        metric_update_rescales_eps_and_tau = FALSE,
+                                        metric_update_rescales_eps_and_tau = TRUE,
                                         metric_update_rescales_tau = TRUE,
                                         initial_eps_search_at_each_chain = FALSE,
                                         restart_stuck_chains_in_burnin = FALSE,
@@ -1536,13 +1536,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
 
                 tau_weight_by_p_jump <- if_null_then_set_to(tau_weight_by_p_jump, TRUE)
                 tau_ramp <- if_null_then_set_to(tau_ramp, "original")
-                eps_reinit_at_ChEES_handover <- if_null_then_set_to(eps_reinit_at_ChEES_handover, TRUE)
+                eps_reinit_at_ChEES_handover <- if_null_then_set_to(eps_reinit_at_ChEES_handover, FALSE)
                 eps_acceptance_mean <- if_null_then_set_to(eps_acceptance_mean, "harmonic")
                 eps_reinit_after_pre_burnin <- if_null_then_set_to(eps_reinit_after_pre_burnin, TRUE)
                 tau_shrink_on_divergence        <- if_null_then_set_to(tau_shrink_on_divergence, FALSE)
                 tau_shrink_factor               <- if_null_then_set_to(tau_shrink_factor, 0.95)
                 tau_shrink_min_divergent_chains <- if_null_then_set_to(tau_shrink_min_divergent_chains, 2)
-                share_tau_ii_across_chains_in_burnin <- isTRUE(if_null_then_set_to(share_tau_ii_across_chains_in_burnin, FALSE))
+                share_tau_ii_across_chains_in_burnin <- isTRUE(if_null_then_set_to(share_tau_ii_across_chains_in_burnin, TRUE))
                 for (flag in c("randomize_tau_burnin", "randomize_tau_sampling")) {
                     value <-  get(flag)
                     if (!is.logical(value) || length(value) != 1L || is.na(value)) {

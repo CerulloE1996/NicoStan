@@ -117,7 +117,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ##           ADAM moments. The long-standing behaviour.
                                            ##   FALSE - keep the eps (and its ADAM moments) adapted up to gap. tau
                                            ##           is reset either way.
-                                           eps_reinit_at_ChEES_handover = TRUE,
+                                           eps_reinit_at_ChEES_handover = FALSE,
                                            ##
                                            ## Cross-chain mean of the per-chain acceptance probabilities that the
                                            ## eps (step-size) ADAM update targets to adapt_delta (see
@@ -207,7 +207,7 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            ## each chain's momentum stays its own). Iterations then stop waiting
                                            ## for whichever chain drew the longest trajectory. FALSE = per-chain
                                            ## tau_ii (as before).
-                                           share_tau_ii_across_chains_in_burnin = FALSE,
+                                           share_tau_ii_across_chains_in_burnin = TRUE,
                                            randomize_tau_burnin,
                                            tau_gradient_estimator,
                                            tau_cost_exponent,
@@ -450,11 +450,11 @@ init_and_run_burnin_ChESSR   <- function(  debug,
                                            eps_adam_reset_at_metric_end = TRUE,
                                            eps_learning_rate_restart_at_metric_end = TRUE,
                                            rate_criterion_cost_offset_steps = 0,
-                                           pooled_metric_warm_up = 8,
+                                           pooled_metric_warm_up = 16,
                                            pooled_metric_soft_full_weight_draws = NULL,
                                            pooled_metric_weight_k_draws = 5,
                                            pooled_metric_signal_to_noise_centred = FALSE,
-                                           metric_update_rescales_eps_and_tau = FALSE,
+                                           metric_update_rescales_eps_and_tau = TRUE,
                                            metric_update_rescales_tau = TRUE,
                                            initial_eps_search_at_each_chain = FALSE,
                                            restart_stuck_chains_in_burnin = FALSE,
