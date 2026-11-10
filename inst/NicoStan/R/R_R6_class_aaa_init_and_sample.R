@@ -1319,7 +1319,7 @@ MVP_model <- R6Class("MVP_model",
                                               calibrate_eps_on_sampling_chains_before_sampling = TRUE,
                                               n_transitions_per_eps_calibration_block = 300,
                                               n_eps_calibration_blocks = 4,
-                                              max_n_iter_of_eps_calibration_call = 50,
+                                              max_n_iter_of_eps_calibration_call = 10,
                                               repeat_sampling_with_eps_refitted_if_mean_acceptance_outside = NULL,
                                               n_eps_refits_and_repeated_samplings = 2,
                                               set_sampling_eps_to_adapt_delta_from_acceptance_of_burnin_chains =

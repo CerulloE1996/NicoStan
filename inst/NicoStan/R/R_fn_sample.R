@@ -725,7 +725,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                                         calibrate_eps_on_sampling_chains_before_sampling = TRUE,
                                         n_transitions_per_eps_calibration_block = 300,
                                         n_eps_calibration_blocks = 4,
-                                        max_n_iter_of_eps_calibration_call = 50,
+                                        max_n_iter_of_eps_calibration_call = 10,
                                         ## (NULL: never; c(lower, upper): see the documentation)
                                         repeat_sampling_with_eps_refitted_if_mean_acceptance_outside = NULL,
                                         n_eps_refits_and_repeated_samplings = 2,
