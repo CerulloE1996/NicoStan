@@ -42,6 +42,9 @@
 //  precision for the generated quantities: MetaOrdDTA's compute_log_lik_binomial_fact_data and
 //  map_latent_surv_to_random_hetero_C)
 #include "stan_external_factorised_binomial_log_lik_of_ordinal_test_accuracy_data.hpp"
+//
+// (Sean Pinkney partially-centered study cutpoints and total log-Jacobian from unique cutpoint pairs)
+#include "stan_external_pinkney_partially_centered_cutpoints.hpp"
 
 // ---- the headers that BayesMVP's stan_external_functions.hpp does not include: a model that uses one of their
 //      functions includes it in its own user header, after this file, as its BayesMVP version does now
