@@ -8,7 +8,8 @@
 #include <complex>
 
 #include <map>
-#include <vector>  
+#include <vector>
+#include <mutex>
 #include <string> 
 #include <stdexcept>
 #include <stdio.h>
@@ -44,11 +45,14 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
     const int n_threads;
     const std::vector<Eigen::Matrix<double, -1, -1>> &unc_params_trace_input_main;
     const std::vector<Eigen::Matrix<double, -1, -1>> &unc_params_trace_input_nuisance;
+    const std::vector<int> &pars_indicies_to_track;
     const int n_params_full;
     const int n_params_main;
     const int n_nuisance;
     const std::string model_so_file;
     const std::string json_file_path;
+    const bool include_tp;
+    const bool include_gq;
     
     //// Disk mode
     const bool use_disk;
@@ -66,6 +70,7 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
     ParamConstrainWorker( const int &n_threads_R_,
                           const std::vector<Eigen::Matrix<double, -1, -1>> &unc_params_trace_input_main_,
                           const std::vector<Eigen::Matrix<double, -1, -1>> &unc_params_trace_input_nuisance_,
+                          const std::vector<int> &pars_indicies_to_track_,
                           const int &n_params_full_,
                           const int &n_params_main_,
                           const int &n_nuisance_,
@@ -73,16 +78,21 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
                           const std::string &json_file_path_,
                           std::vector<Eigen::Matrix<double, -1, -1>> &all_param_outs_trace_,
                           const bool use_disk_,
-                          const std::string& trace_dir_)
+                          const std::string& trace_dir_,
+                          const bool include_tp_ = true,
+                          const bool include_gq_ = true)
       :
       n_threads(n_threads_R_),
       unc_params_trace_input_main(unc_params_trace_input_main_),
       unc_params_trace_input_nuisance(unc_params_trace_input_nuisance_),
+      pars_indicies_to_track(pars_indicies_to_track_),
       n_params_full(n_params_full_),
       n_params_main(n_params_main_),
       n_nuisance(n_nuisance_),
       model_so_file(model_so_file_),
       json_file_path(json_file_path_),
+      include_tp(include_tp_),
+      include_gq(include_gq_),
       all_param_outs_trace_ptr(&all_param_outs_trace_),
       use_disk(use_disk_),
       trace_dir(trace_dir_)
@@ -116,11 +126,20 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
               char* error_msg = nullptr;
         
               // Thread-local model instance
-              bs_model* local_model = shared_Stan_model.bs_model_construct(json_file_path.c_str(),
-                                                                           123,
-                                                                           &error_msg);
-              
-              const int n_iter = unc_params_trace_input_main[0].cols();
+              static std::mutex bs_construct_mutex;
+              bs_model* local_model = nullptr;
+              {
+                std::lock_guard<std::mutex> guard(bs_construct_mutex);
+                local_model = shared_Stan_model.bs_model_construct(json_file_path.c_str(),
+                                                                   123,
+                                                                   &error_msg);
+              }
+
+              const int n_iter = unc_params_trace_input_main[kk].cols();
+              const int n_tracked = static_cast<int>(pars_indicies_to_track.size());
+              if (!use_disk) {
+                (*all_param_outs_trace_ptr)[kk].resize(n_tracked, n_iter);
+              }
               
               // std::cout << "B: chain=" << kk << " n_iter=" << n_iter 
               //           << " n_params_full=" << n_params_full 
@@ -171,7 +190,7 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
                 
                         // std::cout << "C: iter=" << ii << std::flush;
                 
-                        theta_constrain_full_output.setZero();
+                        // bs_param_constrain overwrites all requested outputs
                 
                         // // Get the column for this iteration from this chain's matrix
                         // theta_unc_input = unc_params_trace_input_main[kk].col(ii);
@@ -200,22 +219,19 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
                           theta_unc_input(n_nuisance + p) = unc_params_trace_input_main[kk](p, ii);
                         }
                         
-                        // Use SHARED model pointer
                         int result = shared_Stan_model.bs_param_constrain(  local_model,
-                                                                            true,
-                                                                            true,
+                                                                            include_tp,
+                                                                            include_gq,
                                                                             theta_unc_input.data(),
-                                                                            theta_constrain_full_output.data(), 
+                                                                            theta_constrain_full_output.data(),
                                                                             bs_rng_object,
                                                                             &error_msg);
-                        
-                        // if (ii % 500 == 0) std::cout <<  "D: constrain done" << std::flush;
-                        
+
                         if (result != 0) {
-                          throw std::runtime_error("Constraint computation failed: " + 
+                          throw std::runtime_error("Constraint computation failed: " +
                                                    std::string(error_msg ? error_msg : "Unknown error"));
                         }
-                        
+
                         if (use_disk) {
                             for (int p = 0; p < n_params_full; ++p) {
                               tracked_params(p) = theta_constrain_full_output(p);
@@ -224,12 +240,9 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
                               reinterpret_cast<const char*>(tracked_params.data()),
                               n_params_full * sizeof(double));
                         } else {
-                            // for (int p = 0; p < n_params_full; ++p) {
-                            //   all_param_outs_trace[kk](p, ii) = theta_constrain_full_output(p);
-                            // }
-                            // Use pointer dereference
-                            for (int p = 0; p < n_params_full; ++p) {
-                              (*all_param_outs_trace_ptr)[kk](p, ii) = theta_constrain_full_output(p);
+                            double* col_ptr = (*all_param_outs_trace_ptr)[kk].col(ii).data();
+                            for (int t = 0; t < n_tracked; ++t) {
+                              col_ptr[t] = theta_constrain_full_output(pars_indicies_to_track[t]);
                             }
                         }
                         
@@ -251,6 +264,7 @@ struct ParamConstrainWorker : public RcppParallel::Worker {
               
               // Clean up thread-local model
               if (local_model != nullptr) {
+                std::lock_guard<std::mutex> guard(bs_construct_mutex);
                 shared_Stan_model.bs_model_destruct(local_model);
               }
               

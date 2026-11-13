@@ -57,6 +57,10 @@ Rcpp_compute_MCMC_diagnostics <- function(mcmc_3D_array, diagnostic, n_threads) 
     .Call(`_NicoStan_Rcpp_compute_MCMC_diagnostics`, mcmc_3D_array, diagnostic, n_threads)
 }
 
+Rcpp_compute_all_summaries <- function(trace, n_rows_trace, n_params, n_iter, n_chains, n_threads) {
+    .Call(`_NicoStan_Rcpp_compute_all_summaries`, trace, n_rows_trace, n_params, n_iter, n_chains, n_threads)
+}
+
 detect_vectorization_support <- function() {
     .Call(`_NicoStan_detect_vectorization_support`)
 }
@@ -133,8 +137,8 @@ Rcpp_shrink_matrix <- function(mat, shrinkage_factor) {
     .Call(`_NicoStan_Rcpp_shrink_matrix`, mat, shrinkage_factor)
 }
 
-fn_compute_param_constrain_from_trace_parallel <- function(unc_params_trace_input_main, unc_params_trace_input_nuisance, pars_indicies_to_track, n_params_full, n_params_main, n_nuisance, model_so_file, json_file_path, use_disk = FALSE, trace_dir = "/tmp/constrain_traces") {
-    .Call(`_NicoStan_fn_compute_param_constrain_from_trace_parallel`, unc_params_trace_input_main, unc_params_trace_input_nuisance, pars_indicies_to_track, n_params_full, n_params_main, n_nuisance, model_so_file, json_file_path, use_disk, trace_dir)
+fn_compute_param_constrain_from_trace_parallel <- function(unc_params_trace_input_main, unc_params_trace_input_nuisance, pars_indicies_to_track, n_params_full, n_params_main, n_nuisance, model_so_file, json_file_path, use_disk = FALSE, trace_dir = "/tmp/constrain_traces", include_tp = TRUE, include_gq = TRUE) {
+    .Call(`_NicoStan_fn_compute_param_constrain_from_trace_parallel`, unc_params_trace_input_main, unc_params_trace_input_nuisance, pars_indicies_to_track, n_params_full, n_params_main, n_nuisance, model_so_file, json_file_path, use_disk, trace_dir, include_tp, include_gq)
 }
 
 fn_compute_param_constrain_from_trace_v2 <- function(unc_params_trace_input_main, n_params_full, n_params_main, include_nuisance, model_so_file, json_file_path) {

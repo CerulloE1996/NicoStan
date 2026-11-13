@@ -1124,17 +1124,42 @@ create_summary_and_traces <- function(    model_results,
                            }
                      }
                      ##
+                     has_leading_lp <- identical(model_results$init_object$stan_main_param_names[1], "lp__")
+                     if (!has_leading_lp) {
+                           rows_needed_1based <- sort(unique(as.integer(c(
+                                 if (isTRUE(compute_main_params)) index_params_main else integer(0),
+                                 if (isTRUE(compute_transformed_parameters) && length(index_tp_wo_log_lik) > 0L) index_tp_wo_log_lik else integer(0),
+                                 if (isTRUE(compute_generated_quantities) && length(index_gq) > 0L) index_gq else integer(0),
+                                 if (isTRUE(save_log_lik_trace) && identical(Model_type, "Stan") && length(index_log_lik) > 0L) index_log_lik else integer(0)
+                           ))))
+                           need_tp_constrain <- any(rows_needed_1based > n_params & rows_needed_1based <= n_params_inc_tp)
+                           need_gq_constrain <- any(rows_needed_1based > n_params_inc_tp)
+                           n_tp_block <- n_params_inc_tp - n_params
+                           n_gq_block <- n_params_inc_tp_and_gq - n_params_inc_tp
+                           constrain_out_len <- as.integer(n_params + (if (need_tp_constrain) n_tp_block else 0L) + (if (need_gq_constrain) n_gq_block else 0L))
+                           tracked_0based <- as.integer(ifelse(rows_needed_1based > n_params_inc_tp & !need_tp_constrain,
+                                                               rows_needed_1based - 1L - n_tp_block,
+                                                               rows_needed_1based - 1L))
+                     } else {
+                           rows_needed_1based <- seq_len(n_params_full)
+                           need_tp_constrain <- TRUE
+                           need_gq_constrain <- TRUE
+                           constrain_out_len <- as.integer(n_params_full)
+                           tracked_0based <- as.integer(pars_indicies_to_track)
+                     }
                      all_param_outs_trace <- fn_compute_param_constrain_from_trace_parallel( unc_params_trace_input_main = main_trace,
                                                                                             unc_params_trace_input_nuisance = nuisance_trace_for_constrain,
-                                                                                            pars_indicies_to_track = pars_indicies_to_track,
-                                                                                            n_params_full = n_params_full,
+                                                                                            pars_indicies_to_track = tracked_0based,
+                                                                                            n_params_full = constrain_out_len,
                                                                                             n_nuisance =
                                                                                                 n_nuisance_for_constrain,
                                                                                             n_params_main = n_params_main,
                                                                                             model_so_file = model_so_file,
                                                                                             json_file_path = json_file_path,
-                                                                                            use_disk = FALSE, # Enable disk mode
-                                                                                            trace_dir = use_disk_path_post_hoc_dir)
+                                                                                            use_disk = FALSE,
+                                                                                            trace_dir = use_disk_path_post_hoc_dir,
+                                                                                            include_tp = need_tp_constrain,
+                                                                                            include_gq = need_gq_constrain)
              
              }
          
@@ -1152,6 +1177,11 @@ create_summary_and_traces <- function(    model_results,
              # tictoc::tic("Timer 7")
              
              offset <- 0
+             if (exists("rows_needed_1based", inherits = FALSE)) {
+               fn_map_rows <- function(idx_vec) match(idx_vec - offset, rows_needed_1based)
+             } else {
+               fn_map_rows <- function(idx_vec) idx_vec - offset
+             }
              # offset <- 1
              
              # message(print(paste("offset = ", offset)))
@@ -1171,12 +1201,12 @@ create_summary_and_traces <- function(    model_results,
             
              if (compute_main_params == TRUE) {
                kk <- 1
-               # all_param_outs_trace[[kk]][index_params_main - offset, 1:n_iter] 
-              ##   trace_params_main[1:n_params_main, 1:n_iter, kk] <- all_param_outs_trace[[kk]][index_params_main - offset, 1:n_iter] 
+               # all_param_outs_trace[[kk]][fn_map_rows(index_params_main), 1:n_iter] 
+              ##   trace_params_main[1:n_params_main, 1:n_iter, kk] <- all_param_outs_trace[[kk]][fn_map_rows(index_params_main), 1:n_iter] 
                 for (kk in 1:n_chains_sampling) {
                   try({ 
-                     # trace_params_main[1:n_params_main, 1:n_iter, kk] <-   all_param_outs_trace[[kk]][index_params_main - offset, 1:n_iter]  
-                    trace_params_main[1:n_params_main_constrained, 1:n_iter, kk] <-   all_param_outs_trace[[kk]][index_params_main - offset, 1:n_iter]
+                     # trace_params_main[1:n_params_main, 1:n_iter, kk] <-   all_param_outs_trace[[kk]][fn_map_rows(index_params_main), 1:n_iter]  
+                    trace_params_main[1:n_params_main_constrained, 1:n_iter, kk] <-   all_param_outs_trace[[kk]][fn_map_rows(index_params_main), 1:n_iter]
                   }, silent = TRUE)
                 }
              }
@@ -1198,7 +1228,7 @@ create_summary_and_traces <- function(    model_results,
                  trace_tp <- array(dim = c(n_tp_wo_log_lik, n_iter, n_chains_sampling))
                  if (n_tp_wo_log_lik > 0L) {
                    for (kk in 1:n_chains_sampling) {
-                     trace_tp[1:n_tp_wo_log_lik,  1:n_iter, kk] <- all_param_outs_trace[[kk]][index_tp_wo_log_lik - offset, 1:n_iter] #  params_subset_trace[[kk]][param, 1:n_iter]
+                     trace_tp[1:n_tp_wo_log_lik,  1:n_iter, kk] <- all_param_outs_trace[[kk]][fn_map_rows(index_tp_wo_log_lik), 1:n_iter] #  params_subset_trace[[kk]][param, 1:n_iter]
                    }
                  }
                }
@@ -1210,7 +1240,7 @@ create_summary_and_traces <- function(    model_results,
                    trace_gq <- array(dim = c(n_gq, n_iter, n_chains_sampling))
                    if (n_gq > 0L) {
                      for (kk in 1:n_chains_sampling) {
-                       trace_gq[1:n_gq, 1:n_iter, kk] <- all_param_outs_trace[[kk]][index_gq - offset, 1:n_iter] #  params_subset_trace[[kk]][param, 1:n_iter]
+                       trace_gq[1:n_gq, 1:n_iter, kk] <- all_param_outs_trace[[kk]][fn_map_rows(index_gq), 1:n_iter] #  params_subset_trace[[kk]][param, 1:n_iter]
                      }
                    }
                }
@@ -1228,7 +1258,7 @@ create_summary_and_traces <- function(    model_results,
                        
                             if (n_log_lik_names > 0L) {
                               for (kk in 1:n_chains_sampling) {
-                                  log_lik_trace[1:n_log_lik_names,  1:n_iter, kk] <- all_param_outs_trace[[kk]][index_log_lik - offset, 1:n_iter] #  params_subset_trace[[kk]][param, 1:n_iter]
+                                  log_lik_trace[1:n_log_lik_names,  1:n_iter, kk] <- all_param_outs_trace[[kk]][fn_map_rows(index_log_lik), 1:n_iter] #  params_subset_trace[[kk]][param, 1:n_iter]
                               }
                             }
                        
@@ -1254,9 +1284,7 @@ create_summary_and_traces <- function(    model_results,
           
              n_cores <- n_threads_summary ## was parallel::detectCores() (see "Thread budget for the summary")
              
-             # try({ 
-             #   rm(all_param_outs_trace)
-             # })
+             rm(all_param_outs_trace)
              
              # tictoc::toc(log = TRUE)
          

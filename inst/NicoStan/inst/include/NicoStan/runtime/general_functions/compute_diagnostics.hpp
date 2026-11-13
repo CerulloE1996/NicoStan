@@ -1,3 +1,4 @@
+#include <cstring>
 
 #pragma once
 
@@ -100,14 +101,14 @@ inline Eigen::Matrix<double, -1, -1> fn_split_diagnostic_chains(const Eigen::Mat
 // Keep zero-variance chains with zero autocovariance, not 0/0. Use biased
 // autocovariances (lag denominator n) and posterior's positive/monotone sequence
 // truncation. The local Stan Math autocovariance uses denominator n - lag.
-inline double fn_ensemble_ESS(const Eigen::Matrix<double, -1, -1> &draws) {
+inline double fn_ensemble_ESS(const Eigen::Matrix<double, -1, -1> &draws,
+                              Eigen::FFT<double> &fft) {
 
     const Eigen::Index n = draws.rows();
     const Eigen::Index chains = draws.cols();
     if (n < 3 || !fn_diagnostic_ensemble_varies(draws)) return std::numeric_limits<double>::quiet_NaN();
     Eigen::Matrix<double, -1, 1> mean_acov = Eigen::Matrix<double, -1, 1>::Zero(n);
     Eigen::Matrix<double, -1, 1> chain_means(chains);
-    Eigen::FFT<double> fft;
     for (Eigen::Index chain = 0; chain < chains; ++chain) {
         const Eigen::Matrix<double, -1, 1> values = draws.col(chain);
         chain_means(chain) = values.mean();
@@ -148,6 +149,11 @@ inline double fn_ensemble_ESS(const Eigen::Matrix<double, -1, -1> &draws) {
     const double tau = -1.0 + 2.0 * rho.head(std::max<Eigen::Index>(1, max_t)).sum() + rho(max_t);
     return total / std::max(tau, 1.0 / std::log10(total));
 
+}
+
+inline double fn_ensemble_ESS(const Eigen::Matrix<double, -1, -1> &draws) {
+    Eigen::FFT<double> fft;
+    return fn_ensemble_ESS(draws, fft);
 }
 
 //// Rank-normalised split-ESS (Vehtari et al. 2021): returns (bulk_ESS, tail_ESS)
@@ -550,3 +556,180 @@ struct ComputeStatsParallel : public RcppParallel::Worker {
 
 
 
+
+struct FusedSummaryWorker : public RcppParallel::Worker {
+    const double* trace_ptr;
+    const int n_rows_trace;
+    const int n_params;
+    const int n_iter;
+    const int n_chains;
+    RcppParallel::RMatrix<double> output;
+
+    FusedSummaryWorker(const double* trace_ptr_,
+                       const int n_rows_trace_,
+                       const int n_params_,
+                       const int n_iter_,
+                       const int n_chains_,
+                       Rcpp::NumericMatrix &output_)
+      : trace_ptr(trace_ptr_),
+        n_rows_trace(n_rows_trace_),
+        n_params(n_params_),
+        n_iter(n_iter_),
+        n_chains(n_chains_),
+        output(output_) {}
+
+    void operator()(std::size_t begin, std::size_t end) {
+        const int half = n_iter / 2;
+        const int n_split_chains = 2 * n_chains;
+        const Eigen::Index total_n = static_cast<Eigen::Index>(n_iter) * static_cast<Eigen::Index>(n_chains);
+        const double undef = std::numeric_limits<double>::quiet_NaN();
+        const boost::math::normal_distribution<double> norm_dist;
+
+        Eigen::FFT<double> fft;
+        Eigen::Matrix<double, -1, -1> draws(n_iter, n_chains);
+        Eigen::Matrix<double, -1, -1> split_draws(half, n_split_chains);
+        Eigen::Matrix<double, -1, -1> ranked(half, n_split_chains);
+        Eigen::Matrix<double, -1, -1> binary_mat(half, n_split_chains);
+        Eigen::Matrix<double, -1, -1> folded(n_iter, n_chains);
+        Eigen::Matrix<double, -1, -1> draws_sq(n_iter, n_chains);
+        Eigen::Matrix<double, -1, 1> col_sorted(n_iter);
+        std::vector<std::pair<double, Eigen::Index>> val_idx(static_cast<std::size_t>(total_n));
+
+        for (std::size_t idx = begin; idx < end; ++idx) {
+            const int i = static_cast<int>(idx);
+            for (int c = 0; c < n_chains; ++c) {
+                const std::size_t col_base = static_cast<std::size_t>(i) +
+                    static_cast<std::size_t>(n_rows_trace) * static_cast<std::size_t>(n_iter) * static_cast<std::size_t>(c);
+                double* dst = draws.col(c).data();
+                for (int it = 0; it < n_iter; ++it) {
+                    dst[it] = trace_ptr[col_base + static_cast<std::size_t>(it) * static_cast<std::size_t>(n_rows_trace)];
+                }
+            }
+
+            // 1. Per-chain mean, sd, quantiles (matches compute_chain_stats bit-for-bit)
+            const Eigen::Matrix<double, -1, 1> col_means = draws.colwise().mean();
+            const double mean_all = col_means.mean();
+            const Eigen::Matrix<double, -1, 1> col_sds =
+                ((draws.rowwise() - col_means.transpose()).array().square().colwise().sum() / (n_iter - 1)).sqrt();
+            const double sd_all = col_sds.mean();
+
+            double sum_q025 = 0.0, sum_q50 = 0.0, sum_q975 = 0.0;
+            const int idx025 = static_cast<int>(std::floor(0.025 * (n_iter - 1)));
+            const int idx50  = static_cast<int>(std::floor(0.5   * (n_iter - 1)));
+            const int idx975 = static_cast<int>(std::floor(0.975 * (n_iter - 1)));
+            for (int c = 0; c < n_chains; ++c) {
+                std::memcpy(col_sorted.data(), draws.col(c).data(), static_cast<std::size_t>(n_iter) * sizeof(double));
+                std::sort(col_sorted.data(), col_sorted.data() + n_iter);
+                sum_q025 += col_sorted(idx025);
+                sum_q50  += col_sorted(idx50);
+                sum_q975 += col_sorted(idx975);
+            }
+            output(i, 0) = mean_all;
+            output(i, 1) = sd_all;
+            output(i, 2) = sum_q025 / n_chains;
+            output(i, 3) = sum_q50  / n_chains;
+            output(i, 4) = sum_q975 / n_chains;
+
+            const bool all_fin = draws.allFinite();
+            if (!all_fin) {
+                output(i, 5) = undef;
+                output(i, 6) = undef;
+                output(i, 7) = undef;
+                output(i, 8) = undef;
+                output(i, 9) = undef;
+                continue;
+            }
+
+            // 2. Single pooled sort gives (q05, q50, q95) AND (when n_iter is even) ranked split_draws
+            split_draws.leftCols(n_chains)  = draws.topRows(half);
+            split_draws.rightCols(n_chains) = draws.bottomRows(half);
+
+            double q05_pool = undef, q50_pool = undef, q95_pool = undef;
+            const bool even_n_iter = (2 * half == n_iter);
+            if (even_n_iter) {
+                for (int sc = 0; sc < n_split_chains; ++sc) {
+                    const double* src = split_draws.col(sc).data();
+                    const Eigen::Index base = static_cast<Eigen::Index>(sc) * static_cast<Eigen::Index>(half);
+                    for (int r = 0; r < half; ++r) {
+                        val_idx[static_cast<std::size_t>(base + r)] = {src[r], base + r};
+                    }
+                }
+                std::sort(val_idx.begin(), val_idx.end());
+                auto q_from_sorted = [&](double p) -> double {
+                    if (total_n == 1) return val_idx[0].first;
+                    const double pos = static_cast<double>(total_n - 1) * p;
+                    const std::size_t lo = static_cast<std::size_t>(std::floor(pos));
+                    const std::size_t hi = static_cast<std::size_t>(std::ceil(pos));
+                    const double h = pos - static_cast<double>(lo);
+                    return (1.0 - h) * val_idx[lo].first + h * val_idx[hi].first;
+                };
+                q05_pool = q_from_sorted(0.05);
+                q50_pool = q_from_sorted(0.5);
+                q95_pool = q_from_sorted(0.95);
+
+                double* rptr = ranked.data();
+                for (Eigen::Index a = 0; a < total_n; ++a) {
+                    Eigen::Index b = a + 1;
+                    double sum_ranks = static_cast<double>(b);
+                    Eigen::Index count = 1;
+                    while (b < total_n && val_idx[static_cast<std::size_t>(b)].first == val_idx[static_cast<std::size_t>(a)].first) {
+                        sum_ranks += static_cast<double>(b + 1);
+                        ++b;
+                        ++count;
+                    }
+                    const double avg_rank = sum_ranks / static_cast<double>(count);
+                    const double p_norm = (avg_rank - 0.375) / (static_cast<double>(total_n) + 0.25);
+                    const double z_val = boost::math::quantile(norm_dist, p_norm);
+                    for (Eigen::Index k = a; k < b; ++k) {
+                        rptr[val_idx[static_cast<std::size_t>(k)].second] = z_val;
+                    }
+                    a = b - 1;
+                }
+            } else {
+                const std::vector<double> qs = stan::math::quantile(draws.reshaped(), std::vector<double>{0.05, 0.5, 0.95});
+                q05_pool = qs[0];
+                q50_pool = qs[1];
+                q95_pool = qs[2];
+                ranked = stan::analyze::rank_transform(split_draws);
+            }
+
+            const bool varies_draws = fn_diagnostic_ensemble_varies(draws);
+            double ess_bulk = undef, ess_tail = undef, rhat_bulk = undef, rhat_tail = undef;
+
+            if (n_iter >= 8) {
+                ess_bulk = fn_ensemble_ESS(ranked, fft);
+                if (varies_draws) {
+                    binary_mat.leftCols(n_chains)  = (draws.topRows(half).array() <= q05_pool).cast<double>();
+                    binary_mat.rightCols(n_chains) = (draws.bottomRows(half).array() <= q05_pool).cast<double>();
+                    const double l_ess = fn_ensemble_ESS(binary_mat, fft);
+                    binary_mat.leftCols(n_chains)  = (draws.topRows(half).array() <= q95_pool).cast<double>();
+                    binary_mat.rightCols(n_chains) = (draws.bottomRows(half).array() <= q95_pool).cast<double>();
+                    const double u_ess = fn_ensemble_ESS(binary_mat, fft);
+                    ess_tail = (std::isnan(l_ess) || std::isnan(u_ess)) ? undef : std::min(l_ess, u_ess);
+                    if (!std::isfinite(ess_tail)) {
+                        ess_tail = compute_Stan_split_ESS_rank(-draws).second;
+                    }
+                }
+            }
+
+            if (n_iter >= 4) {
+                rhat_bulk = fn_diagnostic_ensemble_varies(ranked) ? stan::analyze::rhat(ranked) : undef;
+                folded = (draws.array() - q50_pool).abs().matrix();
+                const Eigen::Matrix<double, -1, -1> ranked_folded =
+                    stan::analyze::rank_transform(fn_split_diagnostic_chains(folded));
+                rhat_tail = fn_diagnostic_ensemble_varies(ranked_folded) ? stan::analyze::rhat(ranked_folded) : undef;
+            }
+
+            // 3. ESS of centred squared draws (ess_sd)
+            const double pooled_mean = draws.mean();
+            draws_sq = (draws.array() - pooled_mean).square().matrix();
+            const double ess_sd = compute_Stan_split_ESS(draws_sq);
+
+            output(i, 5) = ess_bulk;
+            output(i, 6) = ess_tail;
+            output(i, 7) = ess_sd;
+            output(i, 8) = rhat_bulk;
+            output(i, 9) = rhat_tail;
+        }
+    }
+};

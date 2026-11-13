@@ -183,6 +183,22 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Rcpp_compute_all_summaries
+Rcpp::NumericMatrix Rcpp_compute_all_summaries(const Rcpp::NumericVector trace, const int n_rows_trace, const int n_params, const int n_iter, const int n_chains, const int n_threads);
+RcppExport SEXP _NicoStan_Rcpp_compute_all_summaries(SEXP traceSEXP, SEXP n_rows_traceSEXP, SEXP n_paramsSEXP, SEXP n_iterSEXP, SEXP n_chainsSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector >::type trace(traceSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_rows_trace(n_rows_traceSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_params(n_paramsSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_iter(n_iterSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_chains(n_chainsSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(Rcpp_compute_all_summaries(trace, n_rows_trace, n_params, n_iter, n_chains, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 // detect_vectorization_support
 Rcpp::String detect_vectorization_support();
 RcppExport SEXP _NicoStan_detect_vectorization_support() {
@@ -515,8 +531,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // fn_compute_param_constrain_from_trace_parallel
-Rcpp::List fn_compute_param_constrain_from_trace_parallel(const std::vector<Eigen::Matrix<double, -1, -1>> unc_params_trace_input_main, const std::vector<Eigen::Matrix<double, -1, -1>> unc_params_trace_input_nuisance, const std::vector<int> pars_indicies_to_track, const int n_params_full, const int n_params_main, const int n_nuisance, const std::string model_so_file, const std::string json_file_path, const bool use_disk, const std::string trace_dir);
-RcppExport SEXP _NicoStan_fn_compute_param_constrain_from_trace_parallel(SEXP unc_params_trace_input_mainSEXP, SEXP unc_params_trace_input_nuisanceSEXP, SEXP pars_indicies_to_trackSEXP, SEXP n_params_fullSEXP, SEXP n_params_mainSEXP, SEXP n_nuisanceSEXP, SEXP model_so_fileSEXP, SEXP json_file_pathSEXP, SEXP use_diskSEXP, SEXP trace_dirSEXP) {
+Rcpp::List fn_compute_param_constrain_from_trace_parallel(const std::vector<Eigen::Matrix<double, -1, -1>> unc_params_trace_input_main, const std::vector<Eigen::Matrix<double, -1, -1>> unc_params_trace_input_nuisance, const std::vector<int> pars_indicies_to_track, const int n_params_full, const int n_params_main, const int n_nuisance, const std::string model_so_file, const std::string json_file_path, const bool use_disk, const std::string trace_dir, const bool include_tp, const bool include_gq);
+RcppExport SEXP _NicoStan_fn_compute_param_constrain_from_trace_parallel(SEXP unc_params_trace_input_mainSEXP, SEXP unc_params_trace_input_nuisanceSEXP, SEXP pars_indicies_to_trackSEXP, SEXP n_params_fullSEXP, SEXP n_params_mainSEXP, SEXP n_nuisanceSEXP, SEXP model_so_fileSEXP, SEXP json_file_pathSEXP, SEXP use_diskSEXP, SEXP trace_dirSEXP, SEXP include_tpSEXP, SEXP include_gqSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -530,7 +546,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const std::string >::type json_file_path(json_file_pathSEXP);
     Rcpp::traits::input_parameter< const bool >::type use_disk(use_diskSEXP);
     Rcpp::traits::input_parameter< const std::string >::type trace_dir(trace_dirSEXP);
-    rcpp_result_gen = Rcpp::wrap(fn_compute_param_constrain_from_trace_parallel(unc_params_trace_input_main, unc_params_trace_input_nuisance, pars_indicies_to_track, n_params_full, n_params_main, n_nuisance, model_so_file, json_file_path, use_disk, trace_dir));
+    Rcpp::traits::input_parameter< const bool >::type include_tp(include_tpSEXP);
+    Rcpp::traits::input_parameter< const bool >::type include_gq(include_gqSEXP);
+    rcpp_result_gen = Rcpp::wrap(fn_compute_param_constrain_from_trace_parallel(unc_params_trace_input_main, unc_params_trace_input_nuisance, pars_indicies_to_track, n_params_full, n_params_main, n_nuisance, model_so_file, json_file_path, use_disk, trace_dir, include_tp, include_gq));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1160,6 +1178,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_NicoStan_Rcpp_wrapper_fn_lp_grad", (DL_FUNC) &_NicoStan_Rcpp_wrapper_fn_lp_grad, 9},
     {"_NicoStan_Rcpp_compute_chain_stats", (DL_FUNC) &_NicoStan_Rcpp_compute_chain_stats, 3},
     {"_NicoStan_Rcpp_compute_MCMC_diagnostics", (DL_FUNC) &_NicoStan_Rcpp_compute_MCMC_diagnostics, 3},
+    {"_NicoStan_Rcpp_compute_all_summaries", (DL_FUNC) &_NicoStan_Rcpp_compute_all_summaries, 6},
     {"_NicoStan_detect_vectorization_support", (DL_FUNC) &_NicoStan_detect_vectorization_support, 0},
     {"_NicoStan_fn_Rcpp_compute_PD_Hessian_main", (DL_FUNC) &_NicoStan_fn_Rcpp_compute_PD_Hessian_main, 10},
     {"_NicoStan_fn_Rcpp_wrapper_update_M_dense_main_Hessian", (DL_FUNC) &_NicoStan_fn_Rcpp_wrapper_update_M_dense_main_Hessian, 18},
@@ -1179,7 +1198,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_NicoStan_Rcpp_Chol", (DL_FUNC) &_NicoStan_Rcpp_Chol, 1},
     {"_NicoStan_Rcpp_near_PD", (DL_FUNC) &_NicoStan_Rcpp_near_PD, 1},
     {"_NicoStan_Rcpp_shrink_matrix", (DL_FUNC) &_NicoStan_Rcpp_shrink_matrix, 2},
-    {"_NicoStan_fn_compute_param_constrain_from_trace_parallel", (DL_FUNC) &_NicoStan_fn_compute_param_constrain_from_trace_parallel, 10},
+    {"_NicoStan_fn_compute_param_constrain_from_trace_parallel", (DL_FUNC) &_NicoStan_fn_compute_param_constrain_from_trace_parallel, 12},
     {"_NicoStan_fn_compute_param_constrain_from_trace_v2", (DL_FUNC) &_NicoStan_fn_compute_param_constrain_from_trace_v2, 6},
     {"_NicoStan_Rcpp_fn_RcppParallel_EHMC_sampling", (DL_FUNC) &_NicoStan_Rcpp_fn_RcppParallel_EHMC_sampling, 21},
     {"_NicoStan_fn_R_RcppParallel_EHMC_single_iter_burnin", (DL_FUNC) &_NicoStan_fn_R_RcppParallel_EHMC_single_iter_burnin, 42},

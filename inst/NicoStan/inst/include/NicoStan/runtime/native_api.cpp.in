@@ -1,3 +1,4 @@
+#include <cstring>
 
 
 //// #include <Rcpp.h>
@@ -969,6 +970,23 @@ Rcpp::List  Rcpp_compute_MCMC_diagnostics(     const std::vector<Eigen::Matrix<d
 
 }
 
+// [[Rcpp::export]]
+Rcpp::NumericMatrix Rcpp_compute_all_summaries(const Rcpp::NumericVector trace,
+                                               const int n_rows_trace,
+                                               const int n_params,
+                                               const int n_iter,
+                                               const int n_chains,
+                                               const int n_threads) {
+      Rcpp::NumericMatrix output(n_params, 10);
+      if (n_params <= 0 || n_iter <= 0 || n_chains <= 0) {
+        return output;
+      }
+      const int threads_use = std::max(1, std::min(n_params, n_threads));
+      FusedSummaryWorker worker(REAL(trace), n_rows_trace, n_params, n_iter, n_chains, output);
+      RcppParallel::parallelFor(0, n_params, worker, 1, threads_use);
+      return output;
+}
+
 
 
 
@@ -1860,7 +1878,9 @@ Rcpp::List    fn_compute_param_constrain_from_trace_parallel(   const std::vecto
                                                                 const std::string model_so_file,
                                                                 const std::string json_file_path,
                                                                 const bool use_disk = false,
-                                                                const std::string trace_dir = "/tmp/constrain_traces"
+                                                                const std::string trace_dir = "/tmp/constrain_traces",
+                                                                const bool include_tp = true,
+                                                                const bool include_gq = true
 ) {
       
       const int n_chains = unc_params_trace_input_main.size();
@@ -1915,74 +1935,52 @@ Rcpp::List    fn_compute_param_constrain_from_trace_parallel(   const std::vecto
         std::filesystem::create_directories(trace_dir);
       }  
       
-      // Eigen storage - use n_params_to_track, not n_params_full!
-      // Only allocate if NOT using disk
+      const int n_tracked = static_cast<int>(pars_indicies_to_track.size());
       std::vector<Eigen::Matrix<double, -1, -1>> all_param_outs_eigen(n_chains);
-      if (use_disk == false) {
-        for (int i = 0; i < n_chains; ++i) {
-          std::cout << "2: allocating chain " << i << std::flush;
-          // all_param_outs_eigen[i].resize(n_params_main, n_iter);
-          all_param_outs_eigen[i].resize(n_params_full, n_iter);
-          all_param_outs_eigen[i].setZero();
-        }
-      }
-      
-      std::cout << "3: creating worker" << std::flush;
-    
-      //// Create worker
+
       ParamConstrainWorker worker(  n_chains,
                                     unc_params_trace_input_main,
                                     unc_params_trace_input_nuisance,
+                                    pars_indicies_to_track,
                                     n_params_full,
                                     n_params_main,
                                     n_nuisance,
                                     model_so_file,
                                     json_file_path,
                                     all_param_outs_eigen,
-                                    use_disk, 
-                                    trace_dir);
-      
-      std::cout << "4: worker created" << std::flush;
-    
-      //// Run parallel chains
-      // RcppParallel::parallelFor(0, n_chains, worker, 1);
-      RcppParallel::parallelFor(0, n_chains, worker);
-      // worker(0, n_chains);  // run everything on main thread (for debug)
-      
-      std::cout << "5: done" << std::flush;
-      
-      //// IMPORTANT: Clean up model AFTER parallelFor completes
+                                    use_disk,
+                                    trace_dir,
+                                    include_tp,
+                                    include_gq);
+
+      //// chunk_size = 1 guarantees each chain runs in parallel on its own worker thread
+      RcppParallel::parallelFor(0, n_chains, worker, 1);
+
       worker.cleanup_model();
-      
-      if (use_disk == true) { // Return metadata only:
-        
+
+      if (use_disk == true) {
+
             return Rcpp::List::create(
               Rcpp::Named("use_disk") = true,
               Rcpp::Named("trace_dir") = trace_dir,
               Rcpp::Named("n_chains") = n_chains,
               Rcpp::Named("n_iter") = n_iter,
               Rcpp::Named("n_params") = n_params_full);
-        
+
       } else {
-        
+
             Rcpp::List out(n_chains);
             for (int i = 0; i < n_chains; ++i) {
-              
-                Rcpp::NumericMatrix mat(n_params_full, n_iter);
                 const auto &eigen_mat = all_param_outs_eigen[i];
-                
-                for (int ii = 0; ii < n_iter; ++ii) {
-                  for (int p = 0; p < n_params_full; ++p) {
-                    mat(p, ii) = eigen_mat(p, ii);
-                  }
+                Rcpp::NumericMatrix mat(Rcpp::no_init(n_tracked, n_iter));
+                if (n_tracked > 0 && n_iter > 0) {
+                  std::memcpy(REAL(mat), eigen_mat.data(),
+                              static_cast<std::size_t>(n_tracked) * static_cast<std::size_t>(n_iter) * sizeof(double));
                 }
-                
-                out[i] = mat;  // immediately protected by Rcpp::List
-                
+                out[i] = mat;
             }
-            
             return out;
-        
+
       }
       
 }

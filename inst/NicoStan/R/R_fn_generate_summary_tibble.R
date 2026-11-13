@@ -33,23 +33,36 @@ generate_summary_tibble <- function(n_threads = NULL,
               }
 
 
-              #### Initialize summary dataframe
+              n_iter <- dim(trace)[2]
+              if (n_iter == 0 || n_chains == 0) {
+                    stop(paste0("the summary of the trace needs at least one draw and one chain; the trace has ",
+                                n_iter, " draws and ", n_chains, " chains."))
+              }
+              n_params <- n_to_compute
+              if (n_params < n_threads) { n_threads <- n_params }
+              storage.mode(trace) <- "double"
+              stats_mat <- Rcpp_compute_all_summaries(trace = trace,
+                                                      n_rows_trace = as.integer(dim(trace)[1]),
+                                                      n_params = as.integer(n_params),
+                                                      n_iter = as.integer(n_iter),
+                                                      n_chains = as.integer(n_chains),
+                                                      n_threads = as.integer(n_threads))
+              rhat_vec <- pmax(stats_mat[, 9], stats_mat[, 10])
+              Max_rhat_rank <- max(rhat_vec, na.rm = TRUE)
               summary_df <- data.frame(     parameter = param_names,
-                                            mean = NA,
-                                            sd = NA,
-                                            `2.5%` = NA,
-                                            `50%` = NA,
-                                            `97.5%` = NA,
-                                            n_eff = NA,
-                                            Rhat = NA,
+                                            mean = stats_mat[, 1],
+                                            sd = stats_mat[, 2],
+                                            `2.5%` = stats_mat[, 3],
+                                            `50%` = stats_mat[, 4],
+                                            `97.5%` = stats_mat[, 5],
+                                            n_eff = round(stats_mat[, 6]),
+                                            Rhat = rhat_vec,
                                             n_Rhat = NA,
-                                            ## tail ESS (Vehtari et al. 2021): the smaller of the 5% and 95%
-                                            ## quantile ESS
-                                            n_eff_tail = NA,
-                                            ## ESS of the centred squared draws, (x - mean)^2: the ESS for
-                                            ## estimating the posterior SD
-                                            n_eff_sd = NA,
-                                                               ## ("ESS(theta^2)"; the definition behind
+                                            n_eff_tail = round(stats_mat[, 7]),
+                                            n_eff_sd = round(stats_mat[, 8]),
+                                            check.names = FALSE)
+              if (FALSE) {
+              summary_df_unused <- data.frame(parameter = param_names,
                                                                ## posterior::ess_sd)
                                             check.names = FALSE)
               
@@ -159,7 +172,8 @@ generate_summary_tibble <- function(n_threads = NULL,
                         summary_df$n_eff_tail[i] <-  round(ess_tail_vec[i])
                         summary_df$n_eff_sd[i] <-  round(ess_sd_vec[i])
                         summary_df$Rhat[i] <- rhat_vec[i]
-                
+
+              }
               }
               
               if (compute_nested_rhat == TRUE) {
