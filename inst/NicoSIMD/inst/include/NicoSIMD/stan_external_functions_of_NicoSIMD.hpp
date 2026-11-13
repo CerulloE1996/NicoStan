@@ -27,6 +27,11 @@
 //  induced-Dirichlet prior on its cutpoints)
 #include "stan_external_induced_dirichlet_prior_of_ordered_cutpoints.hpp"
 #include "stan_external_dirichlet_cutpoint_median.hpp"
+#include "stan_external_Box_Cox_lambda_log_density_of_the_flat_Dirichlet.hpp"
+//
+// (the induced Dirichlet of ordered cutpoints, and the Dirichlet of a simplex, with a Se / Sp prior at chosen
+//  cutoffs: ordinal models of test accuracy with a prior on Sp or 1 - Se)
+#include "stan_external_induced_dirichlet_with_Se_Sp_prior.hpp"
 //
 // (the Dirichlet, Beta and LKJ-Cholesky log densities: e.g. the Dirichlet and Beta priors on the category and
 //  cutpoint probabilities of ordinal models, LKJ priors on correlation matrices)
@@ -45,6 +50,9 @@
 //
 // (Sean Pinkney partially-centered study cutpoints and total log-Jacobian from unique cutpoint pairs)
 #include "stan_external_pinkney_partially_centered_cutpoints.hpp"
+//
+// (exact Set-0 marginal log-density at chosen cutoffs via 24-node Laplace-centered Gauss-Hermite quadrature)
+#include "stan_external_set0_marginal_at_chosen_cutoffs.hpp"
 
 // ---- the headers that BayesMVP's stan_external_functions.hpp does not include: a model that uses one of their
 //      functions includes it in its own user header, after this file, as its BayesMVP version does now
