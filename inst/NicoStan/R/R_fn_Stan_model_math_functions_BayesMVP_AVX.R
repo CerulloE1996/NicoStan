@@ -1379,10 +1379,14 @@ R_fn_write_AVX_version_of_Stan_model_with_BayesMVP_functions <-  function(
                                                                ##
                                                                FUN = function(k) {
 
-                                                                     paste0("    real bmvp_probe_", k,
-                                                                            "_std_normal_lpdf(",
-                                                                     c("real y", "vector y", "array[] real y"),
-                                                                     ");")
+                                                                     c(paste0("    real bmvp_probe_", k,
+                                                                              "_std_normal_lpdf(",
+                                                                       c("real y", "vector y", "array[] real y"),
+                                                                       ");"),
+                                                                       ## (its _lcdf and _lccdf too: T[L, U])
+                                                                       paste0("    real bmvp_probe_", k,
+                                                                              "_std_normal", c("_lcdf", "_lccdf"),
+                                                                              "(real y);"))
 
                                                                })
 
@@ -1870,9 +1874,15 @@ R_fn_write_AVX_version_of_Stan_model_with_BayesMVP_functions <-  function(
 
               } else distribution$declaration_suffix
               type_of_variate <-  if (identical(declaration_suffix, "_lpmf")) "int" else "real"
-              return(paste0("    real bmvp_probe_", k, "_", name, declaration_suffix, "(",
-                            fn_signatures_on_reals(n_arguments = distribution$n_arguments,
-                                                   type_of_first_argument = type_of_variate), ");"))
+              signatures <-  fn_signatures_on_reals(n_arguments = distribution$n_arguments,
+                                                    type_of_first_argument = type_of_variate)
+              ## (its _lcdf and _lccdf too, with the same signatures: a truncated statement, T[L, U], needs them)
+              suffixes <-  unique(c(declaration_suffix, "_lcdf", "_lccdf"))
+              return(unlist(lapply(X = suffixes, FUN = function(suffix) {
+
+                    paste0("    real bmvp_probe_", k, "_", name, suffix, "(", signatures, ");")
+
+              })))
 
         })
         ##
