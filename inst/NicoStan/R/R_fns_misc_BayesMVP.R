@@ -639,8 +639,11 @@ get_model_info <- function(  Model_type,
                                                                 Stan_model_text, perl = TRUE))
                     is_nuisance_coordinate <- rep(FALSE, length(unconstrained_names))
                     for (name_of_block in names_of_the_nuisance_blocks_of_a_regular_library) {
+                          ## (an element of an array, vector or matrix is named "block.", an element of a tuple
+                          ##  "block:" (a tuple of nuisance blocks, e.g. tuple(matrix[N, K], vector[N]) block))
                           is_coordinate_of_block <- (unconstrained_names == name_of_block) |
-                                                    startsWith(unconstrained_names, paste0(name_of_block, "."))
+                                                    startsWith(unconstrained_names, paste0(name_of_block, ".")) |
+                                                    startsWith(unconstrained_names, paste0(name_of_block, ":"))
                           is_declared <- grepl(paste0("\\b", name_of_block, "\\s*;"), parameters_block_text,
                                                perl = TRUE)
                           if (!any(is_coordinate_of_block) && !isTRUE(is_declared)) {

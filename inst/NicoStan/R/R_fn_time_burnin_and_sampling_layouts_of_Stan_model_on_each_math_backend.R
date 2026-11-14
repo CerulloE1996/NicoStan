@@ -723,8 +723,11 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                                          regexpr("(?s)\\nparameters\\s*\\{.*?\\n\\}",
                                                                  Stan_model_text, perl = TRUE))
                     for (name_of_block in names_of_nuisance_blocks) {
+                          ## (an element of an array, vector or matrix is named "block.", an element of a tuple
+                          ##  "block:" (a tuple of nuisance blocks, e.g. tuple(matrix[N, K], vector[N]) block))
                           is_coordinate_of_block <-  (unconstrained_names == name_of_block) |
-                                                     startsWith(unconstrained_names, paste0(name_of_block, "."))
+                                                     startsWith(unconstrained_names, paste0(name_of_block, ".")) |
+                                                     startsWith(unconstrained_names, paste0(name_of_block, ":"))
                           is_declared <-  grepl(paste0("\\b", name_of_block, "\\s*;"), parameters_block_text,
                                                 perl = TRUE)
                           if (!any(is_coordinate_of_block) && !isTRUE(is_declared)) {
