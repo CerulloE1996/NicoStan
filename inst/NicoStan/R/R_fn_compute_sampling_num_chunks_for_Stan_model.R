@@ -270,7 +270,8 @@ fn_compute_sampling_num_chunks_for_Stan_model <-  function( model_so_file,
                                               L2_cache_size_bytes_per_core  =
                                                     L2_cache_and_threads_per_core$L2_cache_size_bytes,
                                               N_threads_per_core            =
-                                                    L2_cache_and_threads_per_core$N_threads_per_core)
+                                                    L2_cache_and_threads_per_core$N_threads_per_core,
+                                              library_is_auto_chunked       = isTRUE(init_object$auto_chunking))
         ## (the chains and threads per chain are given: the equation's N_chunks at 1 thread per chain)
         # rule <-  list(N_chunks = sampling_equation_of_18_Oct$num_chunks_sampling,
         #               sampling_equation_of_18_Oct = sampling_equation_of_18_Oct)

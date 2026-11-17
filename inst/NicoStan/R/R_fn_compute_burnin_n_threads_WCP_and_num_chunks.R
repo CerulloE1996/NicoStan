@@ -2646,20 +2646,78 @@ fn_read_threads_per_core_and_L2_cache_size_of_first_CPU_of_this_process <-  func
 #' LC-MVOP (Cox held out): 96 of 96 cases within 10% of the fastest layout on the local-HPC (the worst 9.1%),
 #' 97 of 99 on the laptop.
 #'
+#' A library built with auto_chunking = TRUE (library_is_auto_chunked = TRUE) takes the memory of its own chunks
+#' in place of the tape's, a constant number of bytes per unit, w:
+#'
+#' \preformatted{
+#'   N_chunks        = 2^round( log2( max( 1, N_units x w / L2 per hardware thread ) ) ),  w = 3444 bytes
+#'   T               = 1 thread per chain
+#'   N_chunks timed  = N_chunks / 2, N_chunks and 2 x N_chunks, and 1 as well when N_chunks <= 8
+#' }
+#'
+#' because auto-chunking cuts each connected computation into chunks of at least 8192 / (its operations) rows, so
+#' that N_chunks only sets the rows of the computations with many operations, and the memory of Stan's tape no
+#' longer predicts the best N_chunks. Scored against the sampling ground truth of the 16 general Stan models with
+#' auto-chunking alone (every N; laptop 47 cases, local-HPC 34): the fastest of the N_chunks timed was within 5% of
+#' the fastest layout in 73 of 81 cases and within 10% in 80 of 81 (laptop 44 and 47 of 47, local-HPC 29 and 33 of
+#' 34); with w fitted to 15 of the models only, 71 and 77 of 81 of the model left out.
+#'
 #' @param M_bytes_per_chain Memory, in bytes, of one full-data log-density-and-gradient evaluation of one chain.
 #' @param N_units The number of units reduce_sum_static sums over (the N of the Stan data).
 #' @param kind_of_tape "Stan_math" (a Stan::math library) or "nico_math" (a nico::math, AVX, library).
 #' @param L2_cache_size_bytes_per_core The L2 cache of one core, in bytes.
 #' @param N_threads_per_core The hardware threads of one core.
+#' @param library_is_auto_chunked TRUE for a library built with auto_chunking = TRUE (the rule above with w);
+#'   FALSE (default) for every other library.
 #' @return A list with num_chunks_sampling and n_threads_WCP_sampling (the equation's layout),
-#'   num_chunks_at_one_thread_per_chain (the same f at 1 thread per chain) and every intermediate quantity.
+#'   num_chunks_at_one_thread_per_chain (the same f at 1 thread per chain) and every intermediate quantity; for an
+#'   auto-chunked library, also num_chunks_to_time (the N_chunks to time around the equation's).
 #' @export
 fn_sampling_num_chunks_of_Paper_1_equation <-  function( M_bytes_per_chain,
                                                          N_units,
                                                          kind_of_tape,
                                                          L2_cache_size_bytes_per_core,
-                                                         N_threads_per_core
+                                                         N_threads_per_core,
+                                                         library_is_auto_chunked  = FALSE
 ) {
+
+        ##
+        ## ---- An auto-chunked library: N_units x w bytes in place of the tape's memory, f = 1, the nearest power of two ---------------
+        ##
+        if (isTRUE(library_is_auto_chunked)) {
+              bytes_per_unit_of_auto_chunking <-  3444
+              L2_cache_size_bytes_per_hardware_thread <-  L2_cache_size_bytes_per_core / N_threads_per_core
+              N_pieces_for_the_L2_cache <-  N_units * bytes_per_unit_of_auto_chunking /
+                                            L2_cache_size_bytes_per_hardware_thread
+              num_chunks_at_one_thread_per_chain <-  2^max(0, round(log2(max(1, N_pieces_for_the_L2_cache))))
+              num_chunks_at_one_thread_per_chain <-  min(num_chunks_at_one_thread_per_chain,
+                                                         2^floor(log2(max(1, N_units))))
+              ## (the N_chunks timed: half, the same and twice, and 1 as well when the equation's is at most 8;
+              ##  never more chunks than units)
+              num_chunks_to_time <-  c(num_chunks_at_one_thread_per_chain / 2,
+                                       num_chunks_at_one_thread_per_chain,
+                                       2 * num_chunks_at_one_thread_per_chain)
+              if (num_chunks_at_one_thread_per_chain <= 8) num_chunks_to_time <-  c(1, num_chunks_to_time)
+              num_chunks_to_time <-  sort(unique(num_chunks_to_time[(num_chunks_to_time >= 1) &
+                                                                    (num_chunks_to_time <= N_units)]))
+              return(list( num_chunks_sampling                      = num_chunks_at_one_thread_per_chain,
+                           n_threads_WCP_sampling                   = 1,
+                           num_chunks_at_one_thread_per_chain       = num_chunks_at_one_thread_per_chain,
+                           num_chunks_to_time                       = num_chunks_to_time,
+                           is_Stan_like_tape                        = FALSE,
+                           chunk_size_sampling                      =
+                                 fn_chunk_size_and_number_of_blocks_from_N_and_N_chunks(
+                                       N         = N_units,
+                                       N_chunks  = num_chunks_at_one_thread_per_chain)$chunk_size,
+                           fraction_of_the_L2_cache                 = 1,
+                           bytes_per_unit_of_auto_chunking          = bytes_per_unit_of_auto_chunking,
+                           L2_cache_size_bytes_per_hardware_thread  = L2_cache_size_bytes_per_hardware_thread,
+                           N_pieces_for_the_L2_cache                = N_pieces_for_the_L2_cache,
+                           M_bytes_per_chain                        = M_bytes_per_chain,
+                           N_units                                  = N_units,
+                           kind_of_tape                             = kind_of_tape,
+                           library_is_auto_chunked                  = TRUE))
+        }
 
         ##
         ## ---- The kind of tape: a nico::math tape of more than 8 KiB per unit is a Stan-like tape -----------------------------------
@@ -2700,6 +2758,45 @@ fn_sampling_num_chunks_of_Paper_1_equation <-  function( M_bytes_per_chain,
                      M_bytes_per_chain                        = M_bytes_per_chain,
                      N_units                                  = N_units,
                      kind_of_tape                             = kind_of_tape))
+
+}
+
+
+#'
+#' The N_chunks to time at each N of an auto-chunked library, from the equation above on the CPUs of this process
+#' (for num_chunks_of_each_listed_N of the timings of the layouts: half, the same and twice the equation's N_chunks,
+#' and 1 as well when it is at most 8).
+#'
+#' @param N_values The N of the data sets.
+#' @param L2_cache_size_bytes_per_core The L2 cache of one core, in bytes (NULL: read from this process's CPUs).
+#' @param N_threads_per_core The hardware threads of one core (NULL: read from this process's CPUs).
+#' @return A list named by N, each element the N_chunks to time, in increasing order.
+#' @export
+fn_num_chunks_to_time_at_each_N_of_an_auto_chunked_library <-  function( N_values,
+                                                                         L2_cache_size_bytes_per_core  = NULL,
+                                                                         N_threads_per_core            = NULL
+) {
+
+        if (is.null(L2_cache_size_bytes_per_core) || is.null(N_threads_per_core)) {
+              L2_cache_and_threads_per_core <-  fn_read_threads_per_core_and_L2_cache_size_of_first_CPU_of_this_process()
+              if (is.null(L2_cache_and_threads_per_core)) stop(paste0("fn_num_chunks_to_time_at_each_N_of_an_auto_",
+                                                                       "chunked_library: the L2 cache of this ",
+                                                                       "process's CPUs cannot be read; give it"))
+              if (is.null(L2_cache_size_bytes_per_core)) {
+                    L2_cache_size_bytes_per_core <-  L2_cache_and_threads_per_core$L2_cache_size_bytes
+              }
+              if (is.null(N_threads_per_core)) N_threads_per_core <-  L2_cache_and_threads_per_core$N_threads_per_core
+        }
+        num_chunks_of_each_N <-  lapply(N_values, function(N) {
+              fn_sampling_num_chunks_of_Paper_1_equation( M_bytes_per_chain             = NA_real_,
+                                                          N_units                       = N,
+                                                          kind_of_tape                  = "Stan_math",
+                                                          L2_cache_size_bytes_per_core  = L2_cache_size_bytes_per_core,
+                                                          N_threads_per_core            = N_threads_per_core,
+                                                          library_is_auto_chunked       = TRUE)$num_chunks_to_time
+        })
+        names(num_chunks_of_each_N) <-  as.character(N_values)
+        return(num_chunks_of_each_N)
 
 }
 

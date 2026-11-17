@@ -853,7 +853,8 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                 N_units                       = N,
                                 kind_of_tape                  = kind_of_tape_of_this_library,
                                 L2_cache_size_bytes_per_core  = L2_cache_and_threads_per_core$L2_cache_size_bytes,
-                                N_threads_per_core            = L2_cache_and_threads_per_core$N_threads_per_core
+                                N_threads_per_core            = L2_cache_and_threads_per_core$N_threads_per_core,
+                                library_is_auto_chunked       = library_is_auto_chunked
                           )$num_chunks_at_one_thread_per_chain
                     }
                     ## (a search already started for these chains and threads: the equations' N_chunks saved with

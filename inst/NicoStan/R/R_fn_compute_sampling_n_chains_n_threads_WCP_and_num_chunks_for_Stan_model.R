@@ -379,7 +379,8 @@ fn_compute_sampling_n_chains_n_threads_WCP_and_num_chunks_for_Stan_model <-  fun
                                               L2_cache_size_bytes_per_core  =
                                                     L2_cache_and_threads_per_core$L2_cache_size_bytes,
                                               N_threads_per_core            =
-                                                    L2_cache_and_threads_per_core$N_threads_per_core)
+                                                    L2_cache_and_threads_per_core$N_threads_per_core,
+                                              library_is_auto_chunked       = isTRUE(init_object$auto_chunking))
         ##
         ## ---- Every CPU used: the equation's threads per chain and N_chunks ---------------------------------------------------------
         ##
