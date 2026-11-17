@@ -192,6 +192,24 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
 
         }
         ##
+        ## ---- When the largest N_chunks of a line (sampling or burn-in) is doubled again -------------------------------------------
+        ##
+        ## (whilst it is within 10% of the fastest of its line; only when it is the fastest of its line when the
+        ##  environment has E5_DEBUG_DOUBLE_PAST_THE_LARGEST_ONLY_WHEN_IT_IS_THE_FASTEST = TRUE or 1, for timings at the
+        ##  N_chunks of the equation only, whose lines are a few counts around its N_chunks)
+        double_past_the_largest_only_when_it_is_the_fastest <-
+              Sys.getenv("E5_DEBUG_DOUBLE_PAST_THE_LARGEST_ONLY_WHEN_IT_IS_THE_FASTEST", "FALSE") %in%
+              c("1", "TRUE", "true", "T")
+        fn_the_largest_is_doubled_again <-  function(TP_iter_of_the_line) {
+
+              TP_iter_of_the_largest <-  TP_iter_of_the_line[length(TP_iter_of_the_line)]
+              if (double_past_the_largest_only_when_it_is_the_fastest) {
+                    return(TP_iter_of_the_largest >= max(TP_iter_of_the_line))
+              }
+              return(TP_iter_of_the_largest > max(TP_iter_of_the_line) / 1.1)
+
+        }
+        ##
         ## ---- The layouts of the grids ----------------------------------------------------------------------------------------------
         ##
         stopifnot(n_chains_sampling <= n_CPUs, all(phases_to_time %in% c("sampling", "burnin")))
@@ -922,7 +940,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                 if ((index_of_num_chunks == length(num_chunks_of_grid)) &&
                                     # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
                                     ##  of the fastest)
-                                    (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
+                                    fn_the_largest_is_doubled_again(TP_iter_of_grid)) {
                                       # if (ceiling(N / (2 * num_chunks_of_grid[index_of_num_chunks])) ==
                                       #     ceiling(N / num_chunks_of_grid[index_of_num_chunks])) {
                                       ## (twice the chunks would be more chunks than N: the doublings end here)
@@ -1217,7 +1235,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           ## (the largest N_chunks is the fastest: twice it is timed too)
                           if ((index_of_num_chunks == length(num_chunks_of_grid)) &&
                               # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
-                              (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
+                              fn_the_largest_is_doubled_again(TP_iter_of_grid)) {
                                 # if (ceiling(N / (2 * num_chunks_of_grid[index_of_num_chunks])) ==
                                 #     ceiling(N / num_chunks_of_grid[index_of_num_chunks])) {
                                 ## (twice the chunks would be more chunks than N: the doublings end here)
@@ -1316,7 +1334,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                                 if ((index_of_num_chunks == length(num_chunks_of_grid)) &&
                                     # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
                                     ##  of the fastest)
-                                    (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
+                                    fn_the_largest_is_doubled_again(TP_iter_of_grid)) {
                                       # if (ceiling(N / (2 * num_chunks)) == ceiling(N / num_chunks)) {
                                       ## (twice the chunks would be more chunks than N: the doublings end here)
                                       if ((!missing(most_num_chunks_of_grid)) &&
@@ -1614,7 +1632,7 @@ fn_time_burnin_and_sampling_layouts_of_Stan_model_on_each_math_backend <-  funct
                           TP_iter_of_grid <-  c(TP_iter_of_grid, timing$TP_iter)
                           if ((index_of_num_chunks == length(num_chunks_of_grid)) &&
                               # (which.max(TP_iter_of_grid) == length(TP_iter_of_grid)) &&
-                              (TP_iter_of_grid[length(TP_iter_of_grid)] > max(TP_iter_of_grid) / 1.1)) {
+                              fn_the_largest_is_doubled_again(TP_iter_of_grid)) {
                                 # if (ceiling(N / (2 * num_chunks)) == ceiling(N / num_chunks)) {
                                 ## (twice the chunks would be more chunks than N: the doublings end here)
                                 if ((!missing(most_num_chunks_of_grid)) &&
