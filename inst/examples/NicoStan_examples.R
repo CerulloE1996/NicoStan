@@ -14,7 +14,7 @@
 ##
 NicoStan_example_registry <-  function() {
 
-        data.frame(
+        registry <-  data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic", "joint_longitudinal_survival", "gaussian_process", "EASY_stochastic_volatility",
                       "latent_diffusion_survival"),
             file = c("Frailty_surv_shared_frailty_Cox.stan", "standard_surv_Weibull.stan", "robust_regression_t4.stan",
@@ -24,6 +24,9 @@ NicoStan_example_registry <-  function() {
             nuisance = c("log_frailty_raw[J]", "none", "none", "beta_raw[K,2]", "b_raw[2,N_subj]", "none: latent GP integrated out", "h_std[T]",
                          "w[M]: standard normal Brownian increments"),
             stringsAsFactors = FALSE)
+        ## (the recurrent state-space model: a single-gate GRU-style cell, its data read from data/)
+        rbind(registry, data.frame(model = "rnn_ssm", file = "RNN_SSM.stan", diffusion_eligible = TRUE,
+                                   nuisance = "eps[T]", stringsAsFactors = FALSE))
 }
 
 ##
@@ -235,6 +238,17 @@ make_NicoStan_example <-  function( model,
                 main <-  c("mu", "phi", "sigma")
                 latent_name <-  "h_std"
                 n_nuisance <-  n
+        } else if (model == "rnn_ssm") {
+                ## (the data of the three T of the paper, read from data/, never simulated again here)
+                n <-  size(500)
+                data_file <-  file.path(.NicoStan_examples_source_directory, "data", sprintf("rnn_ssm_data_T%d_seed123.rds", n))
+                if (!file.exists(data_file)) stop("rnn_ssm: data only at T = 500, 10000 and 100000: ", data_file)
+                stored <-  readRDS(data_file)
+                data <-  stored$stan_data_list
+                initial <-  c(list(eps = rep(0, n)), stored$initial_main_values)
+                main <-  c("g0", "gx", "wh", "wx", "b", "h0", "sigma_proc", "sigma_obs")
+                latent_name <-  "eps"
+                n_nuisance <-  n
         } else if (model == "latent_diffusion_survival") {
                 ##
                 ## ---- latent diffusion survival (Beskos, Kalogeropoulos and Pazos, 2013, Section 6.3):
@@ -338,7 +352,7 @@ NicoStan_check_gradient <-  function(model, example, expected_simd_lanes = NULL)
         ## The first declared parameter must be the complete standard normal nuisance block.
         expected_latent_name <-  switch(example$model, cox_frailty = "log_frailty_raw", hierarchical_logistic = "beta_raw",
                                        joint_longitudinal_survival = "b_raw", EASY_stochastic_volatility = "h_std",
-                                       latent_diffusion_survival = "w", NULL)
+                                       latent_diffusion_survival = "w", rnn_ssm = "eps", NULL)
         if (example$n_nuisance > 0) {
                 names <-  unlist(bs$param_names(include_tp = FALSE, include_gq = FALSE))
                 first_names <-  names[seq_len(example$n_nuisance)]
@@ -384,7 +398,7 @@ NicoStan_check_model_structure <- function(model, example, expected_simd_lanes =
         stopifnot(length(unconstrained_names) == as.integer(init$n_nuisance + init$n_params_main))
         expected_latent_name <- switch(example$model, cox_frailty = "log_frailty_raw", hierarchical_logistic = "beta_raw",
                                        joint_longitudinal_survival = "b_raw", EASY_stochastic_volatility = "h_std",
-                                       latent_diffusion_survival = "w", NULL)
+                                       latent_diffusion_survival = "w", rnn_ssm = "eps", NULL)
         if (example$n_nuisance > 0) {
                 unconstrained_bases <- sub("\\..*$", "", unconstrained_names[seq_len(example$n_nuisance)])
                 stopifnot(all(unconstrained_bases == expected_latent_name))

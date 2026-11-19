@@ -78,5 +78,9 @@
   {
     "file": "Latent_diffusion_survival_avx.stan",
     "sha256": "2f9464137a35dc35414244be0fa63bf355464505ff08df9d394c9154961b4c00"
+  },
+  {
+    "file": "RNN_SSM.stan",
+    "sha256": "1e70f55edf085322b796979f2f7d49fba65f3fb121e4ec7e96f9b0a235b2143b"
   }
 ]

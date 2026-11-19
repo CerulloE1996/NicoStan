@@ -10,7 +10,7 @@
 
 NicoStan_benchmark_registry <- function() {
 
-        data.frame(
+        registry <- data.frame(
             model = c("cox_frailty", "weibull", "robust_t4", "hierarchical_logistic",
                       "joint_longitudinal_survival", "gaussian_process", "EASY_stochastic_volatility",
                       "latent_diffusion_survival"),
@@ -21,6 +21,9 @@ NicoStan_benchmark_registry <- function() {
                       "subjects", "observations", "time_points", "subjects"),
             diffusion_eligible = c(TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, TRUE),
             stringsAsFactors = FALSE)
+        ## (the recurrent state-space model at the three T of the paper, the data of its .rds files)
+        rbind(registry, data.frame(model = "rnn_ssm", N_1 = 500, N_2 = 10000, N_3 = 100000, units = "time_points",
+                                   diffusion_eligible = TRUE, stringsAsFactors = FALSE))
 }
 
 
