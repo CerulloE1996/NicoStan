@@ -26,7 +26,7 @@
 "fn_tau_jitter_radical_inverse", "fn_tau_jitter_burnin_init", "fn_tau_jitter_burnin_draw", 
 "fn_tau_jitter_burnin_worker_api", "fn_tau_jitter_burnin_reset", 
 "fn_metric_tau_block_update", "plot_param_group_batched", "plot_multiple_params_batched", 
-"fn_tau_sampling_scale_gaussian_factor", "fn_sample_model_in_fresh_R_process", "R_fn_sample_model", 
+"fn_tau_sampling_scale_gaussian_factor", "R_fn_sample_model", 
 "R_fn_validate_frozen_sampling_geometry", 
 "fn_bulk_local_tuner_settings", "fn_bulk_local_tuner_chain_vector", "fn_bulk_local_tuner_init",
 "fn_bulk_local_tuner_reset", "fn_bulk_local_tuner_length_probability", "fn_bulk_local_tuner_expected_length",

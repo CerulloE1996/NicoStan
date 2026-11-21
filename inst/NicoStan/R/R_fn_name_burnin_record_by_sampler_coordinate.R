@@ -77,7 +77,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
         ##
         # if ((names_method_main != "positional") && identical(Model_type, "LC_MVP") &&
         #     !is.null(test_perm)) {
-        if ((names_method_main != "positional") && (Model_type %in% c("LC_MVP", "LC_MVOP")) &&
+        if ((names_method_main != "positional") && (Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP")) &&
             !is.null(test_perm)) {
               fn_indices <-  function(name) {
 
@@ -119,7 +119,7 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
         ##
         n_cat_per_test_in_fitted_order     <-  init_object$model_args_list$n_cat_per_test
         n_thr_per_ord_test_in_fitted_order <-  init_object$model_args_list$n_thr_per_ord_test
-        if ((names_method_main != "positional") && identical(Model_type, "LC_MVOP") && !is.null(test_perm) &&
+        if ((names_method_main != "positional") && (Model_type %in% c("LC_MVOP", "MVOP")) && !is.null(test_perm) &&
             !is.null(n_cat_per_test_in_fitted_order) && !is.null(n_thr_per_ord_test_in_fitted_order) &&
             (length(n_thr_per_ord_test_in_fitted_order) > 0)) {
               original_test_of_fitted_ordinal_slot <-  test_perm[n_cat_per_test_in_fitted_order > 2]

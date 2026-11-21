@@ -688,7 +688,8 @@ get_model_info <- function(  Model_type,
                                                            compile = compile,
                                                            force_recompile = force_recompile,
                                                            Stan_data_list = Stan_data_list,
-                                                           Stan_model_name = Stan_model_name)
+                                                           Stan_model_name = Stan_model_name,
+                                                           auto_chunking = auto_chunking)
                 # ##
 #                 # # make_Stan_data_list_for_internal_models(Model_type = "LC_MVP", model_args_list = list(y = y))
 #                 # Stan_data_list <- make_Stan_data_list_for_internal_models( Model_type = "LC_MVOP",

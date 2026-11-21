@@ -263,6 +263,9 @@ fn_sample_model_in_fresh_R_process <-  function(arguments,
                 .libPaths(new = libpath)
                 fit_result <-  tryCatch({
                         ## Loading a namespace may use RNG, so restore caller state after it has loaded.
+                        ## (NicoStan first: a provider such as BayesMVP loaded before it takes the static TLS that
+                        ##  NicoStan.so needs, and NicoStan's functions are then not found in the child)
+                        if (!identical(provider_package, "NicoStan")) loadNamespace(package = "NicoStan", lib.loc = libpath)
                         loadNamespace(package = provider_package, lib.loc = libpath)
                         do.call(what = RNGkind, args = as.list(rng_snapshot$kind))
                         if (isTRUE(rng_snapshot$has_seed)) {

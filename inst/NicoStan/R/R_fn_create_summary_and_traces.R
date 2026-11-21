@@ -1295,8 +1295,8 @@ create_summary_and_traces <- function(    model_results,
         ##      (beta, Omega and L_Omega are re-indexed into the ORIGINAL test order for LC_MVP in the block
         ##      after the commented-out un-permutation code below.)
         test_perm <- model_results$test_perm
-        if (is.null(test_perm) && (Model_type %in% c("LC_MVP", "LC_MVOP"))) {
-          warning("create_summary_and_traces: no test_perm in model_results for an LC model -- old run or R_fn_sample.R not updated.")
+        if (is.null(test_perm) && (Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP"))) {
+          warning("create_summary_and_traces: no test_perm in model_results for a built-in model -- old run or R_fn_sample.R not updated.")
         }
         
         # ## ---- Un-permute test-indexed params back to ORIGINAL test order  ----------------------
@@ -1364,8 +1364,15 @@ create_summary_and_traces <- function(    model_results,
           
               ## (external Stan models: only y is permuted and NicoStan cannot identify the model's test-indexed
               ##  parameters, see the reorder_cols_MVP documentation)
-              parameter_families_left_in_fitted_test_order <-
-                    "every test-indexed parameter of the external Stan model (not identified by NicoStan)"
+              ## (a Stan model with latent_test_order permutes internally and returns every output in the original
+              ##  order itself, e.g. the four-class LC-MVOP model)
+              if (!is.null(init_object$Stan_data_list$latent_test_order)) {
+                    parameter_families_re_indexed_into_original_test_order <-
+                          "every output (kept in the original test order by the model itself, through latent_test_order)"
+              } else {
+                    parameter_families_left_in_fitted_test_order <-
+                          "every test-indexed parameter of the external Stan model (not identified by NicoStan)"
+              }
           
         } else if (test_order_of_fit_is_not_original_order) {
           
@@ -1373,12 +1380,13 @@ create_summary_and_traces <- function(    model_results,
               ##
               ## ---- LC_MVOP too (beta, Omega and L_Omega as for LC_MVP; the cutpoint families below):
               ##
-              if (!(Model_type %in% c("LC_MVP", "LC_MVOP"))) {
+              ## (MVP and MVOP too: their skeletons have the same one-class layout, beta[1,k,t], Omega_orig[1,i,j],
+              ##  C_unc_vec[1,j], C_raw_vec[1,j], C_vec[1,j])
+              if (!(Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP"))) {
                     stop(paste0("create_summary_and_traces: the fit used test_perm = ",
                                 paste(test_perm, collapse = " "), " for Model_type = '", Model_type,
                                 "', but returning the test-indexed parameters in the original test order is ",
-                                # "implemented for LC_MVP only."))
-                                "implemented for LC_MVP and LC_MVOP only."))
+                                "implemented for MVP, MVOP, LC_MVP and LC_MVOP only."))
               }
               ##
               fitted_slot_of_original_test <-  order(test_perm)
@@ -1434,7 +1442,7 @@ create_summary_and_traces <- function(    model_results,
               ##      holds it (each test's cutpoint transform reads its own block only, so the blocks are the
               ##      same draws, re-indexed):
               ##
-              if (Model_type == "LC_MVOP") {
+              if (Model_type %in% c("LC_MVOP", "MVOP")) {
                     n_cat_per_test_in_fitted_order <-  as.numeric(init_object$model_args_list$n_cat_per_test)
                     n_thr_per_fitted_ordinal_slot <-  as.numeric(init_object$model_args_list$n_thr_per_ord_test)
                     fitted_positions_of_ordinal_slots <-  which(n_cat_per_test_in_fitted_order > 2)

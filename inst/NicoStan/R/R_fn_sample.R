@@ -1066,7 +1066,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     fit_arguments <-  setNames(lapply(argument_names, function(argument_name) {
                         get(argument_name, envir = fit_frame, inherits = FALSE)
                     }), argument_names)
-                    return(fn_sample_model_in_fresh_R_process(arguments = fit_arguments))
+                    ## (the provider of this R_fn_sample_model - NicoStan, or an extension package such as BayesMVP -
+                    ##  given to NicoStan's own launcher, which is not copied into providers)
+                    return(fn_sample_model_in_fresh_R_process(arguments = fit_arguments,
+                                                              provider_package = .nicostan_provider_package))
                 }
                 ##
                 ## Built-in likelihoods use OpenMP WCP teams; external Stan likelihoods share the outer TBB arena.
@@ -1894,12 +1897,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 # reorder_cols_MVP <- if (missing(reorder_cols_MVP)) FALSE else
                 #                     if_null_then_set_to(reorder_cols_MVP, FALSE)
-                ## A reorder_cols_MVP that is NULL or not given is TRUE for the latent class probit models
-                ## (LC_MVP, LC_MVOP) and FALSE for every other model (a value given explicitly is used as it is):
+                ## A reorder_cols_MVP that is NULL or not given is TRUE for the built-in probit models of BayesMVP
+                ## (MVP, MVOP, LC_MVP, LC_MVOP) and FALSE for every other model (a value given explicitly is used as
+                ## it is):
                 # reorder_cols_MVP_when_not_given <-  Model_type %in% c("LC_MVP", "LC_MVOP")
                 ## (and TRUE for a Stan model whose data has latent_test_order, e.g. the four-class LC-MVOP model:
                 ##  its test order is then set automatically after the pre-burnin, as for the built-in models)
-                reorder_cols_MVP_when_not_given <-  (Model_type %in% c("LC_MVP", "LC_MVOP")) ||
+                reorder_cols_MVP_when_not_given <-  (Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP")) ||
                                                     ((Model_type == "Stan") &&
                                                      !is.null(Stan_data_list$latent_test_order))
                 reorder_cols_MVP <-  if (missing(reorder_cols_MVP)) reorder_cols_MVP_when_not_given else
@@ -1933,8 +1937,10 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ##
                 ## A fixed test order is only applied inside the reorder_cols_MVP block, so refuse it anywhere
                 ## else rather than silently ignoring it (the ps7 filename would otherwise claim "_tp...").
-                if (!is.null(test_perm_override) && !((Model_type %in% c("LC_MVP", "Stan")) && isTRUE(reorder_cols_MVP))) {
-                    stop("test_perm_override is only used when reorder_cols_MVP = TRUE (Model_type LC_MVP or Stan); ",
+                if (!is.null(test_perm_override) && !((Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP", "Stan")) &&
+                                                      isTRUE(reorder_cols_MVP))) {
+                    stop("test_perm_override is only used when reorder_cols_MVP = TRUE (Model_type MVP, MVOP, LC_MVP, ",
+                         "LC_MVOP or Stan); ",
                          "here it would be silently ignored.")
                 }
                 ##
@@ -1971,7 +1977,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           if ((Model_type == "Stan") && !is.null(Stan_data_list$latent_test_order))
                                 test_order_rules_for_reorder_cols_MVP_allowed[4] else
                           if (Model_type == "Stan") "greedy_correlation_order" else
-                          if (Model_type == "LC_MVOP") test_order_rules_for_reorder_cols_MVP_allowed[3] else
+                          if (Model_type %in% c("LC_MVOP", "MVOP")) test_order_rules_for_reorder_cols_MVP_allowed[3] else
                                                     test_order_rules_for_reorder_cols_MVP_allowed[1]
                 } else if ((Model_type != "Stan") &&
                            identical(test_order_rule_for_reorder_cols_MVP,
@@ -1979,13 +1985,13 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                     stop(paste0("test_order_rule_for_reorder_cols_MVP = \"",
                                 test_order_rules_for_reorder_cols_MVP_allowed[4], "\" reads the missing values ",
                                 "of a Stan model's data y (NA or negative); it is for Model_type = \"Stan\"."))
-                } else if ((Model_type == "LC_MVOP") &&
+                } else if ((Model_type %in% c("LC_MVOP", "MVOP")) &&
                            identical(test_order_rule_for_reorder_cols_MVP,
                                      test_order_rules_for_reorder_cols_MVP_allowed[1])) {
                     stop(paste0("test_order_rule_for_reorder_cols_MVP = \"",
                                 test_order_rules_for_reorder_cols_MVP_allowed[1], "\" reads the intercepts ",
                                 "only, which do not measure an ordinal test; use \"",
-                                test_order_rules_for_reorder_cols_MVP_allowed[3], "\" for LC_MVOP."))
+                                test_order_rules_for_reorder_cols_MVP_allowed[3], "\" for LC_MVOP and MVOP."))
                 } else if ((Model_type == "Stan") &&
                            identical(test_order_rule_for_reorder_cols_MVP,
                                      test_order_rules_for_reorder_cols_MVP_allowed[3])) {
@@ -2963,7 +2969,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                 ## ---- LC_MVOP too: its re-layout block and its outputs (create_summary_and_traces) handle any
                 ##      test order:
                 ##
-                if ((Model_type %in% c("LC_MVP", "LC_MVOP", "Stan")) &&
+                if ((Model_type %in% c("MVP", "MVOP", "LC_MVP", "LC_MVOP", "Stan")) &&
                     (reorder_cols_MVP == TRUE)) {
 
                     ## ---- Number of tests + number of latent classes: known from
@@ -3223,7 +3229,11 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                             ## which case the nuisance mean has to be prepended (same layout as
                             ## 'snaper_m_vec_all' = c(nuisance, main) used by the burnin):
                             ##
-                            theta_full_median <- if (n_nuisance > 0) {
+                            ## (a nuisance block held by NicoStan itself - nuisance_params, e.g. u_raw held inside the
+                            ##  chunks of nico_reduce_sum - is not a parameter of the compiled model, whose unconstrained
+                            ##  vector is then theta_main alone: the length the compiled model takes decides)
+                            theta_full_median <- if ((n_nuisance > 0) &&
+                                                     (bs_model$param_unc_num() != length(theta_main_median))) {
                                   c(as.numeric(pre_burnin_object$EHMC_burnin_as_Rcpp_List$snaper_m_vec_us),
                                     as.numeric(theta_main_median))
                             } else {
@@ -3489,8 +3499,9 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                           model_args_list$X[[c]] <- model_args_list$X[[c]][test_perm]
                         }
                         # model_args_list$n_covs_per_outcome <- model_args_list$n_covs_per_outcome[, test_perm, drop = FALSE]   ## CHECK-NAME-1
-                        # model_args_list$baseline_case_nd   <- model_args_list$baseline_case_nd[test_perm]                     ## CHECK-NAME-1
-                        # model_args_list$baseline_case_d    <- model_args_list$baseline_case_d[test_perm]                      ## CHECK-NAME-1
+                        ## (the skeletons read the baseline cases at the FITTED slot, as every test-indexed datum)
+                        if (!is.null(model_args_list$baseline_case_nd)) model_args_list$baseline_case_nd <- model_args_list$baseline_case_nd[test_perm]
+                        if (!is.null(model_args_list$baseline_case_d))  model_args_list$baseline_case_d  <- model_args_list$baseline_case_d[test_perm]
                         ##
                         ## ---- Permute beta inits (existing):
                         ##
