@@ -23,8 +23,9 @@
 ## parameters_that_Se_Sp_and_prevalence_depend_on_for_built_in_latent_class_models <-  function(Model_type) {
 parms_that_Se_Sp_and_prev_depend_on_for_built_in_LCMs <-  function(Model_type) {
 
-        if (identical(Model_type, "LC_MVP"))   return(c("beta", "p_raw"))
-        if (identical(Model_type, "LC_MVOP"))  return(c("beta", "p_raw", "C_unc_vec"))
+        ## (beta_vec: the skeleton's parameter holding the coefficients the model samples)
+        if (identical(Model_type, "LC_MVP"))   return(c("beta_vec", "p_raw"))
+        if (identical(Model_type, "LC_MVOP"))  return(c("beta_vec", "p_raw", "C_unc_vec"))
         return(NULL)
 
 }

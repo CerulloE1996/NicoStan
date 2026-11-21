@@ -1417,7 +1417,8 @@ create_summary_and_traces <- function(    model_results,
               ## ---- Omega and L_Omega (transformed parameters) <- the skeleton's Omega_orig and L_Omega_orig:
               ##
               if (!is.null(trace_tp) && (length(names_tp_wo_log_lik) > 0)) {
-                    for (family_name in c("Omega", "L_Omega")) {
+                    ## (beta: a transformed parameter of the skeletons, from beta_vec, returned as beta_orig)
+                    for (family_name in c("Omega", "L_Omega", "beta")) {
                           family_rows <-  grep(paste0("^", family_name, "\\["), names_tp_wo_log_lik)
                           if (length(family_rows) == 0) next
                           names_of_original_order_rows <-  sub(paste0("^", family_name, "\\["),
@@ -1495,7 +1496,7 @@ create_summary_and_traces <- function(    model_results,
               }
               ##
               parameter_families_left_in_fitted_test_order <-
-                    intersect("Omega_unconstrained_vec", sub("\\[.*$", "", names_of_main_trace_rows))
+                    intersect(c("Omega_unconstrained_vec", "beta_vec"), sub("\\[.*$", "", names_of_main_trace_rows))
               ##
               message(colourise(paste0("test order of the fit (fitted slot j holds original test test_perm[j]): ",
                                        paste(test_perm, collapse = " "),

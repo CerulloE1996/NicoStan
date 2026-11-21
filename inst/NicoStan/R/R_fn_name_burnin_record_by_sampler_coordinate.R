@@ -86,10 +86,35 @@ fn_names_of_sampler_coordinates_in_sampler_layout <-  function( init_object,
 
               pair_first_test  <-  unlist(lapply(2:n_tests, function(i) rep(i, i - 1)))
               pair_second_test <-  unlist(lapply(2:n_tests, function(i) seq_len(i - 1)))
+              ## (beta_vec[i] of the built-in skeletons: coefficient k of class c at fitted slot s, in the order class,
+              ##  slot, coefficient of n_covariates_per_outcome_mat, the fitted layout)
+              n_covs_mat_for_names <-  init_object$model_args_list$n_covariates_per_outcome_mat
+              beta_vec_map <-  if (!is.null(n_covs_mat_for_names)) {
+                    n_covs_mat_for_names <-  if (is.matrix(n_covs_mat_for_names)) n_covs_mat_for_names else
+                                             matrix(n_covs_mat_for_names, nrow = 1L)
+                    do.call(rbind, unlist(lapply(seq_len(nrow(n_covs_mat_for_names)), function(c_i) {
+                          lapply(seq_len(ncol(n_covs_mat_for_names)), function(t_i) {
+                                cbind(c = c_i, k = seq_len(n_covs_mat_for_names[c_i, t_i]), s = t_i)
+                          })
+                    }), recursive = FALSE))
+              } else NULL
               for (position in seq_len(n_params_main)) {
 
                     name <-  main_names[position]
-                    if (grepl("^beta\\[[0-9]+,[0-9]+,[0-9]+\\]$", name)) {
+                    if (grepl("^beta_vec\\[[0-9]+\\]$", name) && !is.null(beta_vec_map)) {
+                          idx_v <-  fn_indices(name)[1]
+                          if (!is.na(idx_v) && idx_v >= 1L && idx_v <= nrow(beta_vec_map)) {
+                                c_i <-  beta_vec_map[idx_v, "c"]
+                                k_i <-  beta_vec_map[idx_v, "k"]
+                                s_i <-  beta_vec_map[idx_v, "s"]
+                                main_names[position] <-  paste0("beta[", c_i, ",", k_i, ",", test_perm[s_i], "]")
+                                main_descriptions[position] <-  paste0("sampler main position ", position, ": ",
+                                                                       name, " = ", main_names[position],
+                                                                       " = coefficient ", k_i, " of class ", c_i,
+                                                                       ", fitted test ", s_i, " = original test ",
+                                                                       test_perm[s_i])
+                          }
+                    } else if (grepl("^beta\\[[0-9]+,[0-9]+,[0-9]+\\]$", name)) {
                           index <-  fn_indices(name)
                           main_names[position] <-  paste0("beta[", index[1], ",", index[2], ",",
                                                           test_perm[index[3]], "]")

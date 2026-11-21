@@ -158,6 +158,20 @@ R_fn_init_initial_values <- function( Model_type,
 ##
               init_list_kk <- init_lists_per_chain[[kk]]
               init_list_kk$u_raw <- NULL  # Remove nuisance
+              ## (the skeleton's parameter is beta_vec, the coefficients the model samples: for each class, each test,
+              ##  its n_covs_per_outcome[c, t] coefficients; a beta given as one matrix per class is packed so)
+              if (!is.null(init_list_kk$beta) && is.null(init_list_kk$beta_vec) &&
+                  any(grepl("^beta_vec", bs_model$param_unc_names()))) {
+                    n_covs_per_outcome_of_the_skeleton <-  Stan_data_list$n_covs_per_outcome
+                    if (!is.matrix(n_covs_per_outcome_of_the_skeleton)) n_covs_per_outcome_of_the_skeleton <-  matrix(n_covs_per_outcome_of_the_skeleton, nrow = 1L)
+                    if (is.null(Stan_data_list$n_covs_per_outcome)) stop("R_fn_init_initial_values: no n_covs_per_outcome in the data to pack beta into beta_vec.")
+                    beta_given <-  init_list_kk$beta
+                    if (!is.list(beta_given)) beta_given <-  list(beta_given)
+                    init_list_kk$beta_vec <-  unlist(lapply(seq_len(nrow(n_covs_per_outcome_of_the_skeleton)), function(c)
+                          unlist(lapply(seq_len(ncol(n_covs_per_outcome_of_the_skeleton)), function(t)
+                                (if (is.matrix(beta_given[[c]])) beta_given[[c]] else matrix(beta_given[[c]], nrow = 1L))[seq_len(n_covs_per_outcome_of_the_skeleton[c, t]), t]))))
+                    init_list_kk$beta <-  NULL
+              }
               ##
               json_string_for_inits_chain_kk <- convert_stan_data_list_to_JSON(init_list_kk)
               validated_json_string <- paste(readLines(json_string_for_inits_chain_kk), collapse="")

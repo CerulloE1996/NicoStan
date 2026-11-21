@@ -3506,6 +3506,7 @@ R_fn_sample_model  <-    function(      debug = FALSE,
                         ## ---- Permute beta inits (existing):
                         ##
                         for (kk in 1:n_chains_burnin) {
+                          if (is.null(init_lists_per_chain[[kk]]$beta)) next   ## (initial values given as beta_vec)
                           for (c in 1:n_class) {
                             init_lists_per_chain[[kk]]$beta[[c]][,] <- init_lists_per_chain[[kk]]$beta[[c]][, test_perm, drop = FALSE]
                           }

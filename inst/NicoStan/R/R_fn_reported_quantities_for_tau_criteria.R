@@ -141,8 +141,9 @@ fn_reported_quantities_function_for_built_in_LCMs <-  function( init_object,
         n_thresholds_of_fitted_ordinal_slot <-  if (is_ordinal_model) {
               as.numeric(fn_data_value("n_thr_per_ord_test"))
         } else numeric(0)
+        ## (beta_vec: the coefficients the model samples, for each class, each test, its n_covs_per_outcome[c, t])
         n_main_rows_of_family <-  c( Omega_unconstrained_vec = n_class * n_corrs_per_class,
-                                     beta                    = n_class * n_covariates_max * n_tests,
+                                     beta_vec                = sum(n_covs_per_outcome),
                                      p_raw                   = n_pops)
         if (is_ordinal_model) {
               n_main_rows_of_family <-  c( n_main_rows_of_family,
@@ -177,8 +178,13 @@ fn_reported_quantities_function_for_built_in_LCMs <-  function( init_object,
         ##
         fn_main_row_of_beta <-  function(class_index, coefficient_index, fitted_slot) {
 
-              return(n_main_rows_before_family[["beta"]] + (class_index - 1) * n_covariates_max * n_tests +
-                           (fitted_slot - 1) * n_covariates_max + coefficient_index)
+              ## (vectorised over fitted_slot: the coefficients of the earlier classes, then of the earlier fitted
+              ##  slots of this class, in beta_vec's order; the coefficient index is kept within each slot's own
+              ##  count, so a slot whose weight is 0 stays in range)
+              n_before_class <-  if (class_index > 1) sum(n_covs_per_outcome[seq_len(class_index - 1), ]) else 0
+              n_before_slot  <-  c(0, utils::head(cumsum(n_covs_per_outcome[class_index, ]), -1))[fitted_slot]
+              k_kept_within  <-  pmin(coefficient_index, n_covs_per_outcome[class_index, fitted_slot])
+              return(n_main_rows_before_family[["beta_vec"]] + n_before_class + n_before_slot + k_kept_within)
         }
 
         fn_baseline_linear_predictor_terms <-  function(class_index) {
